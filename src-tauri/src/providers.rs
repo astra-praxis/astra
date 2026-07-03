@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
 
 // ===== 类型定义 =====
 
@@ -31,19 +32,21 @@ pub struct ModelsResponse {
 
 // ===== 辅助函数 =====
 
-fn get_providers_path() -> PathBuf {
-    let config_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    config_dir.join("xingye").join("providers.json")
+fn get_providers_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    fs::create_dir_all(&app_data_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
+    Ok(app_data_dir.join("providers.json"))
 }
 
-fn ensure_providers_file() {
-    let path = get_providers_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
+fn ensure_providers_file(app: &AppHandle) -> Result<PathBuf, String> {
+    let path = get_providers_path(app)?;
     if !path.exists() {
-        let _ = fs::write(&path, "[]");
+        fs::write(&path, "[]").map_err(|e| format!("创建配置文件失败: {}", e))?;
     }
+    Ok(path)
 }
 
 fn unix_timestamp() -> u64 {
@@ -60,9 +63,8 @@ fn generate_id() -> String {
 // ===== Tauri 命令 =====
 
 #[tauri::command]
-pub fn list_providers() -> Result<Vec<ProviderConfig>, String> {
-    ensure_providers_file();
-    let path = get_providers_path();
+pub fn list_providers(app: AppHandle) -> Result<Vec<ProviderConfig>, String> {
+    let path = ensure_providers_file(&app)?;
 
     match fs::read_to_string(&path) {
         Ok(content) => {
@@ -75,14 +77,14 @@ pub fn list_providers() -> Result<Vec<ProviderConfig>, String> {
 
 #[tauri::command]
 pub fn save_provider(
+    app: AppHandle,
     id: Option<String>,
     name: String,
     base_url: String,
     api_key: String,
     active_model: Option<String>,
 ) -> Result<ProviderConfig, String> {
-    ensure_providers_file();
-    let path = get_providers_path();
+    let path = ensure_providers_file(&app)?;
 
     // 读取现有配置
     let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
@@ -129,9 +131,8 @@ pub fn save_provider(
 }
 
 #[tauri::command]
-pub fn delete_provider(id: String) -> Result<(), String> {
-    ensure_providers_file();
-    let path = get_providers_path();
+pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
+    let path = ensure_providers_file(&app)?;
 
     let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
     let mut providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
@@ -324,9 +325,12 @@ fn parse_bracket_list(msg: &str, owned_by: &str) -> Vec<ModelInfo> {
 }
 
 #[tauri::command]
-pub fn set_active_model(provider_id: String, model_id: String) -> Result<(), String> {
-    ensure_providers_file();
-    let path = get_providers_path();
+pub fn set_active_model(
+    app: AppHandle,
+    provider_id: String,
+    model_id: String,
+) -> Result<(), String> {
+    let path = ensure_providers_file(&app)?;
 
     let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
     let mut providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
@@ -345,9 +349,8 @@ pub fn set_active_model(provider_id: String, model_id: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn get_provider(id: String) -> Result<ProviderConfig, String> {
-    ensure_providers_file();
-    let path = get_providers_path();
+pub fn get_provider(app: AppHandle, id: String) -> Result<ProviderConfig, String> {
+    let path = ensure_providers_file(&app)?;
 
     let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
     let providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();

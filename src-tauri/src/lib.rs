@@ -1,4 +1,5 @@
 mod chat;
+mod chat_sessions;
 mod providers;
 
 use serde::{Deserialize, Serialize};
@@ -998,6 +999,12 @@ pub fn run() {
             // Chat
             chat::send_chat,
             chat::stop_chat,
+            // Chat Sessions
+            chat_sessions::list_chat_sessions,
+            chat_sessions::save_chat_session,
+            chat_sessions::update_chat_session_title,
+            chat_sessions::delete_chat_session,
+            chat_sessions::get_chat_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

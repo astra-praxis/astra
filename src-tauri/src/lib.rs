@@ -975,6 +975,7 @@ pub fn run() {
             get_preset_editors,
             list_skills,
             delete_skill,
+            read_skill_doc,
             get_project_detail,
             add_workspace,
             remove_workspace,
@@ -1151,4 +1152,38 @@ fn delete_skill(path: String) -> Result<(), String> {
     }
     fs::remove_dir_all(dir).map_err(|e| format!("删除失败: {}", e))?;
     Ok(())
+}
+
+#[tauri::command]
+fn read_skill_doc(path: String) -> Result<String, String> {
+    let dir = Path::new(&path);
+    if !dir.exists() || !dir.is_dir() {
+        return Err("技能目录不存在".to_string());
+    }
+
+    // 按优先级尝试读取文档文件
+    let candidates = ["SKILL.md", "README.md", "readme.md", "README", "Readme.md"];
+    for candidate in &candidates {
+        let file_path = dir.join(candidate);
+        if file_path.exists() && file_path.is_file() {
+            return fs::read_to_string(&file_path).map_err(|e| format!("读取文件失败: {}", e));
+        }
+    }
+
+    // 尝试任意 .md 文件
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            if entry_path.is_file() {
+                if let Some(ext) = entry_path.extension() {
+                    if ext == "md" {
+                        return fs::read_to_string(&entry_path)
+                            .map_err(|e| format!("读取文件失败: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    Err("未找到文档文件（SKILL.md / README.md）".to_string())
 }

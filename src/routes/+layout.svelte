@@ -210,7 +210,7 @@
 
   /* ===== 顶部标题栏（可拖拽） ===== */
   .title-bar {
-    height: 46px;
+    height: 38px;
     background: var(--sidebar-bg);
     display: flex;
     align-items: center;

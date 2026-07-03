@@ -150,6 +150,12 @@
   });
 
   onDestroy(() => {
+    // 清理 portal 残留
+    const target = document.getElementById(TITLEBAR_SLOT_ID);
+    if (target) {
+      target.innerHTML = '';
+      target.classList.remove('has-toolbar');
+    }
     unlisteners.forEach((fn) => fn());
   });
 
@@ -493,6 +499,7 @@
     const target = document.getElementById(TITLEBAR_SLOT_ID);
     if (target && toolbarEl.parentElement !== target) {
       target.appendChild(toolbarEl);
+      target.classList.add('has-toolbar');
     }
   });
 </script>

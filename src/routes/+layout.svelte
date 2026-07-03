@@ -2,20 +2,13 @@
   import { page } from '$app/stores';
   import '../styles/global.css';
   import { initTheme } from '$lib/theme.svelte';
-  import { onMount, setContext } from 'svelte';
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { invoke } from '@tauri-apps/api/core';
   let { children } = $props();
 
-  // 供子页面（如 chat）把工具栏挂载进顶部标题栏
-  const titlebar = $state<{ slotEl: HTMLElement | null; active: boolean }>({
-    slotEl: null,
-    active: false,
-  });
-  setContext('titlebar', titlebar);
-
-  let toolbarSlotEl: HTMLElement | null = null;
-  $effect(() => { titlebar.slotEl = toolbarSlotEl; });
+  // 标题栏插槽 id，暴露给 chat 页面 portal 使用
+  const titlebarSlotId = 'titlebar-slot';
 
   initTheme();
 
@@ -88,13 +81,10 @@
 </script>
 
 <div class="app-layout" class:collapsed={sidebarCollapsed}>
-  <!-- 顶部标题栏（可拖拽）；chat 页面会把工具栏挂载进来 -->
-  <header use:windowDrag class="title-bar" class:tall={titlebar.active}>
-    {#if titlebar.active}
-      <div class="title-bar-slot" bind:this={toolbarSlotEl}></div>
-    {:else}
-      <span class="title-bar-title">星野</span>
-    {/if}
+  <!-- 顶部标题栏（可拖拽） -->
+  <header use:windowDrag class="title-bar">
+    <span class="title-bar-title">星野</span>
+    <div id="titlebar-slot" class="title-bar-slot"></div>
   </header>
 
   <div class="app-body">
@@ -220,7 +210,7 @@
 
   /* ===== 顶部标题栏（可拖拽） ===== */
   .title-bar {
-    height: 38px;
+    height: 46px;
     background: var(--sidebar-bg);
     display: flex;
     align-items: center;
@@ -238,23 +228,31 @@
     letter-spacing: 0.5px;
     user-select: none;
     -webkit-user-select: none;
-  }
-
-  /* chat 页面：标题栏作为工具栏容器 */
-  .title-bar.tall {
-    height: 46px;
-    padding: 0 24px;
-    justify-content: stretch;
-    background: transparent;
-    border-bottom: 1px solid var(--border-light);
+    flex-shrink: 0;
   }
 
   .title-bar-slot {
+    display: none;
     flex: 1;
-    width: 100%;
     height: 100%;
-    display: flex;
     align-items: center;
+    min-width: 0;
+  }
+
+  /* 有工具栏时隐藏标题，slot 占满整个 title bar */
+  .title-bar:has(.title-bar-slot:not(:empty)) {
+    justify-content: flex-start;
+    padding-left: 80px;
+    padding-right: 24px;
+  }
+
+  .title-bar:has(.title-bar-slot:not(:empty)) .title-bar-title {
+    display: none;
+  }
+
+  .title-bar:has(.title-bar-slot:not(:empty)) .title-bar-slot {
+    display: flex;
+    justify-content: stretch;
   }
 
   .sidebar {

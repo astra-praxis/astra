@@ -1,11 +1,11 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount, onDestroy, tick, getContext } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import MarkdownMessage from './MarkdownMessage.svelte';
 
-  // 把工具栏挂载到全局顶部标题栏
-  const titlebar = getContext<{ slotEl: HTMLElement | null; active: boolean }>('titlebar');
+  // 标题栏 slot id（layout 里定义）
+  const TITLEBAR_SLOT_ID = 'titlebar-slot';
 
   // ===== 类型 =====
   interface RunningModelInfo {
@@ -99,8 +99,6 @@
 
   // ===== 生命周期 =====
   onMount(async () => {
-    document.body.classList.add('chat-active');
-    if (titlebar) titlebar.active = true;
     await Promise.all([loadSessions(), loadRunningModels(), loadProviders()]);
 
     if (providers.length > 0) {
@@ -152,8 +150,6 @@
   });
 
   onDestroy(() => {
-    document.body.classList.remove('chat-active');
-    if (titlebar) titlebar.active = false;
     unlisteners.forEach((fn) => fn());
   });
 
@@ -491,11 +487,11 @@
     saveCurrentSession();
   }
 
-  // 把工具栏 DOM 移动到全局顶部标题栏插槽
+  // 工具栏 DOM 传送到全局标题栏
   $effect(() => {
-    const target = titlebar?.slotEl ?? null;
-    if (!toolbarEl || !target) return;
-    if (toolbarEl.parentElement !== target) {
+    if (!toolbarEl) return;
+    const target = document.getElementById(TITLEBAR_SLOT_ID);
+    if (target && toolbarEl.parentElement !== target) {
       target.appendChild(toolbarEl);
     }
   });
@@ -570,12 +566,10 @@
       <div class="tb-left">
         <div class="seg-control">
           <button class:active={sourceType === 'provider'} onclick={() => onSwitchType('provider')} title="API 提供者">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            API
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           </button>
           <button class:active={sourceType === 'model'} onclick={() => onSwitchType('model')} title="本地模型">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            本地
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </button>
         </div>
 
@@ -589,7 +583,7 @@
             {/each}
           </select>
 
-          <div class="model-picker-group">
+          <div class="picker-group">
             <select
               class="picker mono"
               value={currentModelName}
@@ -632,13 +626,13 @@
       <!-- 右侧：功能按钮 -->
       <div class="tb-right">
         <button class="icon-btn" class:active={showSettings} onclick={() => (showSettings = !showSettings)} title="参数设置" aria-label="参数设置">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
         <button class="icon-btn" onclick={handleClear} disabled={isSending || messages.length === 0} title="清空对话" aria-label="清空对话">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
         </button>
         <button class="icon-btn" onclick={() => (sidebarOpen = !sidebarOpen)} title="历史记录" aria-label="历史记录">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           {#if sessions.length > 0}
             <span class="tb-badge">{sessions.length}</span>
           {/if}
@@ -1080,48 +1074,46 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 0;
-    background: color-mix(in srgb, var(--bg-card) 70%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    padding: 0 20px;
     position: relative;
-    z-index: 5;
     flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .tb-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 0;
+    min-width: 0;
   }
 
   .tb-right {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 2px;
     flex-shrink: 0;
   }
 
   .icon-btn {
     position: relative;
-    width: 34px;
-    height: 34px;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: transparent;
     border: none;
-    border-radius: 9px;
-    color: var(--text-secondary);
+    border-radius: 6px;
+    color: var(--sidebar-text);
     cursor: pointer;
-    transition: all 0.18s;
+    transition: all 0.15s;
     flex-shrink: 0;
   }
 
   .icon-btn:hover:not(:disabled) {
-    background: var(--bg-subtle);
-    color: var(--text-primary);
+    background: var(--sidebar-hover-bg);
+    color: var(--sidebar-text-hover);
   }
 
   .icon-btn.active {
@@ -1135,8 +1127,8 @@
   }
 
   .icon-btn.sm {
-    width: 32px;
-    height: 32px;
+    width: 26px;
+    height: 26px;
   }
 
   .tb-badge {
@@ -1159,49 +1151,52 @@
 
   .seg-control {
     display: inline-flex;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 3px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 7px;
+    padding: 2px;
     gap: 2px;
   }
 
   .seg-control button {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 12px;
+    justify-content: center;
+    width: 26px;
+    height: 22px;
     background: transparent;
     border: none;
-    border-radius: 7px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
+    border-radius: 5px;
+    color: var(--sidebar-text);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.12s;
   }
 
   .seg-control button:hover {
-    color: var(--text-primary);
+    color: var(--sidebar-text-hover);
   }
 
   .seg-control button.active {
-    background: var(--accent);
-    color: white;
-    box-shadow: 0 2px 6px var(--accent-shadow);
+    background: var(--sidebar-active-bg);
+    color: var(--sidebar-active-text);
   }
 
   .picker {
-    padding: 7px 12px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    font-size: 13px;
-    color: var(--text-primary);
+    padding: 3px 8px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--sidebar-text);
     cursor: pointer;
     outline: none;
-    transition: all 0.15s;
-    max-width: 200px;
+    transition: all 0.12s;
+    max-width: 160px;
+    font-family: inherit;
+  }
+
+  .picker:hover {
+    color: var(--sidebar-text-hover);
+    border-color: rgba(255,255,255,0.2);
   }
 
   .picker.mono {
@@ -1209,19 +1204,20 @@
   }
 
   .picker:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-ring);
+    color: var(--sidebar-accent);
+    border-color: var(--sidebar-accent);
   }
 
   .picker:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .model-picker-group {
+  .picker-group {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
+    min-width: 0;
   }
 
   .spinning {

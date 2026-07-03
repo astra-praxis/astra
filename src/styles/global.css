@@ -160,10 +160,3 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
 }
-
-/* ===== chat 页面：顶部标题栏承载工具栏 ===== */
-body.chat-active .app-layout {
-    background:
-        radial-gradient(ellipse 80% 60% at 50% -10%, var(--accent-light), transparent 70%),
-        var(--bg-app);
-}

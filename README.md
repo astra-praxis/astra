@@ -1,5 +1,5 @@
 ```
-aiTool/
+astra/
 ├── src/                    # SvelteKit 前端源码
 │   ├── lib/               # 共享组件和工具
 │   │   └── theme.svelte.ts # 主题状态管理

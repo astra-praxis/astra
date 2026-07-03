@@ -730,6 +730,7 @@
     border-radius: 12px;
     max-width: 100%;
     box-shadow: 0 1px 2px var(--shadow-sm);
+    color: var(--text-primary);
   }
 
   .msg-row.user .msg-content {
@@ -751,6 +752,7 @@
     line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;
+    color: inherit;
   }
 
   /* 推理过程 */
@@ -759,7 +761,7 @@
     border-radius: 8px;
     padding: 6px 12px;
     font-size: 12px;
-    color: var(--text-muted);
+    color: var(--text-primary);
     max-width: 100%;
   }
 
@@ -780,7 +782,7 @@
   }
 
   .generating {
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 14px;
   }
 

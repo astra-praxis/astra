@@ -738,17 +738,15 @@
             <!-- 底部操作按钮 -->
             {#if msg.content && !(isSending && i === messages.length - 1)}
               <div class="msg-footer">
-                <button class="mf-btn" onclick={() => copyMessage(msg)} title="复制全文">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  复制
+                <button class="mf-btn" onclick={() => copyMessage(msg)} title="复制全文" aria-label="复制全文">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 </button>
-                <button class="mf-btn" class:faved={msg.favorite} onclick={() => toggleFavorite(msg)} title={msg.favorite ? '取消收藏' : '收藏'}>
+                <button class="mf-btn" class:faved={msg.favorite} onclick={() => toggleFavorite(msg)} title={msg.favorite ? '取消收藏' : '收藏'} aria-label="收藏">
                   {#if msg.favorite}
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                   {:else}
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                   {/if}
-                  {msg.favorite ? '已收藏' : '收藏'}
                 </button>
               </div>
             {/if}
@@ -1465,6 +1463,11 @@
     animation: msgEnter 0.3s ease;
   }
 
+  /* 预留浮动按钮空间，鼠标 hover 时才让按钮浮出 */
+  .msg:has(.msg-footer) {
+    padding-bottom: 6px;
+  }
+
   @keyframes msgEnter {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
@@ -1507,6 +1510,7 @@
   }
 
   .msg-content {
+    position: relative;
     display: inline-block;
   }
 
@@ -1609,39 +1613,45 @@
     30% { transform: translateY(-4px); opacity: 1; }
   }
 
-  /* 消息底部操作 */
+  /* 消息底部操作（绝对定位到气泡下方，默认隐藏） */
   .msg-footer {
+    position: absolute;
+    left: 4px;
+    top: 100%;
     display: flex;
-    gap: 6px;
-    padding-top: 8px;
-    margin-top: 8px;
-    border-top: 1px solid var(--border-light);
+    gap: 4px;
+    padding-top: 4px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+    z-index: 5;
   }
 
-  .msg.user .msg-footer {
-    border-top-color: rgba(255, 255, 255, 0.2);
+  .msg:hover .msg-footer,
+  .msg:focus-within .msg-footer {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .mf-btn {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    background: var(--bg-subtle);
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 7px;
-    font-size: 12px;
-    font-weight: 500;
+    border-radius: 8px;
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.15s;
-    font-family: inherit;
+    padding: 0;
   }
 
   .msg.user .mf-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.8);
+    background: rgba(0, 0, 0, 0.2);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .mf-btn:hover {

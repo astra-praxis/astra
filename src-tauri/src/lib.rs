@@ -1,3 +1,4 @@
+mod chat;
 mod providers;
 
 use serde::{Deserialize, Serialize};
@@ -887,6 +888,9 @@ fn get_preset_editors() -> Vec<EditorSetting> {
 pub fn run() {
     tauri::Builder::default()
         .manage(Mutex::new(Vec::<RunningServer>::new()))
+        .manage(chat::ChatStopFlag(std::sync::atomic::AtomicBool::new(
+            false,
+        )))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -991,6 +995,9 @@ pub fn run() {
             providers::fetch_provider_models,
             providers::set_active_model,
             providers::get_provider,
+            // Chat
+            chat::send_chat,
+            chat::stop_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

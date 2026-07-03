@@ -350,7 +350,12 @@ pub fn set_active_model(
 
 #[tauri::command]
 pub fn get_provider(app: AppHandle, id: String) -> Result<ProviderConfig, String> {
-    let path = ensure_providers_file(&app)?;
+    get_provider_inner(&app, &id)
+}
+
+/// 内部复用版本：供 chat 模块直接调用
+pub fn get_provider_inner(app: &AppHandle, id: &str) -> Result<ProviderConfig, String> {
+    let path = ensure_providers_file(app)?;
 
     let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
     let providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();

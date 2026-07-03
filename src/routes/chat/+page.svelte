@@ -1,7 +1,11 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy, tick, getContext } from 'svelte';
+  import MarkdownMessage from './MarkdownMessage.svelte';
+
+  // 把工具栏挂载到全局顶部标题栏
+  const titlebar = getContext<{ slotEl: HTMLElement | null; active: boolean }>('titlebar');
 
   // ===== 类型 =====
   interface RunningModelInfo {
@@ -27,6 +31,8 @@
     reasoning?: string;
     timestamp: number;
     error?: boolean;
+    favorite?: boolean;
+    showReasoning?: boolean;
   }
   type ChatSource =
     | { type: 'model'; port: number; model_name: string }
@@ -58,6 +64,7 @@
   let isSending = $state(false);
   let error = $state('');
   let messagesEl: HTMLElement | null = null;
+  let toolbarEl: HTMLElement | null = $state(null);
 
   let sourceType = $state<'provider' | 'model'>('provider');
   let selectedProviderId = $state<string | null>(null);
@@ -72,10 +79,28 @@
 
   let sessions = $state<ChatSession[]>([]);
 
+  let searchQuery = $state('');
+
+  const filteredSessions = $derived.by(() => {
+    if (!searchQuery.trim()) return sessions;
+    const q = searchQuery.toLowerCase();
+    return sessions.filter((s) => {
+      if (s.title.toLowerCase().includes(q)) return true;
+      if (s.messages && s.messages.length > 0) {
+        for (const m of s.messages) {
+          if (m.content.toLowerCase().includes(q)) return true;
+        }
+      }
+      return false;
+    });
+  });
+
   let unlisteners: Array<() => void> = [];
 
   // ===== 生命周期 =====
   onMount(async () => {
+    document.body.classList.add('chat-active');
+    if (titlebar) titlebar.active = true;
     await Promise.all([loadSessions(), loadRunningModels(), loadProviders()]);
 
     if (providers.length > 0) {
@@ -127,6 +152,8 @@
   });
 
   onDestroy(() => {
+    document.body.classList.remove('chat-active');
+    if (titlebar) titlebar.active = false;
     unlisteners.forEach((fn) => fn());
   });
 
@@ -237,6 +264,8 @@
       reasoning: m.reasoning,
       timestamp: m.timestamp ?? 0,
       error: m.error,
+      favorite: m.favorite,
+      showReasoning: false,
     }));
 
     if (s.source.type === 'provider') {
@@ -302,6 +331,7 @@
       reasoning: m.reasoning,
       timestamp: m.timestamp,
       error: m.error,
+      favorite: m.favorite,
     }));
 
     try {
@@ -444,6 +474,31 @@
     const p = providers.find((x) => x.id === s.provider_id);
     return p?.name ?? 'provider';
   }
+
+  // ===== 消息操作 =====
+  async function copyMessage(msg: ChatMessage) {
+    try {
+      await navigator.clipboard.writeText(msg.content);
+    } catch {
+      // ignore
+    }
+  }
+
+  function toggleFavorite(msg: ChatMessage) {
+    msg.favorite = !msg.favorite;
+    messages = [...messages];
+    // 自动保存
+    saveCurrentSession();
+  }
+
+  // 把工具栏 DOM 移动到全局顶部标题栏插槽
+  $effect(() => {
+    const target = titlebar?.slotEl ?? null;
+    if (!toolbarEl || !target) return;
+    if (toolbarEl.parentElement !== target) {
+      target.appendChild(toolbarEl);
+    }
+  });
 </script>
 
 <div class="chat-root" class:with-sidebar={sidebarOpen}>
@@ -465,14 +520,22 @@
       新建对话
     </button>
 
+    <div class="hd-search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" placeholder="搜索对话历史…" bind:value={searchQuery} />
+      {#if searchQuery}
+        <button class="hd-search-clear" onclick={() => (searchQuery = '')} aria-label="清除搜索">✕</button>
+      {/if}
+    </div>
+
     <div class="hd-list">
-      {#if sessions.length === 0}
+      {#if filteredSessions.length === 0}
         <div class="hd-empty">
           <span class="hd-empty-icon">✦</span>
-          <p>暂无历史记录</p>
+          <p>{searchQuery ? '没有匹配的对话' : '暂无历史记录'}</p>
         </div>
       {:else}
-        {#each sessions as s (s.id)}
+        {#each filteredSessions as s (s.id)}
           <div
             class="hd-item"
             class:active={s.id === currentSessionId}
@@ -501,99 +564,86 @@
 
   <!-- ===== 主对话区 ===== -->
   <section class="chat-main">
-    <!-- 顶部状态栏 -->
-    <header class="top-bar">
-      <!-- 当前来源 chip -->
-      <div class="source-chip">
-        <span class="source-chip-dot" class:model={sourceType === 'model'}></span>
-        <span class="source-chip-text">{currentSourceLabel}</span>
-        {#if currentModelName}
-          <span class="source-chip-model">{currentModelName}</span>
-        {/if}
-      </div>
-
-      <div class="tb-spacer"></div>
-
-      <button class="tb-btn-text" onclick={handleClear} disabled={isSending || messages.length === 0} title="清空当前对话">
-        清空
-      </button>
-
-      <button class="tb-btn" onclick={() => (sidebarOpen = !sidebarOpen)} title="历史记录" aria-label="历史记录">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        {#if sessions.length > 0}
-          <span class="tb-badge">{sessions.length}</span>
-        {/if}
-      </button>
-    </header>
-
-    <!-- 源选择条（浮动下方选择器） -->
-    <div class="source-bar" class:settings-open={showSettings}>
-      <div class="seg-control">
-        <button class:active={sourceType === 'provider'} onclick={() => onSwitchType('provider')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          API
-        </button>
-        <button class:active={sourceType === 'model'} onclick={() => onSwitchType('model')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          本地
-        </button>
-      </div>
-
-      {#if sourceType === 'provider'}
-        <select class="picker" bind:value={selectedProviderId} onchange={onSelectProviderChange} disabled={isSending}>
-          {#if providers.length === 0}
-            <option value={null}>尚未配置 Provider</option>
-          {/if}
-          {#each providers as p (p.id)}
-            <option value={p.id}>{p.name}</option>
-          {/each}
-        </select>
-
-        <!-- 模型切换 -->
-        <div class="model-picker-group">
-          <select
-            class="picker mono"
-            value={currentModelName}
-            onchange={(e) => (overrideModelName = (e.target as HTMLSelectElement).value || null)}
-            disabled={isSending || modelsLoading}
-            title="选择模型"
-          >
-            {#if !currentModelName}
-              <option value="">未选择模型</option>
-            {/if}
-            {#if modelsLoading}
-              <option value="">加载中…</option>
-            {/if}
-            {#if currentModelName && providerModels.findIndex((m) => m.id === currentModelName) < 0}
-              <option value={currentModelName}>{currentModelName}</option>
-            {/if}
-            {#each providerModels as m (m.id)}
-              <option value={m.id}>{m.id}</option>
-            {/each}
-          </select>
-          <button class="refresh-btn" onclick={handleFetchModels} disabled={isSending || modelsLoading} title="刷新模型列表" aria-label="刷新模型">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class:spinning={modelsLoading}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    <!-- 工具栏（会被挂载到全局顶部标题栏） -->
+    <div class="toolbar-row" bind:this={toolbarEl}>
+      <!-- 左侧：模式切换 + 选择器 -->
+      <div class="tb-left">
+        <div class="seg-control">
+          <button class:active={sourceType === 'provider'} onclick={() => onSwitchType('provider')} title="API 提供者">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            API
+          </button>
+          <button class:active={sourceType === 'model'} onclick={() => onSwitchType('model')} title="本地模型">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            本地
           </button>
         </div>
-      {:else}
-        <select class="picker mono" bind:value={selectedModelPort} disabled={isSending}>
-          {#if runningModels.length === 0}
-            <option value={null}>无运行中模型</option>
-          {/if}
-          {#each runningModels as m (m.port)}
-            <option value={m.port}>{m.name} :{m.port}</option>
-          {/each}
-        </select>
-        <button class="refresh-btn" onclick={loadRunningModels} disabled={isSending} title="刷新" aria-label="刷新">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+
+        {#if sourceType === 'provider'}
+          <select class="picker" bind:value={selectedProviderId} onchange={onSelectProviderChange} disabled={isSending} title="选择 Provider">
+            {#if providers.length === 0}
+              <option value={null}>尚未配置</option>
+            {/if}
+            {#each providers as p (p.id)}
+              <option value={p.id}>{p.name}</option>
+            {/each}
+          </select>
+
+          <div class="model-picker-group">
+            <select
+              class="picker mono"
+              value={currentModelName}
+              onchange={(e) => (overrideModelName = (e.target as HTMLSelectElement).value || null)}
+              disabled={isSending || modelsLoading}
+              title="选择模型"
+            >
+              {#if !currentModelName}
+                <option value="">未选模型</option>
+              {/if}
+              {#if modelsLoading}
+                <option value="">加载中…</option>
+              {/if}
+              {#if currentModelName && providerModels.findIndex((m) => m.id === currentModelName) < 0}
+                <option value={currentModelName}>{currentModelName}</option>
+              {/if}
+              {#each providerModels as m (m.id)}
+                <option value={m.id}>{m.id}</option>
+              {/each}
+            </select>
+            <button class="icon-btn sm" onclick={handleFetchModels} disabled={isSending || modelsLoading} title="刷新模型列表" aria-label="刷新模型">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class:spinning={modelsLoading}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+          </div>
+        {:else}
+          <select class="picker mono" bind:value={selectedModelPort} disabled={isSending} title="选择本地模型">
+            {#if runningModels.length === 0}
+              <option value={null}>无运行模型</option>
+            {/if}
+            {#each runningModels as m (m.port)}
+              <option value={m.port}>{m.name} :{m.port}</option>
+            {/each}
+          </select>
+          <button class="icon-btn sm" onclick={loadRunningModels} disabled={isSending} title="刷新" aria-label="刷新">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+        {/if}
+      </div>
+
+      <!-- 右侧：功能按钮 -->
+      <div class="tb-right">
+        <button class="icon-btn" class:active={showSettings} onclick={() => (showSettings = !showSettings)} title="参数设置" aria-label="参数设置">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
-      {/if}
-
-      <div class="spacer"></div>
-
-      <button class="settings-trigger" class:active={showSettings} onclick={() => (showSettings = !showSettings)} title="参数" aria-label="参数">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-      </button>
+        <button class="icon-btn" onclick={handleClear} disabled={isSending || messages.length === 0} title="清空对话" aria-label="清空对话">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+        <button class="icon-btn" onclick={() => (sidebarOpen = !sidebarOpen)} title="历史记录" aria-label="历史记录">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          {#if sessions.length > 0}
+            <span class="tb-badge">{sessions.length}</span>
+          {/if}
+        </button>
+      </div>
     </div>
 
     {#if showSettings}
@@ -656,20 +706,50 @@
 
       {#each messages as msg, i (i)}
         <article class="msg" class:user={msg.role === 'user'} class:assistant={msg.role === 'assistant'}>
-          {#if msg.reasoning}
-            <details class="reasoning">
-              <summary><span class="reasoning-dot"></span>推理过程</summary>
-              <pre class="reasoning-text">{msg.reasoning}</pre>
-            </details>
-          {/if}
-
           <div class="msg-content" class:err={msg.error}>
+            <!-- 推理过程（可折叠） -->
+            {#if msg.reasoning}
+              <div class="reasoning-wrap">
+                <button class="reasoning-toggle" onclick={() => (msg.showReasoning = !msg.showReasoning)}>
+                  <span class="reasoning-dot"></span>
+                  <span>推理过程</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class:rotated={msg.showReasoning}><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                {#if msg.showReasoning}
+                  <pre class="reasoning-text">{msg.reasoning}</pre>
+                {/if}
+              </div>
+            {/if}
+
+            <!-- 主回复内容 -->
             {#if !msg.content && isSending && i === messages.length - 1}
               <div class="typing">
                 <span></span><span></span><span></span>
               </div>
+            {:else if msg.role === 'assistant'}
+              <div class="msg-body">
+                <MarkdownMessage content={msg.content} />
+              </div>
             {:else}
               <pre class="msg-text">{msg.content}</pre>
+            {/if}
+
+            <!-- 底部操作按钮 -->
+            {#if msg.content && !(isSending && i === messages.length - 1)}
+              <div class="msg-footer">
+                <button class="mf-btn" onclick={() => copyMessage(msg)} title="复制全文">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  复制
+                </button>
+                <button class="mf-btn" class:faved={msg.favorite} onclick={() => toggleFavorite(msg)} title={msg.favorite ? '取消收藏' : '收藏'}>
+                  {#if msg.favorite}
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  {:else}
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  {/if}
+                  {msg.favorite ? '已收藏' : '收藏'}
+                </button>
+              </div>
             {/if}
           </div>
         </article>
@@ -707,13 +787,18 @@
 </div>
 
 <style>
+  /* 仅在 chat 页面让 content 全屏，不影响其他页面 */
+  :global(body .content:has(.chat-root)) {
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
   .chat-root {
     --chat-gap: 16px;
     --dock-max: 760px;
     --msg-max: 760px;
 
     height: 100%;
-    padding: 0;
     overflow: hidden;
     display: flex;
     background:
@@ -750,6 +835,55 @@
   .history-drawer.open {
     transform: translateX(0);
     box-shadow: -4px 0 32px rgba(0, 0, 0, 0.15);
+  }
+
+  .hd-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 12px 8px;
+    padding: 6px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: border-color 0.15s;
+  }
+
+  .hd-search:focus-within {
+    border-color: var(--accent);
+  }
+
+  .hd-search svg {
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  .hd-search input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    min-width: 0;
+  }
+
+  .hd-search input::placeholder {
+    color: var(--text-placeholder);
+  }
+
+  .hd-search-clear {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+  }
+
+  .hd-search-clear:hover {
+    color: var(--text-primary);
   }
 
   .hd-top {
@@ -935,23 +1069,41 @@
     display: flex;
     flex-direction: column;
     position: relative;
+    height: 100%;
+    min-height: 0;
   }
 
-  /* ===== 顶部状态栏 ===== */
-  .top-bar {
+  /* ===== 工具栏（单行） ===== */
+  .toolbar-row {
+    width: 100%;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 24px;
-    border-bottom: 1px solid var(--border-light);
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0;
     background: color-mix(in srgb, var(--bg-card) 70%, transparent);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     position: relative;
     z-index: 5;
+    flex-shrink: 0;
   }
 
-  .tb-btn {
+  .tb-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .tb-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .icon-btn {
     position: relative;
     width: 34px;
     height: 34px;
@@ -964,11 +1116,27 @@
     color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.18s;
+    flex-shrink: 0;
   }
 
-  .tb-btn:hover {
+  .icon-btn:hover:not(:disabled) {
     background: var(--bg-subtle);
     color: var(--text-primary);
+  }
+
+  .icon-btn.active {
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+
+  .icon-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .icon-btn.sm {
+    width: 32px;
+    height: 32px;
   }
 
   .tb-badge {
@@ -987,83 +1155,6 @@
     align-items: center;
     justify-content: center;
     line-height: 1;
-  }
-
-  .source-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-
-  .source-chip-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent-shadow);
-    flex-shrink: 0;
-  }
-
-  .source-chip-dot.model {
-    background: #10b981;
-    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
-  }
-
-  .source-chip-text {
-    color: var(--text-primary);
-    font-weight: 600;
-  }
-
-  .source-chip-model {
-    padding-left: 8px;
-    margin-left: 4px;
-    border-left: 1px solid var(--border);
-    color: var(--accent);
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .tb-spacer { flex: 1; }
-
-  .tb-btn-text {
-    padding: 6px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 7px;
-    font-size: 13px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .tb-btn-text:hover:not(:disabled) {
-    color: var(--accent);
-    background: var(--accent-bg);
-  }
-
-  .tb-btn-text:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  /* ===== 源选择条 ===== */
-  .source-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 24px;
-    flex-wrap: wrap;
   }
 
   .seg-control {
@@ -1133,31 +1224,6 @@
     gap: 4px;
   }
 
-  .refresh-btn {
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .refresh-btn:hover:not(:disabled) {
-    color: var(--accent);
-    border-color: var(--accent);
-    transform: rotate(-15deg);
-  }
-
-  .refresh-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   .spinning {
     animation: spin 0.8s linear infinite;
   }
@@ -1166,32 +1232,7 @@
     to { transform: rotate(360deg); }
   }
 
-  .spacer { flex: 1; }
 
-  .settings-trigger {
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .settings-trigger:hover {
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .settings-trigger.active {
-    background: var(--accent-bg);
-    color: var(--accent);
-    border-color: var(--accent);
-  }
 
   /* 设置抽屉 */
   .settings-sheet {
@@ -1475,35 +1516,17 @@
     word-break: break-word;
   }
 
-  /* 推理 */
-  .reasoning {
-    margin-bottom: 8px;
-    padding: 8px 14px;
-    background: var(--bg-subtle);
-    border-radius: 10px;
-    font-size: 12px;
-    color: var(--text-muted);
-    border: 1px dashed var(--border);
+  /* 推理部分（折叠式） */
+  .reasoning-wrap {
+    margin-bottom: 10px;
   }
-
-  .reasoning summary {
-    cursor: pointer;
-    user-select: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    list-style: none;
-  }
-
-  .reasoning summary::-webkit-details-marker { display: none; }
 
   .reasoning-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: var(--accent);
+    flex-shrink: 0;
     animation: pulse 1.4s ease infinite;
   }
 
@@ -1512,14 +1535,51 @@
     50% { opacity: 0.4; transform: scale(0.85); }
   }
 
+  .reasoning-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+
+  .reasoning-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .reasoning-toggle svg.rotated {
+    transform: rotate(180deg);
+  }
+
+  .reasoning-toggle svg {
+    transition: transform 0.2s;
+  }
+
   .reasoning-text {
     margin: 8px 0 0;
+    padding: 10px 12px;
+    background: var(--bg-subtle);
+    border-radius: 8px;
     font-size: 12px;
-    line-height: 1.6;
+    line-height: 1.55;
     color: var(--text-secondary);
     white-space: pre-wrap;
     word-break: break-word;
     font-family: ui-monospace, monospace;
+    border: 1px dashed var(--border);
+  }
+
+  .msg-body {
+    margin-top: 4px;
   }
 
   /* 打字指示器 */
@@ -1544,6 +1604,64 @@
   @keyframes typingBounce {
     0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
     30% { transform: translateY(-4px); opacity: 1; }
+  }
+
+  /* 消息底部操作 */
+  .msg-footer {
+    display: flex;
+    gap: 6px;
+    padding-top: 8px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border-light);
+  }
+
+  .msg.user .msg-footer {
+    border-top-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .mf-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+
+  .msg.user .mf-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .mf-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-bg);
+  }
+
+  .msg.user .mf-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+
+  .mf-btn.faved {
+    color: #f59e0b;
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  .mf-btn.faved:hover {
+    color: #d97706;
+    border-color: #d97706;
   }
 
   /* ===== 输入停靠 ===== */
@@ -1678,10 +1796,6 @@
 
   /* 响应式 */
   @media (max-width: 640px) {
-    .source-bar {
-      padding: 8px 16px;
-    }
-
     .welcome-examples {
       grid-template-columns: 1fr;
     }
@@ -1694,8 +1808,8 @@
       padding: 8px 16px 16px;
     }
 
-    .top-bar {
-      padding: 10px 16px;
+    .toolbar-row {
+      padding: 8px 16px;
     }
 
     .composer-hint { display: none; }

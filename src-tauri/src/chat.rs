@@ -16,6 +16,8 @@ pub struct ChatMessage {
     pub timestamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<bool>,
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 /// 聊天的来源选择。两种模式统一走 OpenAI 兼容接口。

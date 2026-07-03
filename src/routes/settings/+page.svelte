@@ -217,6 +217,44 @@
     </div>
   </div>
 
+  <!-- 导航入口卡片 -->
+  <div class="settings-card nav-card">
+    <div class="card-section-header">
+      <div class="section-icon">🧭</div>
+      <div class="section-text">
+        <h3>高级管理</h3>
+        <p>以下功能已从侧边栏移入设置，点击进入对应页面</p>
+      </div>
+    </div>
+
+    <div class="nav-grid">
+      <a href="/models" class="nav-entry">
+        <span class="nav-entry-icon">🤖</span>
+        <span class="nav-entry-body">
+          <span class="nav-entry-title">模型管理</span>
+          <span class="nav-entry-desc">管理本地与服务端模型</span>
+        </span>
+        <span class="nav-entry-arrow">›</span>
+      </a>
+      <a href="/providers" class="nav-entry">
+        <span class="nav-entry-icon">🔌</span>
+        <span class="nav-entry-body">
+          <span class="nav-entry-title">API 接口</span>
+          <span class="nav-entry-desc">配置 AI 服务提供商与密钥</span>
+        </span>
+        <span class="nav-entry-arrow">›</span>
+      </a>
+      <a href="/skills" class="nav-entry">
+        <span class="nav-entry-icon">🧩</span>
+        <span class="nav-entry-body">
+          <span class="nav-entry-title">Skills 管理</span>
+          <span class="nav-entry-desc">管理可用的技能模块</span>
+        </span>
+        <span class="nav-entry-arrow">›</span>
+      </a>
+    </div>
+  </div>
+
   <!-- 主题设置卡片 -->
   <div class="settings-card theme-card">
     <div class="card-section-header">
@@ -532,6 +570,65 @@
   /* ===== 主题选择器 ===== */
   .theme-card {
     margin-bottom: 24px;
+  }
+
+  .nav-card {
+    margin-bottom: 24px;
+  }
+
+  .nav-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .nav-entry {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  }
+
+  .nav-entry:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+
+  .nav-entry-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+  }
+
+  .nav-entry-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .nav-entry-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .nav-entry-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .nav-entry-arrow {
+    flex-shrink: 0;
+    font-size: 20px;
+    color: var(--text-muted);
+    line-height: 1;
   }
 
   .scan-depth-card {

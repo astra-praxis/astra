@@ -76,6 +76,10 @@
 <div class="skills-page">
   <div class="page-header">
     <div class="header-left">
+      <a href="/settings" class="btn-back" title="返回设置">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        返回设置
+      </a>
       <h1>Skills 管理</h1>
       <p class="subtitle">管理和配置本地的 AI 技能</p>
     </div>
@@ -205,6 +209,28 @@
   .subtitle {
     color: var(--text-muted);
     font-size: 14px;
+  }
+
+  .btn-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 12px;
+    padding: 5px 10px 5px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    text-decoration: none;
+    align-self: flex-start;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+
+  .btn-back:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
   }
 
   .btn-refresh {

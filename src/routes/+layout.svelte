@@ -12,6 +12,7 @@
   const menuItems = [
     { id: 'workspace', label: '工作空间', path: '/', icon: '📁' },
     { id: 'models', label: '模型管理', path: '/models', icon: '🤖' },
+    { id: 'providers', label: 'API接口', path: '/providers', icon: '🔌' },
     { id: 'skills', label: 'Skills管理', path: '/skills', icon: '🧩' }
   ];
 

@@ -1,3 +1,5 @@
+mod providers;
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -982,6 +984,13 @@ pub fn run() {
             list_model_configs,
             save_model_config,
             delete_model_config,
+            // Providers
+            providers::list_providers,
+            providers::save_provider,
+            providers::delete_provider,
+            providers::fetch_provider_models,
+            providers::set_active_model,
+            providers::get_provider,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -735,8 +735,8 @@
               <pre class="msg-text">{msg.content}</pre>
             {/if}
 
-            <!-- 底部操作按钮 -->
-            {#if msg.content && !(isSending && i === messages.length - 1)}
+            <!-- 底部操作按钮（仅 AI 输出） -->
+            {#if msg.role === 'assistant' && msg.content && !(isSending && i === messages.length - 1)}
               <div class="msg-footer">
                 <button class="mf-btn" onclick={() => copyMessage(msg)} title="复制全文" aria-label="复制全文">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -1459,13 +1459,12 @@
     max-width: var(--msg-max);
     width: 100%;
     margin: 0 auto;
-    padding: 10px 0;
+    padding: 4px 0;
     animation: msgEnter 0.3s ease;
   }
 
-  /* 预留浮动按钮空间，鼠标 hover 时才让按钮浮出 */
   .msg:has(.msg-footer) {
-    padding-bottom: 6px;
+    padding-bottom: 0;
   }
 
   @keyframes msgEnter {
@@ -1473,45 +1472,56 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
-  /* 用户：右侧实心 */
+  /* 用户：占满整行 */
   .msg.user {
     display: flex;
-    justify-content: flex-end;
+    justify-content: stretch;
   }
 
+  /* 用户消息：暗色卡片 + 内阴影 + 占满整行 */
   .msg.user .msg-content {
-    background: var(--accent-gradient);
-    color: white;
-    border-radius: 18px 18px 4px 18px;
-    padding: 11px 16px;
-    max-width: 80%;
-    box-shadow: 0 4px 14px var(--accent-shadow);
+    width: 100%;
+    padding: 10px 16px;
+    background: var(--sidebar-bg);
+    border: 1px solid var(--sidebar-border);
+    border-radius: 10px;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.25);
   }
 
-  /* 助手：左侧无气泡 贴左 */
+  .msg.user .msg-text {
+    color: var(--text-primary);
+  }
+
+  /* 助手：纯文本 */
   .msg.assistant {
     display: flex;
     justify-content: flex-start;
   }
 
   .msg.assistant .msg-content {
-    padding: 11px 16px 11px 14px;
-    border-left: 3px solid var(--accent);
-    border-radius: 0 12px 12px 0;
-    max-width: 90%;
-    background: var(--bg-card);
+    padding: 4px 0;
     color: var(--text-primary);
   }
 
   .msg.assistant .msg-content.err {
-    border-left-color: var(--error-text);
-    background: var(--error-bg);
     color: var(--error-text);
   }
 
+  /* 消息容器基准 */
   .msg-content {
     position: relative;
     display: inline-block;
+  }
+
+  /* 隐形桥接区域：连接消息与右侧按钮，避免 hover 断开 */
+  .msg:has(.msg-footer) .msg-content::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 12px;
+    transform: translateX(24px);
   }
 
   .msg-text {
@@ -1613,16 +1623,17 @@
     30% { transform: translateY(-4px); opacity: 1; }
   }
 
-  /* 消息底部操作（绝对定位到气泡下方，默认隐藏） */
+  /* 消息右侧操作（定位到消息框右侧外部，竖排，默认隐藏） */
   .msg-footer {
     position: absolute;
-    left: 4px;
-    top: 100%;
+    right: -36px;
+    bottom: 0;
     display: flex;
+    flex-direction: column;
     gap: 4px;
-    padding-top: 4px;
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity 0.2s ease;
+    transition-delay: 0.3s;
     pointer-events: none;
     z-index: 5;
   }
@@ -1631,6 +1642,7 @@
   .msg:focus-within .msg-footer {
     opacity: 1;
     pointer-events: auto;
+    transition-delay: 0s;
   }
 
   .mf-btn {

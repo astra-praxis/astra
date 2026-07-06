@@ -3,6 +3,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy, tick } from 'svelte';
   import MarkdownMessage from './MarkdownMessage.svelte';
+  import { workspaceStore, type ProjectItem } from '$lib/workspace.svelte';
 
   // 标题栏 slot id（layout 里定义）
   const TITLEBAR_SLOT_ID = 'titlebar-slot';
@@ -50,6 +51,13 @@
   // ===== 布局 =====
   let sidebarOpen = $state(false);
 
+  // ===== @ 提及功能 =====
+  let textareaEl: HTMLTextAreaElement | null = $state(null);
+  let mentionActive = $state(false);
+  let mentionQuery = $state('');
+  let mentionStartIndex = $state(0); // @ 符号的起始位置
+  let mentionSelectedIndex = $state(0); // 当前选中的项目索引（键盘导航）
+
   // ===== 来源数据 =====
   let runningModels = $state<RunningModelInfo[]>([]);
   let providers = $state<ProviderConfig[]>([]);
@@ -77,6 +85,47 @@
   let temperature = $state(0.7);
   let maxTokens = $state(4000);
 
+  // ===== 工作空间增强系统提示 =====
+  function buildWorkspaceContext(): string {
+    if (!workspaceStore.projects.length) return '';
+    const projList = workspaceStore.projects
+      .slice(0, 20)
+      .map((p) => `- ${p.name} (路径: ${p.path})`)
+      .join('\n');
+    return `
+
+当前工作空间：
+- 名称: ${workspaceStore.activeName || '未设置'}
+- 路径: ${workspaceStore.activePath || '未设置'}
+- 项目列表:
+${projList}
+
+如果用户想要执行操作，你可以在回复中使用 action 链接格式：
+[按钮描述](action://type?path=项目路径)
+
+可用的 action 类型：
+- open_project: 打开项目
+- reveal_project: 在文件管理器中显示
+
+例如：[🚀 打开 astra](action://open_project?path=/Users/workplace/astra)`;
+  }
+
+  // ===== 解析用户消息中的 @ 提及 =====
+  function parseMentions(text: string): ProjectItem[] {
+    const mentionRegex = /@(\w[\w.-]*)/g;
+    const mentions: ProjectItem[] = [];    let match;
+    while ((match = mentionRegex.exec(text)) !== null) {
+      const name = match[1];
+      const project = workspaceStore.projects.find(
+        (p) => p.name.toLowerCase() === name.toLowerCase()
+      );
+      if (project && !mentions.includes(project)) {
+        mentions.push(project);
+      }
+    }
+    return mentions;
+  }
+
   let sessions = $state<ChatSession[]>([]);
 
   let searchQuery = $state('');
@@ -99,7 +148,7 @@
 
   // ===== 生命周期 =====
   onMount(async () => {
-    await Promise.all([loadSessions(), loadRunningModels(), loadProviders()]);
+    await Promise.all([loadSessions(), loadRunningModels(), loadProviders(), workspaceStore.loadFromSettings()]);
 
     if (providers.length > 0) {
       selectedProviderId = providers[0].id;
@@ -387,12 +436,29 @@
     isSending = true;
 
     const context: Array<{ role: string; content: string }> = [];
-    if (systemPrompt.trim()) {
-      context.push({ role: 'system', content: systemPrompt.trim() });
+
+    // 构建增强的系统提示（包含工作空间信息）
+    const enhancedSystemPrompt = systemPrompt.trim() + buildWorkspaceContext();
+    if (enhancedSystemPrompt) {
+      context.push({ role: 'system', content: enhancedSystemPrompt });
     }
+
+    // 解析用户消息中的 @ 提及，如果有提及则补充项目信息
+    const mentions = parseMentions(text);
+    let enhancedUserContent = text;
+    if (mentions.length > 0) {
+      const mentionInfo = mentions.map((p) => `【引用项目】${p.name}: ${p.path}`).join('\n');
+      enhancedUserContent = `${text}\n\n${mentionInfo}`;
+    }
+
     for (let i = 0; i < messages.length - 1; i++) {
       if (messages[i].error) continue;
-      context.push({ role: messages[i].role, content: messages[i].content });
+      if (i === messages.length - 2 && messages[i].role === 'user') {
+        // 最后一条用户消息使用增强版本
+        context.push({ role: 'user', content: enhancedUserContent });
+      } else {
+        context.push({ role: messages[i].role, content: messages[i].content });
+      }
     }
 
     let source: ChatSource;
@@ -445,15 +511,159 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    // 当 @ 提及弹出时，处理键盘导航
+    if (mentionActive) {
+      const filteredProjects = getFilteredProjects();
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        mentionSelectedIndex = Math.min(mentionSelectedIndex + 1, filteredProjects.length - 1);
+        scrollToSelected();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        mentionSelectedIndex = Math.max(mentionSelectedIndex - 1, 0);
+        scrollToSelected();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        if (filteredProjects.length > 0) {
+          selectMentionProject(filteredProjects[mentionSelectedIndex]);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeMention();
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   }
 
+  /** 滚动到选中的项目 */
+  function scrollToSelected() {
+    if (!mentionListEl) return;
+    tick().then(() => {
+      const selectedEl = mentionListEl?.querySelector('.mention-item.selected');
+      if (selectedEl) {
+        selectedEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    });
+  }
+
   async function scrollToBottom() {
     await tick();
     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // ===== @ 提及功能 =====
+  let mentionListEl: HTMLElement | null = $state(null);
+
+  function getFilteredProjects(): ProjectItem[] {
+    const q = mentionQuery.toLowerCase();
+    if (!q) return workspaceStore.projects.slice(0, 10); // 无搜索词时只显示前10个
+    return workspaceStore.projects
+      .filter((p) => p.name.toLowerCase().includes(q))
+      .slice(0, 8); // 搜索匹配时最多8个结果
+  }
+
+  /** 监听 textarea 输入，检测 @ 提及 */
+  function handleTextareaInput() {
+    if (!textareaEl) return;
+
+    const val = textareaEl.value;
+    const cursorPos = textareaEl.selectionStart;
+
+    if (!val || cursorPos === 0) {
+      mentionActive = false;
+      return;
+    }
+
+    // 从光标位置向前查找最近的 @ 符号
+    const beforeCursor = val.substring(0, cursorPos);
+    // 匹配模式：@ 后面只能跟字母/数字/下划线/点/连字符（停止在空格、换行等处）
+    const atMatch = beforeCursor.match(/(?:^|\s)@([\w.-]*)$/);
+
+    if (atMatch) {
+      mentionActive = true;
+      mentionStartIndex = cursorPos - atMatch[0].length + (atMatch[0].startsWith('@') ? 0 : 1);
+      mentionQuery = atMatch[1]; // @ 后面的搜索词
+      mentionSelectedIndex = 0;
+    } else {
+      mentionActive = false;
+    }
+  }
+
+  /** 选择项目，插入到输入框 */
+  function selectMentionProject(project: ProjectItem) {
+    if (!textareaEl) return;
+
+    const val = textareaEl.value;
+    const cursorPos = textareaEl.selectionStart;
+
+    // 替换 @xxx 为 @项目名 并在后面加空格
+    const beforeMention = val.substring(0, mentionStartIndex);
+    const afterCursor = val.substring(cursorPos);
+    const insertion = `@${project.name} `;
+    const newValue = beforeMention + insertion + afterCursor;
+
+    input = newValue;
+    mentionActive = false;
+
+    // 更新光标位置到插入文本之后
+    tick().then(() => {
+      if (textareaEl) {
+        textareaEl.focus();
+        const newCursorPos = beforeMention.length + insertion.length;
+        textareaEl.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    });
+  }
+
+  /** 关闭提及弹出 */
+  function closeMention() {
+    mentionActive = false;
+  }
+
+  /** 鼠标点击选择项目 */
+  function clickMentionProject(project: ProjectItem, index: number) {
+    mentionSelectedIndex = index;
+    selectMentionProject(project);
+  }
+
+  // ===== Action 链接点击处理 =====
+  async function handleActionClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    const link = target.closest('a[href^="action://"]');
+    if (!link) return;
+
+    e.preventDefault();
+    const href = link.getAttribute('href') || '';
+    const url = new URL(href);
+    const actionType = url.hostname; // action://open_project?path=xxx -> hostname is 'open_project'
+    const params = Object.fromEntries(url.searchParams);
+
+    if (actionType === 'open_project' && params.path) {
+      if (!workspaceStore.editor.command) {
+        link.textContent = '⚠ 请先在设置页配置编辑器';
+        link.classList.add('action-error');
+        return;
+      }
+      try {
+        await invoke('open_in_editor', { path: params.path, editorCommand: workspaceStore.editor.command });
+        link.textContent = `✓ 已用 ${workspaceStore.editor.name} 打开`;        link.classList.add('action-done');
+      } catch (err) {
+        link.textContent = `❌ ${err}`;
+        link.classList.add('action-error');
+      }
+    }
   }
 
   function formatTime(ts: number): string {
@@ -677,7 +887,8 @@
     {/if}
 
     <!-- 消息流 -->
-    <div class="messages" bind:this={messagesEl}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="messages" bind:this={messagesEl} onclick={handleActionClick} role="presentation">
       {#if messages.length === 0}
         <!-- 空状态 - 居中欢迎 -->
         <div class="welcome">
@@ -757,13 +968,53 @@
 
     <!-- 输入区 -->
     <div class="dock">
+      <!-- @ 提及弹出 -->
+      {#if mentionActive && workspaceStore.projects.length > 0}
+        <div class="mention-popup">
+          <div class="mention-header">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span>选择项目</span>
+            {#if mentionQuery}
+              <span class="mention-query">搜索: {mentionQuery}</span>
+            {/if}
+          </div>
+          <div class="mention-list" bind:this={mentionListEl}>
+            {#if getFilteredProjects().length === 0}
+              <div class="mention-empty">没有匹配的项目</div>
+            {:else}
+              {#each getFilteredProjects() as project, i (project.path)}
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div
+                  class="mention-item"
+                  class:selected={i === mentionSelectedIndex}
+                  onclick={() => clickMentionProject(project, i)}
+                  role="button"
+                  tabindex="-1"
+                >
+                  <span class="mention-item-icon">📁</span>
+                  <div class="mention-item-content">
+                    <span class="mention-item-name">{project.name}</span>
+                    <span class="mention-item-path" title={project.path}>{project.path}</span>
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+          <div class="mention-hint">
+            <kbd>↑↓</kbd> 选择 · <kbd>Enter</kbd> 确认 · <kbd>Esc</kbd> 关闭
+          </div>
+        </div>
+      {/if}
+
       <div class="composer" class:sending={isSending}>
         <textarea
+          bind:this={textareaEl}
           bind:value={input}
           onkeydown={handleKeydown}
+          oninput={handleTextareaInput}
           disabled={isSending}
           rows="2"
-          placeholder={isSending ? '生成中…' : '问点什么 '}
+          placeholder={isSending ? '生成中…' : '问点什么，输入 @ 可提及项目'}
         ></textarea>
         <div class="composer-side">
           <div class="composer-hint">
@@ -1812,6 +2063,162 @@
     height: 10px;
     background: var(--error-text);
     border-radius: 2px;
+  }
+
+  /* ===== @ 提及弹出框 ===== */
+  .mention-popup {
+    max-width: var(--dock-max);
+    margin: 0 auto 8px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .mention-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  .mention-query {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .mention-list {
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  .mention-empty {
+    padding: 20px 14px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .mention-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+
+  .mention-item:hover {
+    background: var(--bg-subtle);
+  }
+
+  .mention-item.selected {
+    background: var(--accent-bg);
+  }
+
+  .mention-item-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .mention-item-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mention-item-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .mention-item.selected .mention-item-name {
+    color: var(--accent);
+  }
+
+  .mention-item-path {
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mention-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  .mention-hint kbd {
+    padding: 1px 5px;
+    background: var(--bg-card);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: ui-monospace, monospace;
+    color: var(--text-secondary);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  /* ===== Action 链接样式 ===== */
+  :global(a[href^="action://"]) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    background: var(--accent-bg);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: var(--accent);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  :global(a[href^="action://"]:hover) {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--accent-shadow);
+  }
+
+  :global(.action-done) {
+    background: rgba(74, 222, 128, 0.15);
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.3);
+  }
+
+  :global(.action-error) {
+    background: var(--error-bg);
+    color: var(--error-text);
+    border-color: var(--error-border);
   }
 
   @keyframes fadeIn {

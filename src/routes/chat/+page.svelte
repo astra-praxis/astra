@@ -94,25 +94,32 @@
       .join('\n');
     return `
 
-当前工作空间：
+当前工作空间信息：
 - 名称: ${workspaceStore.activeName || '未设置'}
 - 路径: ${workspaceStore.activePath || '未设置'}
-- 项目列表:
+项目列表：
 ${projList}
 
-如果用户想要执行操作，你可以在回复中使用 action 链接格式：
-[按钮描述](action://type?path=项目路径)
+当用户想要执行操作时，你可以使用特殊链接来触发命令。格式如下：
+[按钮文案](action://命令类型?参数名=参数值)
 
-可用的 action 类型：
-- open_project: 打开项目
-- reveal_project: 在文件管理器中显示
+可用命令：
+- open_project: 打开项目，参数为 path（项目完整路径）
 
-例如：[🚀 打开 astra](action://open_project?path=/Users/workplace/astra)`;
+例如用户说"打开 astra 项目"，你可以回复：
+好的，我来为你打开 astra 项目：[🚀 打开项目](action://open_project?path=/Users/workplace/astra)
+
+注意：
+1. 链接文案应该简洁明了，包含 emoji 更醒目
+2. path 参数必须是完整的项目路径，从上面的项目列表中获取
+3. 一次只生成一个 action 链接，避免生成多个以免用户困惑
+`;
   }
 
   // ===== 解析用户消息中的 @ 提及 =====
   function parseMentions(text: string): ProjectItem[] {
-    const mentionRegex = /@(\w[\w.-]*)/g;
+    // 支持中文、字母、数字、点、连字符
+    const mentionRegex = /@([\w\u4e00-\u9fff][\w\u4e00-\u9fff.-]*)/g;
     const mentions: ProjectItem[] = [];    let match;
     while ((match = mentionRegex.exec(text)) !== null) {
       const name = match[1];
@@ -515,8 +522,15 @@ ${projList}
     if (mentionActive) {
       const filteredProjects = getFilteredProjects();
 
+      // 如果列表为空，不处理方向键
+      if (filteredProjects.length === 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === 'Tab')) {
+        e.preventDefault();
+        return;
+      }
+
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        // 边界检查：确保 selectedIndex 不超过列表长度
         mentionSelectedIndex = Math.min(mentionSelectedIndex + 1, filteredProjects.length - 1);
         scrollToSelected();
         return;
@@ -529,7 +543,7 @@ ${projList}
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        if (filteredProjects.length > 0) {
+        if (filteredProjects.length > 0 && mentionSelectedIndex >= 0) {
           selectMentionProject(filteredProjects[mentionSelectedIndex]);
         }
         return;
@@ -568,10 +582,11 @@ ${projList}
 
   function getFilteredProjects(): ProjectItem[] {
     const q = mentionQuery.toLowerCase();
-    if (!q) return workspaceStore.projects.slice(0, 10); // 无搜索词时只显示前10个
+    if (!q) return workspaceStore.projects.slice(0, 10); // 无搜索词时显示前10个
+    // 有搜索词时搜索全部项目，最多显示20个匹配结果
     return workspaceStore.projects
       .filter((p) => p.name.toLowerCase().includes(q))
-      .slice(0, 8); // 搜索匹配时最多8个结果
+      .slice(0, 20);
   }
 
   /** 监听 textarea 输入，检测 @ 提及 */
@@ -588,8 +603,9 @@ ${projList}
 
     // 从光标位置向前查找最近的 @ 符号
     const beforeCursor = val.substring(0, cursorPos);
-    // 匹配模式：@ 后面只能跟字母/数字/下划线/点/连字符（停止在空格、换行等处）
-    const atMatch = beforeCursor.match(/(?:^|\s)@([\w.-]*)$/);
+    // 匹配模式：@ 后面可以跟字母/数字/中文/点/连字符（停止在空格、换行等处）
+    // \u4e00-\u9fff 匹配常用中文字符，\w 匹配字母数字下划线
+    const atMatch = beforeCursor.match(/(?:^|\s)@([\w\u4e00-\u9fff.-]*)$/);
 
     if (atMatch) {
       mentionActive = true;
@@ -644,6 +660,11 @@ ${projList}
     const link = target.closest('a[href^="action://"]');
     if (!link) return;
 
+    // 防止重复点击
+    if (link.classList.contains('action-executed') || link.classList.contains('action-done') || link.classList.contains('action-error')) {
+      return;
+    }
+
     e.preventDefault();
     const href = link.getAttribute('href') || '';
     const url = new URL(href);
@@ -656,11 +677,17 @@ ${projList}
         link.classList.add('action-error');
         return;
       }
+
+      // 标记为正在执行
+      link.textContent = '⏳ 正在打开...';
+      link.classList.add('action-executed');
+
       try {
         await invoke('open_in_editor', { path: params.path, editorCommand: workspaceStore.editor.command });
-        link.textContent = `✓ 已用 ${workspaceStore.editor.name} 打开`;        link.classList.add('action-done');
+        link.textContent = `✓ 已用 ${workspaceStore.editor.name} 打开`;
+        link.classList.add('action-done');
       } catch (err) {
-        link.textContent = `❌ ${err}`;
+        link.textContent = `❌ ${String(err).substring(0, 50)}`;
         link.classList.add('action-error');
       }
     }
@@ -2213,12 +2240,23 @@ ${projList}
     background: rgba(74, 222, 128, 0.15);
     color: #4ade80;
     border-color: rgba(74, 222, 128, 0.3);
+    cursor: default;
+    pointer-events: none;
   }
 
   :global(.action-error) {
     background: var(--error-bg);
     color: var(--error-text);
     border-color: var(--error-border);
+    cursor: default;
+    pointer-events: none;
+  }
+
+  :global(.action-executed) {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    cursor: wait;
+    opacity: 0.8;
   }
 
   @keyframes fadeIn {

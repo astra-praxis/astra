@@ -1,5 +1,6 @@
 mod chat;
 mod chat_sessions;
+mod command_runner;
 mod providers;
 
 use serde::{Deserialize, Serialize};
@@ -972,6 +973,7 @@ pub fn run() {
             get_settings,
             save_settings,
             open_in_editor,
+            command_runner::run_command,
             get_preset_editors,
             list_skills,
             delete_skill,

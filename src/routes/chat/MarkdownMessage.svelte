@@ -416,6 +416,9 @@
     .md-content {
         line-height: 1.7;
         font-size: 14.5px;
+        min-width: 0;
+        max-width: 100%;
+        overflow-wrap: break-word;
     }
 
     .md-content :global(p) {
@@ -479,6 +482,7 @@
         overflow: hidden;
         background: #0f0f1a;
         position: relative;
+        max-width: 100%;
     }
 
     .md-content :global(pre code) {
@@ -488,8 +492,11 @@
         font-size: 13px;
         line-height: 1.55;
         overflow-x: auto;
+        max-width: 100%;
         color: #e2e8f0;
         font-family: ui-monospace, "SF Mono", Monaco, monospace;
+        white-space: pre;
+        tab-size: 2;
     }
 
     /* 按钮样式（统一 .code-x-btn 前缀） */

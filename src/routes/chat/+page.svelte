@@ -2305,6 +2305,17 @@
     .msg-content {
         position: relative;
         display: inline-block;
+        max-width: 100%;
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: break-word;
+    }
+
+    .msg-body {
+        margin-top: 4px;
+        max-width: 100%;
+        min-width: 0;
+        overflow: hidden;
     }
 
     /* 隐形桥接区域：连接消息与右侧按钮，避免 hover 断开 */
@@ -2394,10 +2405,6 @@
         word-break: break-word;
         font-family: ui-monospace, monospace;
         border: 1px dashed var(--border);
-    }
-
-    .msg-body {
-        margin-top: 4px;
     }
 
     /* 打字指示器 */

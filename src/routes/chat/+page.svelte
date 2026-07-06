@@ -34,6 +34,7 @@
         error?: boolean;
         favorite?: boolean;
         showReasoning?: boolean;
+        isFresh?: boolean; // 新消息标记（用于控制 action 链接是否自动执行）
     }
     type ChatSource =
         | { type: "model"; port: number; model_name: string }
@@ -359,6 +360,7 @@
             error: m.error,
             favorite: m.favorite,
             showReasoning: false,
+            isFresh: false, // 历史消息不自动执行 action
         }));
 
         if (s.source.type === "provider") {
@@ -482,6 +484,7 @@
             role: "assistant",
             content: "",
             timestamp: Date.now(),
+            isFresh: true, // 标记为新消息
         };
         messages = [...messages, userMsg, placeholder];
         await scrollToBottom();
@@ -1357,6 +1360,7 @@
                                 <MarkdownMessage
                                     content={msg.content}
                                     workspacePath={workspaceStore.activePath}
+                                    isFresh={msg.isFresh || false}
                                 />
                             </div>
                         {:else}

@@ -5,6 +5,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { listen } from "@tauri-apps/api/event";
     import { onMount, onDestroy, tick } from "svelte";
+    import { workspaceStore } from "$lib/workspace.svelte";
     import javascript from "highlight.js/lib/languages/javascript";
     import typescript from "highlight.js/lib/languages/typescript";
     import python from "highlight.js/lib/languages/python";
@@ -36,7 +37,7 @@
         gfm: true,
     });
 
-    let { content = "", workspacePath = "" } = $props();
+    let { content = "", workspacePath = "", isFresh = false } = $props();
     let containerEl: HTMLElement | null = null;
     let rendered = $state("");
 
@@ -114,8 +115,74 @@
                     pre.prepend(execBtn);
                 }
             });
+
+            // 自动执行 action 链接
+            autoExecuteActionLinks();
         });
     });
+
+    // ===== 自动执行 action 链接 =====
+    function autoExecuteActionLinks() {
+        if (!containerEl || !isFresh) return; //仅对新消息自动执行
+        containerEl.querySelectorAll('a[href^="action://"]').forEach((link) => {
+            const actionLink = link as HTMLAnchorElement;
+            // 跳过已自动执行过的链接
+            if (actionLink.dataset.autoExecuted) return;
+            actionLink.dataset.autoExecuted = "1";
+
+            const href = actionLink.getAttribute("href") || "";
+            const url = new URL(href);
+            const actionType = url.hostname; // 'open_project', 'run_command'
+            const params = Object.fromEntries(url.searchParams);
+
+            if (actionType === "open_project" && params.path) {
+                // 检查编辑器是否配置
+                if (!workspaceStore.editor.command) {
+                    actionLink.textContent = "⚠ 请先在设置页配置编辑器";
+                    actionLink.classList.add("action-error");
+                    return;
+                }
+
+                // 标记正在执行
+                actionLink.textContent = "⏳ 正在打开...";
+                actionLink.classList.add("action-executed");
+
+                // 自动打开项目
+                invoke("open_in_editor", {
+                    path: params.path,
+                    editorCommand: workspaceStore.editor.command,
+                })
+                    .then(() => {
+                        actionLink.textContent = `✓ 已用 ${workspaceStore.editor.name} 打开`;
+                        actionLink.classList.remove("action-executed");
+                        actionLink.classList.add("action-done");
+                    })
+                    .catch((err: any) => {
+                        actionLink.textContent = `❌ ${String(err).substring(0, 50)}`;
+                        actionLink.classList.remove("action-executed");
+                        actionLink.classList.add("action-error");
+                    });
+            } else if (actionType === "run_command" && params.cmd) {
+                // 自动执行命令（可选：这里也可以自动执行 run_command）
+                // 根据需求决定是否自动执行命令
+                // actionLink.textContent = '⏳ 正在执行...';
+                // actionLink.classList.add('action-executed');
+                // invoke('run_command', {
+                //     command: params.cmd,
+                //     cwd: params.cwd || workspacePath || undefined,
+                //     timeoutSecs: 300,
+                // }).then(() => {
+                //     actionLink.textContent = '✓ 执行完成';
+                //     actionLink.classList.remove('action-executed');
+                //     actionLink.classList.add('action-done');
+                // }).catch((err: any) => {
+                //     actionLink.textContent = `❌ ${String(err).substring(0, 50)}`;
+                //     actionLink.classList.remove('action-executed');
+                //     actionLink.classList.add('action-error');
+                // });
+            }
+        });
+    }
 
     // ===== 命令执行处理 =====
     async function handleExecClick(pre: HTMLPreElement, command: string) {

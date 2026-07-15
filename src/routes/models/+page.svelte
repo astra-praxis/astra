@@ -37,6 +37,21 @@
     let newNgl = $state(999);
     let formError = $state("");
     let formSaving = $state(false);
+    let newPathChecking = $state(false);
+    let newPathResult = $state<{ modelValid: boolean; modelError: string; serverValid: boolean; serverError: string } | null>(null);
+
+    // ===== 编辑模型表单 =====
+    let showEditModal = $state(false);
+    let editTarget = $state<ModelConfig | null>(null);
+    let editName = $state("");
+    let editServerPath = $state("");
+    let editModelPath = $state("");
+    let editPort = $state(8080);
+    let editNgl = $state(999);
+    let editError = $state("");
+    let editSaving = $state(false);
+    let editPathChecking = $state(false);
+    let editPathResult = $state<{ modelValid: boolean; modelError: string; serverValid: boolean; serverError: string } | null>(null);
 
     // ===== 加载 =====
     onMount(() => {
@@ -133,6 +148,8 @@
         newNgl = 999;
         formError = "";
         formSaving = false;
+        newPathChecking = false;
+        newPathResult = null;
         showAddModal = true;
     }
 
@@ -173,6 +190,114 @@
             formError = `保存失败: ${e}`;
         } finally {
             formSaving = false;
+        }
+    }
+
+    // ===== 编辑模型 =====
+    function openEditModal(model: ModelConfig) {
+        editTarget = model;
+        editName = model.name;
+        editServerPath = model.server_path;
+        editModelPath = model.model_path;
+        editPort = model.port;
+        editNgl = model.ngl;
+        editError = "";
+        editSaving = false;
+        editPathChecking = false;
+        editPathResult = null;
+        showEditModal = true;
+    }
+
+    async function saveEditModel() {
+        editError = "";
+        if (!editTarget) return;
+        if (!editName.trim()) {
+            editError = "请输入模型名称";
+            return;
+        }
+        if (!editModelPath.trim()) {
+            editError = "请输入模型文件路径";
+            return;
+        }
+        if (!editPort || editPort < 1 || editPort > 65535) {
+            editError = "端口号范围 1-65535";
+            return;
+        }
+        if (editNgl < 0 || !Number.isInteger(editNgl)) {
+            editError = "ngl 必须为非负整数";
+            return;
+        }
+
+        editSaving = true;
+        try {
+            const updatedConfig: ModelConfig = {
+                id: editTarget.id, // 保持原来的 ID
+                name: editName.trim(),
+                model_path: editModelPath.trim(),
+                server_path: editServerPath.trim() || "llama",
+                port: editPort,
+                ngl: editNgl,
+            };
+            await invoke("save_model_config", { model: updatedConfig });
+            showEditModal = false;
+            editTarget = null;
+            await loadModels();
+        } catch (e) {
+            editError = `保存失败: ${e}`;
+        } finally {
+            editSaving = false;
+        }
+    }
+
+    // ===== 路径校验 =====
+    interface PathCheckResult {
+        modelValid: boolean;
+        modelError: string;
+        serverValid: boolean;
+        serverError: string;
+    }
+
+    async function checkNewPaths() {
+        newPathChecking = true;
+        newPathResult = null;
+        try {
+            const [modelValid, modelError, serverValid, serverError] =
+                await invoke<[boolean, string, boolean, string]>(
+                    "check_model_paths",
+                    { modelPath: newModelPath, serverPath: newServerPath },
+                );
+            newPathResult = { modelValid, modelError, serverValid, serverError };
+        } catch (e) {
+            newPathResult = {
+                modelValid: false,
+                modelError: `校验失败: ${e}`,
+                serverValid: false,
+                serverError: "",
+            };
+        } finally {
+            newPathChecking = false;
+        }
+    }
+
+    async function checkEditPaths() {
+        editPathChecking = true;
+        editPathResult = null;
+        try {
+            const [modelValid, modelError, serverValid, serverError] =
+                await invoke<[boolean, string, boolean, string]>(
+                    "check_model_paths",
+                    { modelPath: editModelPath, serverPath: editServerPath },
+                );
+            editPathResult = { modelValid, modelError, serverValid, serverError };
+        } catch (e) {
+            editPathResult = {
+                modelValid: false,
+                modelError: `校验失败: ${e}`,
+                serverValid: false,
+                serverError: "",
+            };
+        } finally {
+            editPathChecking = false;
         }
     }
 </script>
@@ -301,6 +426,25 @@
 
                     <div class="model-footer">
                         <div class="footer-left">
+                            <button
+                                class="btn-delete"
+                                onclick={() => (deleteTarget = model)}
+                                title="删除"
+                            >
+                                <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    ><polyline points="3 6 5 6 21 6" /><path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                    /></svg
+                                >
+                            </button>
                             {#if isLoading}
                                 <span class="action-loading">
                                     <span class="mini-spinner"></span>
@@ -363,9 +507,9 @@
                                 </button>
                             {/if}
                             <button
-                                class="btn-delete"
-                                onclick={() => (deleteTarget = model)}
-                                title="删除"
+                                class="btn-edit"
+                                onclick={() => openEditModal(model)}
+                                title="编辑"
                             >
                                 <svg
                                     width="14"
@@ -376,8 +520,10 @@
                                     stroke-width="2.5"
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
-                                    ><polyline points="3 6 5 6 21 6" /><path
-                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                    ><path
+                                        d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                                    /><path
+                                        d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
                                     /></svg
                                 >
                             </button>
@@ -474,6 +620,44 @@
                         <input type="number" bind:value={newNgl} min="0" />
                     </div>
                 </div>
+
+                <!-- 路径校验区域 -->
+                <div class="path-check-section">
+                    <button
+                        class="btn-check"
+                        onclick={checkNewPaths}
+                        disabled={newPathChecking}
+                    >
+                        {#if newPathChecking}
+                            <span class="btn-spinner"></span>
+                            校验中...
+                        {:else}
+                            🔍 校验路径
+                        {/if}
+                    </button>
+                    {#if newPathResult}
+                        <div class="path-result">
+                            <div
+                                class="path-result-item {newPathResult.modelValid
+                                    ? 'path-ok'
+                                    : 'path-fail'}"
+                            >
+                                {newPathResult.modelValid ? "✅" : "❌"} 模型文件：{newPathResult.modelValid
+                                    ? "有效"
+                                    : newPathResult.modelError}
+                            </div>
+                            <div
+                                class="path-result-item {newPathResult.serverValid
+                                    ? 'path-ok'
+                                    : 'path-fail'}"
+                            >
+                                {newPathResult.serverValid ? "✅" : "❌"} llama 路径：{newPathResult.serverValid
+                                    ? "有效"
+                                    : newPathResult.serverError}
+                            </div>
+                        </div>
+                    {/if}
+                </div>
             </div>
             <div class="modal-footer">
                 <button
@@ -486,6 +670,147 @@
                     disabled={formSaving}
                 >
                     {formSaving ? "保存中..." : "保存"}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- 编辑模型弹窗 -->
+{#if showEditModal}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
+    <div class="modal-overlay" role="presentation">
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
+        <div class="modal" role="dialog" aria-label="编辑模型" tabindex="-1">
+            <div class="modal-header">
+                <h2>编辑模型</h2>
+                <button
+                    class="modal-close"
+                    onclick={() => (showEditModal = false)}
+                    aria-label="关闭"
+                >
+                    <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><line x1="18" y1="6" x2="6" y2="18" /><line
+                            x1="6"
+                            y1="6"
+                            x2="18"
+                            y2="18"
+                        /></svg
+                    >
+                </button>
+            </div>
+            <div class="modal-body">
+                {#if editError}
+                    <div class="form-error">{editError}</div>
+                {/if}
+                <div class="form-group">
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
+                    <label>模型名称</label>
+                    <input
+                        type="text"
+                        bind:value={editName}
+                        placeholder="如: qwen2.5-7b"
+                    />
+                </div>
+                <div class="form-group">
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
+                    <label
+                        >llama 路径 <span class="optional-tag">(可选)</span
+                        ></label
+                    >
+                    <input
+                        type="text"
+                        bind:value={editServerPath}
+                        placeholder="留空使用系统 PATH 中的 llama"
+                    />
+                    <p class="input-hint">
+                        若已配置环境变量，可留空直接使用 <code>llama</code> 命令
+                    </p>
+                </div>
+                <div class="form-group">
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
+                    <label>模型文件路径 (.gguf)</label>
+                    <input
+                        type="text"
+                        bind:value={editModelPath}
+                        placeholder="/path/to/model.gguf"
+                    />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <!-- svelte-ignore a11y_label_has_associated_control -->
+                        <label>端口</label>
+                        <input
+                            type="number"
+                            bind:value={editPort}
+                            min="1"
+                            max="65535"
+                        />
+                    </div>
+                    <div class="form-group">
+                        <!-- svelte-ignore a11y_label_has_associated_control -->
+                        <label>ngl (GPU 层数)</label>
+                        <input type="number" bind:value={editNgl} min="0" />
+                    </div>
+                </div>
+
+                <!-- 路径校验区域 -->
+                <div class="path-check-section">
+                    <button
+                        class="btn-check"
+                        onclick={checkEditPaths}
+                        disabled={editPathChecking}
+                    >
+                        {#if editPathChecking}
+                            <span class="btn-spinner"></span>
+                            校验中...
+                        {:else}
+                            🔍 校验路径
+                        {/if}
+                    </button>
+                    {#if editPathResult}
+                        <div class="path-result">
+                            <div
+                                class="path-result-item {editPathResult.modelValid
+                                    ? 'path-ok'
+                                    : 'path-fail'}"
+                            >
+                                {editPathResult.modelValid ? "✅" : "❌"} 模型文件：{editPathResult.modelValid
+                                    ? "有效"
+                                    : editPathResult.modelError}
+                            </div>
+                            <div
+                                class="path-result-item {editPathResult.serverValid
+                                    ? 'path-ok'
+                                    : 'path-fail'}"
+                            >
+                                {editPathResult.serverValid ? "✅" : "❌"} llama 路径：{editPathResult.serverValid
+                                    ? "有效"
+                                    : editPathResult.serverError}
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button
+                    class="btn-cancel"
+                    onclick={() => (showEditModal = false)}>取消</button
+                >
+                <button
+                    class="btn-save"
+                    onclick={saveEditModel}
+                    disabled={editSaving}
+                >
+                    {editSaving ? "保存中..." : "保存"}
                 </button>
             </div>
         </div>
@@ -999,6 +1324,26 @@
         color: var(--text-primary);
     }
 
+    .btn-edit {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 6px 10px;
+        background: none;
+        border: 1px solid var(--border-light);
+        border-radius: 8px;
+        font-size: 13px;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-edit:hover {
+        color: var(--accent);
+        background: var(--accent-light);
+        border-color: var(--accent);
+    }
+
     .btn-delete {
         display: inline-flex;
         align-items: center;
@@ -1252,5 +1597,83 @@
         background: #b91c1c;
         transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+    }
+
+    /* ===== 路径校验区域 ===== */
+    .path-check-section {
+        margin-top: 4px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .btn-check {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-check:hover:not(:disabled) {
+        background: var(--accent-bg);
+        color: var(--accent);
+        border-color: var(--accent);
+    }
+
+    .btn-check:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .btn-spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .path-result {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .path-result-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.5;
+    }
+
+    .path-ok {
+        background: rgba(34, 197, 94, 0.1);
+        color: #16a34a;
+        border: 1px solid rgba(34, 197, 94, 0.2);
+    }
+
+    .path-fail {
+        background: var(--error-bg);
+        color: var(--error-text);
+        border: 1px solid var(--error-border);
     }
 </style>

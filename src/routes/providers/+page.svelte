@@ -29,6 +29,15 @@
     let formSaving = $state(false);
     let testing = $state<ProviderConfig | null>(null);
 
+    // ===== 编辑表单 =====
+    let showEditModal = $state(false);
+    let editTarget = $state<ProviderConfig | null>(null);
+    let editName = $state("");
+    let editBaseUrl = $state("");
+    let editApiKey = $state("");
+    let editError = $state("");
+    let editSaving = $state(false);
+
     // ===== 加载 =====
     onMount(() => {
         loadProviders();
@@ -81,6 +90,48 @@
             formError = `保存失败: ${e}`;
         } finally {
             formSaving = false;
+        }
+    }
+
+    // ===== 编辑 =====
+    function openEditModal(provider: ProviderConfig) {
+        editTarget = provider;
+        editName = provider.name;
+        editBaseUrl = provider.base_url;
+        editApiKey = provider.api_key;
+        editError = "";
+        editSaving = false;
+        showEditModal = true;
+    }
+
+    async function saveEditProvider() {
+        editError = "";
+        if (!editTarget) return;
+        if (!editName.trim()) {
+            editError = "请输入名称";
+            return;
+        }
+        if (!editBaseUrl.trim()) {
+            editError = "请输入 API 地址";
+            return;
+        }
+
+        editSaving = true;
+        try {
+            await invoke("save_provider", {
+                id: editTarget.id,
+                name: editName.trim(),
+                baseUrl: editBaseUrl.trim(),
+                apiKey: editApiKey.trim(),
+                activeModel: editTarget.active_model,
+            });
+            showEditModal = false;
+            editTarget = null;
+            await loadProviders();
+        } catch (e) {
+            editError = `保存失败: ${e}`;
+        } finally {
+            editSaving = false;
         }
     }
 
@@ -261,6 +312,25 @@
 
                     <div class="provider-footer">
                         <div class="footer-left">
+                            <button
+                                class="btn-delete"
+                                onclick={() => (deleteTarget = provider)}
+                                title="删除"
+                            >
+                                <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    ><polyline points="3 6 5 6 21 6" /><path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                    /></svg
+                                >
+                            </button>
                             {#if isTesting}
                                 <span class="action-loading">
                                     <span class="mini-spinner"></span>
@@ -300,16 +370,9 @@
                                 测试
                             </button>
                             <button
-                                class="btn-detail"
-                                onclick={() =>
-                                    goto(`/providers/${provider.id}`)}
-                            >
-                                详情 →
-                            </button>
-                            <button
-                                class="btn-delete"
-                                onclick={() => (deleteTarget = provider)}
-                                title="删除"
+                                class="btn-edit"
+                                onclick={() => openEditModal(provider)}
+                                title="编辑"
                             >
                                 <svg
                                     width="14"
@@ -320,10 +383,20 @@
                                     stroke-width="2.5"
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
-                                    ><polyline points="3 6 5 6 21 6" /><path
-                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                    ><path
+                                        d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                                    /><path
+                                        d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
                                     /></svg
                                 >
+                                编辑
+                            </button>
+                            <button
+                                class="btn-detail"
+                                onclick={() =>
+                                    goto(`/providers/${provider.id}`)}
+                            >
+                                详情 →
                             </button>
                         </div>
                     </div>
@@ -413,6 +486,92 @@
                     disabled={formSaving}
                 >
                     {formSaving ? "保存中..." : "保存"}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- 编辑接口弹窗 -->
+{#if showEditModal}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
+    <div class="modal-overlay" role="presentation">
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
+        <div class="modal" role="dialog" aria-label="编辑接口" tabindex="-1">
+            <div class="modal-header">
+                <h2>编辑接口</h2>
+                <button
+                    class="modal-close"
+                    onclick={() => (showEditModal = false)}
+                    aria-label="关闭"
+                >
+                    <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><line x1="18" y1="6" x2="6" y2="18" /><line
+                            x1="6"
+                            y1="6"
+                            x2="18"
+                            y2="18"
+                        /></svg
+                    >
+                </button>
+            </div>
+            <div class="modal-body">
+                {#if editError}
+                    <div class="form-error">{editError}</div>
+                {/if}
+                <div class="form-group">
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
+                    <label>名称</label>
+                    <input
+                        type="text"
+                        bind:value={editName}
+                        placeholder="如: 本地 Ollama"
+                    />
+                </div>
+                <div class="form-group">
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
+                    <label>API 地址</label>
+                    <input
+                        type="text"
+                        bind:value={editBaseUrl}
+                        placeholder="http://gateway.internal:8002/v1"
+                    />
+                    <p class="input-hint">
+                        OpenAI 兼容的 API 地址，通常以 <code>/v1</code> 结尾
+                    </p>
+                </div>
+                <div class="form-group">
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
+                    <label
+                        >API Key <span class="optional-tag">(可选)</span></label
+                    >
+                    <input
+                        type="password"
+                        bind:value={editApiKey}
+                        placeholder="sk-..."
+                    />
+                    <p class="input-hint">某些本地服务可能不需要 Key，可留空</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button
+                    class="btn-cancel"
+                    onclick={() => (showEditModal = false)}>取消</button
+                >
+                <button
+                    class="btn-save"
+                    onclick={saveEditProvider}
+                    disabled={editSaving}
+                >
+                    {editSaving ? "保存中..." : "保存"}
                 </button>
             </div>
         </div>
@@ -852,6 +1011,27 @@
     .btn-detail:hover {
         background: var(--accent);
         color: white;
+    }
+
+    .btn-edit {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 12px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-edit:hover {
+        background: var(--accent-bg);
+        color: var(--accent);
+        border-color: var(--accent);
     }
 
     .btn-delete {

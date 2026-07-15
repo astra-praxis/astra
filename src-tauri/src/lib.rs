@@ -794,6 +794,87 @@ fn list_model_configs(app: tauri::AppHandle) -> Vec<ModelConfig> {
     settings.models
 }
 
+/// 检查模型配置路径是否有效
+/// 返回: (model_path_valid, model_path_error, server_path_valid, server_path_error)
+#[tauri::command]
+fn check_model_paths(
+    model_path: String,
+    server_path: String,
+) -> Result<(bool, String, bool, String), String> {
+    let mut model_path_valid = false;
+    let mut model_path_error = String::new();
+    let mut server_path_valid = false;
+    let mut server_path_error = String::new();
+
+    // 检查模型文件路径
+    if model_path.trim().is_empty() {
+        model_path_error = "模型文件路径不能为空".to_string();
+    } else {
+        let path = std::path::Path::new(model_path.trim());
+        if path.exists() {
+            if path.is_file() {
+                // 检查是否是 .gguf 文件（可选）
+                if let Some(ext) = path.extension() {
+                    if ext == "gguf" {
+                        model_path_valid = true;
+                    } else {
+                        model_path_error =
+                            format!("文件扩展名不是 .gguf，当前为: {}", ext.to_string_lossy());
+                    }
+                } else {
+                    model_path_valid = true; // 没有扩展名也允许
+                }
+            } else {
+                model_path_error = "路径指向的是目录，不是文件".to_string();
+            }
+        } else {
+            model_path_error = "文件不存在".to_string();
+        }
+    }
+
+    // 检查服务器路径
+    let server_bin = server_path.trim();
+    if server_bin.is_empty() {
+        // 空则默认使用 'llama'，检查是否在 PATH 中
+        if which::which("llama").is_ok() {
+            server_path_valid = true;
+        } else {
+            server_path_error =
+                "未找到 'llama' 命令，请确保已安装 llama.cpp 并添加到 PATH".to_string();
+        }
+    } else {
+        let path = std::path::Path::new(server_bin);
+        if path.exists() {
+            if path.is_file() {
+                server_path_valid = true;
+            } else {
+                // 可能是目录，尝试在其中找 llama 或 llama-server
+                let llama_path = path.join("llama");
+                let llama_server_path = path.join("llama-server");
+                if llama_path.exists() || llama_server_path.exists() {
+                    server_path_valid = true;
+                } else {
+                    server_path_error = "目录中未找到 llama 或 llama-server 可执行文件".to_string();
+                }
+            }
+        } else {
+            // 尝试作为命令名在 PATH 中查找
+            if which::which(server_bin).is_ok() {
+                server_path_valid = true;
+            } else {
+                server_path_error = format!("未找到可执行文件: {}", server_bin);
+            }
+        }
+    }
+
+    Ok((
+        model_path_valid,
+        model_path_error,
+        server_path_valid,
+        server_path_error,
+    ))
+}
+
 #[tauri::command]
 fn save_model_config(app: tauri::AppHandle, model: ModelConfig) -> Result<(), String> {
     let mut settings = get_settings(app.clone());
@@ -989,6 +1070,7 @@ pub fn run() {
             stop_llama_server,
             list_running_servers,
             check_server_status,
+            check_model_paths,
             list_model_configs,
             save_model_config,
             delete_model_config,

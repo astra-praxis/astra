@@ -29,6 +29,9 @@
   // ===== 派生值 =====
   const isRunning = $derived(status === 'running');
 
+  // llama-server Web UI 地址
+  const webuiUrl = $derived(model ? `http://localhost:${model.port}` : '');
+
   const startCommand = $derived(
     model
       ? `${model.server_path} serve -m ${model.model_path} --host 0.0.0.0 --port ${model.port}${model.ngl > 0 ? ` -ngl ${model.ngl}` : ''}`
@@ -333,6 +336,29 @@ async fn chat() -> Result<(), Box<dyn std::error::Error>> {
             <span class="endpoint-desc">llama.cpp 原生补全接口</span>
           </div>
         </div>
+      </div>
+
+      <!-- llama-server Web UI -->
+      <div class="section-card">
+        <div class="section-title">
+          <h2>在线对话</h2>
+          {#if isRunning}
+            <a href={webuiUrl} target="_blank" rel="noopener" class="btn-copy">🔗 新窗口打开</a>
+          {/if}
+        </div>
+        {#if isRunning}
+          <iframe
+            src={webuiUrl}
+            title="llama-server Web UI"
+            class="webui-iframe"
+            sandbox="allow-scripts allow-same-origin allow-forms"
+          ></iframe>
+        {:else}
+          <div class="webui-placeholder">
+            <span class="placeholder-icon">💤</span>
+            <p>模型未运行，请先启动服务以加载在线对话界面</p>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -756,6 +782,37 @@ async fn chat() -> Result<(), Box<dyn std::error::Error>> {
   .endpoint-desc {
     color: var(--text-muted);
     margin-left: auto;
+  }
+
+  /* ===== Web UI iframe ===== */
+  .webui-iframe {
+    width: 100%;
+    height: 600px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .webui-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 400px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    color: var(--text-muted);
+    text-align: center;
+    gap: 12px;
+  }
+
+  .placeholder-icon {
+    font-size: 48px;
+  }
+
+  .webui-placeholder p {
+    font-size: 14px;
+    margin: 0;
   }
 
   /* 响应式 */

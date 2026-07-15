@@ -876,6 +876,73 @@ fn check_model_paths(
     ))
 }
 
+/// 扫描目录中的 .gguf 模型文件
+/// 返回找到的模型文件列表：路径、文件名、大小
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModelFileInfo {
+    pub path: String,
+    pub filename: String,
+    pub size_bytes: u64,
+    pub size_display: String,
+}
+
+#[tauri::command]
+fn scan_model_directory(dir: String) -> Result<Vec<ModelFileInfo>, String> {
+    let dir_path = std::path::Path::new(&dir);
+    if !dir_path.exists() {
+        return Err("目录不存在".to_string());
+    }
+    if !dir_path.is_dir() {
+        return Err("路径不是目录".to_string());
+    }
+
+    let mut results = Vec::new();
+    let entries = std::fs::read_dir(dir_path).map_err(|e| format!("读取目录失败: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
+        let path = entry.path();
+
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "gguf" {
+                    let filename = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    let size_display = format_file_size(size_bytes);
+
+                    results.push(ModelFileInfo {
+                        path: path.to_string_lossy().to_string(),
+                        filename,
+                        size_bytes,
+                        size_display,
+                    });
+                }
+            }
+        }
+    }
+
+    // 按文件名排序
+    results.sort_by(|a, b| a.filename.cmp(&b.filename));
+
+    Ok(results)
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    let i = (bytes as f64).log(1024.0).floor() as usize;
+    if i >= UNITS.len() {
+        return format!("{} TB", bytes as f64 / 1099511627776.0);
+    }
+    let value = bytes as f64 / (1024u64.pow(i as u32) as f64);
+    format!("{:.1} {}", value, UNITS[i])
+}
+
 #[tauri::command]
 fn save_model_config(app: tauri::AppHandle, model: ModelConfig) -> Result<(), String> {
     let mut settings = get_settings(app.clone());
@@ -1073,6 +1140,7 @@ pub fn run() {
             list_running_servers,
             check_server_status,
             check_model_paths,
+            scan_model_directory,
             list_model_configs,
             save_model_config,
             delete_model_config,

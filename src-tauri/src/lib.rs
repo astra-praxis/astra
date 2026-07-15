@@ -1,6 +1,7 @@
 mod chat;
 mod chat_sessions;
 mod command_runner;
+mod downloader;
 mod providers;
 
 use serde::{Deserialize, Serialize};
@@ -974,6 +975,7 @@ pub fn run() {
         .manage(chat::ChatStopFlag(std::sync::atomic::AtomicBool::new(
             false,
         )))
+        .manage(downloader::DownloadManager::new())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -1090,6 +1092,15 @@ pub fn run() {
             chat_sessions::update_chat_session_title,
             chat_sessions::delete_chat_session,
             chat_sessions::get_chat_session,
+            // Downloader
+            downloader::list_downloads,
+            downloader::add_download,
+            downloader::start_download,
+            downloader::pause_download,
+            downloader::delete_download,
+            downloader::retry_download,
+            downloader::open_download_folder,
+            downloader::open_download_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

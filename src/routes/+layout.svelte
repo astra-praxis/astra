@@ -14,7 +14,8 @@
 
   const menuItems = [
     { id: 'workspace', label: '工作空间', path: '/', icon: '📁' },
-    { id: 'chat', label: '对话', path: '/chat', icon: '💬' }
+    { id: 'chat', label: '对话', path: '/chat', icon: '💬' },
+    { id: 'tools', label: '工具箱', path: '/tools', icon: '🧰' }
   ];
 
   let sidebarOpen = $state(false);
@@ -118,7 +119,7 @@
         {#each menuItems as item}
           <a
             href={item.path}
-            class:active={$page.url.pathname === item.path}
+            class:active={$page.url.pathname === item.path || $page.url.pathname.startsWith(item.path + '/')}
             onclick={closeMobileMenu}
             title={item.label}
           >

@@ -20,7 +20,14 @@
       path: '/tools/downloader',
       status: 'stable'
     },
-    // 未来可以添加更多工具
+    {
+      id: 'nm-clean',
+      name: 'node_modules 清理',
+      description: '扫描工作空间中的所有 node_modules 文件夹，查看大小并一键清理，清理过程实时显示进度',
+      icon: '🗑️',
+      path: '/tools/nm',
+      status: 'stable'
+    },
   ];
 
   let searchQuery = $state('');

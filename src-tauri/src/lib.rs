@@ -72,6 +72,8 @@ struct ProjectCard {
     path: String,
     has_readme: bool,
     sub_projects: Vec<SubProject>,
+    size_bytes: u64,
+    size_display: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -187,11 +189,15 @@ fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, String> {
             folder_name.clone()
         };
 
+        let size_bytes = get_project_size(&entry_path);
+
         projects.push(ProjectCard {
             name: project_name,
             path: entry_path.to_string_lossy().to_string(),
             has_readme,
             sub_projects: scan_sub_projects(&entry_path),
+            size_bytes,
+            size_display: format_file_size(size_bytes),
         });
     }
 
@@ -464,11 +470,15 @@ fn create_project(
     let readme_path = project_dir.join("README.md");
     fs::write(&readme_path, &readme_content).map_err(|e| format!("创建 README.md 失败: {}", e))?;
 
+    let size_bytes = get_project_size(&project_dir);
+
     Ok(ProjectCard {
         name: project_name,
         path: project_dir.to_string_lossy().to_string(),
         has_readme: true,
         sub_projects: scan_sub_projects(&project_dir),
+        size_bytes,
+        size_display: format_file_size(size_bytes),
     })
 }
 
@@ -1033,6 +1043,218 @@ fn get_preset_editors() -> Vec<EditorSetting> {
     ]
 }
 
+// ===== 命令：扫描 node_modules =====
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct NodeModulesInfo {
+    path: String,
+    size_bytes: u64,
+    size_display: String,
+    project_name: String,
+    has_pnpm_lock: bool,
+}
+
+#[tauri::command]
+async fn scan_node_modules(
+    workspace_path: String,
+    max_depth: Option<usize>,
+) -> Result<Vec<NodeModulesInfo>, String> {
+    tokio::task::spawn_blocking(move || {
+        use std::fs;
+        use std::path::Path;
+
+        let max_depth = max_depth.unwrap_or(5);
+        let mut results: Vec<NodeModulesInfo> = Vec::new();
+
+        fn scan_dir(
+            path: &Path,
+            depth: usize,
+            max_depth: usize,
+            results: &mut Vec<NodeModulesInfo>,
+        ) {
+            if depth > max_depth {
+                return;
+            }
+            if !path.exists() || !path.is_dir() {
+                return;
+            }
+
+            if let Ok(entries) = fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let entry_path = entry.path();
+                    if !entry_path.is_dir() {
+                        continue;
+                    }
+
+                    if entry_path
+                        .file_name()
+                        .map(|n| n == "node_modules")
+                        .unwrap_or(false)
+                    {
+                        let size = get_dir_size(&entry_path);
+                        let parent_path = entry_path.parent();
+                        let project_name = parent_path
+                            .and_then(|p| p.file_name())
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+
+                        // 检测父目录是否有 pnpm-lock.yaml
+                        let has_pnpm_lock = parent_path
+                            .map(|p| p.join("pnpm-lock.yaml").exists())
+                            .unwrap_or(false);
+
+                        results.push(NodeModulesInfo {
+                            path: entry_path.to_string_lossy().to_string(),
+                            size_bytes: size,
+                            size_display: format_file_size(size),
+                            project_name,
+                            has_pnpm_lock,
+                        });
+                        // 不再递归进入 node_modules 内部
+                    } else {
+                        let name = entry_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("");
+                        if !name.starts_with('.')
+                            && name != "target"
+                            && name != "dist"
+                            && name != "build"
+                        {
+                            scan_dir(&entry_path, depth + 1, max_depth, results);
+                        }
+                    }
+                }
+            }
+        }
+
+        scan_dir(Path::new(&workspace_path), 0, max_depth, &mut results);
+        results.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("扫描任务失败: {}", e))?
+}
+
+fn get_dir_size(path: &std::path::Path) -> u64 {
+    use std::fs;
+
+    let mut total_size: u64 = 0;
+
+    if path.is_dir() {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    total_size += get_dir_size(&entry_path);
+                } else if entry_path.is_file() {
+                    if let Ok(metadata) = entry.metadata() {
+                        total_size += metadata.len();
+                    }
+                }
+            }
+        }
+    }
+
+    total_size
+}
+
+/// 计算项目源码大小（跳过 node_modules、.git、target 等非源码目录）
+fn get_project_size(path: &std::path::Path) -> u64 {
+    use std::fs;
+
+    let skip_dirs: [&str; 10] = [
+        "node_modules",
+        ".git",
+        ".svn",
+        "target",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        ".output",
+        ".cache",
+    ];
+
+    let mut total_size: u64 = 0;
+
+    if path.is_dir() {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                let file_name = entry_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+
+                if entry_path.is_dir() {
+                    // 跳过已知的非源码目录
+                    if !skip_dirs.contains(&file_name) && !file_name.starts_with('.') {
+                        total_size += get_project_size(&entry_path);
+                    }
+                } else if entry_path.is_file() {
+                    if let Ok(metadata) = entry.metadata() {
+                        total_size += metadata.len();
+                    }
+                }
+            }
+        }
+    }
+
+    total_size
+}
+
+#[derive(Debug, serde::Serialize)]
+struct CleanResult {
+    success: bool,
+    cleaned_paths: Vec<String>,
+    failed_paths: Vec<(String, String)>, // (path, error message)
+    total_freed_bytes: u64,
+    total_freed_display: String,
+}
+
+#[tauri::command]
+async fn clean_node_modules(paths: Vec<String>) -> Result<CleanResult, String> {
+    tokio::task::spawn_blocking(move || {
+        use std::fs;
+
+        let mut cleaned_paths: Vec<String> = Vec::new();
+        let mut failed_paths: Vec<(String, String)> = Vec::new();
+        let mut total_freed_bytes: u64 = 0;
+
+        for path in paths {
+            let path_obj = std::path::Path::new(&path);
+            if !path_obj.exists() {
+                failed_paths.push((path.clone(), "路径不存在".to_string()));
+                continue;
+            }
+
+            let size = get_dir_size(path_obj);
+
+            match fs::remove_dir_all(path_obj) {
+                Ok(_) => {
+                    cleaned_paths.push(path.clone());
+                    total_freed_bytes += size;
+                }
+                Err(e) => {
+                    failed_paths.push((path, e.to_string()));
+                }
+            }
+        }
+
+        Ok(CleanResult {
+            success: failed_paths.is_empty(),
+            cleaned_paths,
+            failed_paths,
+            total_freed_bytes,
+            total_freed_display: format_file_size(total_freed_bytes),
+        })
+    })
+    .await
+    .map_err(|e| format!("清理任务失败: {}", e))?
+}
+
 // ===== 应用入口 =====
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1135,6 +1357,8 @@ pub fn run() {
             minimize_to_tray,
             drag_window,
             set_window_background,
+            scan_node_modules,
+            clean_node_modules,
             start_llama_server,
             stop_llama_server,
             list_running_servers,

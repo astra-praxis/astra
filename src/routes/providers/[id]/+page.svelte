@@ -3,6 +3,7 @@
     import { onMount } from "svelte";
     import { goto } from "$app/navigation";
     import { page } from "$app/stores";
+    import { toolbarState, handleFetchModels, loadProviders } from "$lib/chat-state.svelte";
 
     // ===== 类型 =====
     interface ProviderConfig {
@@ -119,8 +120,15 @@
             provider = await invoke<ProviderConfig>("get_provider", {
                 id: providerId,
             });
+            selectedModelId = provider.active_model ?? "";
             // 如果有 active_model，自动加载模型列表
             await fetchModels();
+
+            // 同步到全局 toolbarState：当前查看的 provider 成为选中状态
+            toolbarState.sourceType = "provider";
+            toolbarState.selectedProviderId = provider.id;
+            toolbarState.overrideModelName = provider.active_model;
+            await handleFetchModels();
         } catch (e) {
             error = `加载失败: ${e}`;
         } finally {
@@ -156,6 +164,12 @@
             });
             provider.active_model = modelId;
             selectedModelId = modelId;
+
+            // 同步到全局 toolbarState
+            toolbarState.selectedProviderId = provider.id;
+            toolbarState.sourceType = "provider";
+            toolbarState.overrideModelName = modelId;
+            await handleFetchModels();
         } catch (e) {
             error = `切换模型失败: ${e}`;
         }
@@ -203,6 +217,7 @@
             });
             showEditModal = false;
             await loadProvider();
+            loadProviders(); // 同步全局 toolbarState
         } catch (e) {
             editError = `保存失败: ${e}`;
         } finally {
@@ -217,6 +232,7 @@
         if (!provider) return;
         try {
             await invoke("delete_provider", { id: provider.id });
+            loadProviders(); // 同步全局 toolbarState
             goto("/providers");
         } catch (e) {
             error = `删除失败: ${e}`;

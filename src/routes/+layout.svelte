@@ -7,6 +7,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { nm, stopScan } from '$lib/nm-store.svelte';
   import ChatToolbar from '$lib/ChatToolbar.svelte';
+  import { loadInitialToolbarData } from '$lib/chat-state.svelte';
   let { children } = $props();
 
   // 将 store 状态同步到局部 state（确保跨页面导航时响应式不丢失）
@@ -21,6 +22,7 @@
   });
 
   initTheme();
+  loadInitialToolbarData();
 
   const menuItems = [
     { id: 'workspace', label: '工作空间', path: '/', icon: '📁' },
@@ -89,22 +91,28 @@
 </script>
 
 <div class="app-layout" class:collapsed={sidebarCollapsed}>
-  <!-- 顶部标题栏（可拖拽） -->
+  <!-- 顶部标题栏（可拖拽）：三栏共存布局 -->
+  <!-- 左：chat 工具（模型选择等）｜中：星野标题｜右：加载状态 + 操作按钮 -->
   <header use:windowDrag class="title-bar">
-    <span class="title-bar-title">星野</span>
-    <div class="titlebar-loading" class:titlebar-visible={titleBusy}>
-      <div class="titlebar-spinner" class:spinner-visible={titleBusy}></div>
-      <span class="titlebar-progress" class:progress-visible={titleBusy}>{titleProgress}</span>
-      {#if titleScanning}
-        <button class="titlebar-stop-btn" onclick={stopScan} title="停止">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-        </button>
-      {/if}
+    <div class="titlebar-left">
+      <ChatToolbar side="left" />
     </div>
-    <div id="titlebar-slot" class="title-bar-slot">
-      {#if $page.url.pathname === '/chat'}
-        <ChatToolbar />
-      {/if}
+
+    <div class="titlebar-center">
+      <span class="title-bar-title">星野</span>
+    </div>
+
+    <div class="titlebar-right">
+      <ChatToolbar side="right" />
+      <div class="titlebar-loading" class:titlebar-visible={titleBusy}>
+        <div class="titlebar-spinner" class:spinner-visible={titleBusy}></div>
+        <span class="titlebar-progress" class:progress-visible={titleBusy}>{titleProgress}</span>
+        {#if titleScanning}
+          <button class="titlebar-stop-btn" onclick={stopScan} title="停止">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+          </button>
+        {/if}
+      </div>
     </div>
   </header>
 
@@ -229,19 +237,33 @@
     z-index: 999;
   }
 
-  /* ===== 顶部标题栏（可拖拽） ===== */
+  /* ===== 顶部标题栏（可拖拽）===== */
   .title-bar {
     height: 38px;
     background: var(--sidebar-bg);
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: flex-start;
-    padding: 0 80px 0 70px; /* 左 70px 留给 macOS 三按钮 */
-    gap: 12px;
+    padding: 0 16px 0 70px; /* 左 70px 留给 macOS 三按钮 */
     flex-shrink: 0;
     user-select: none;
     -webkit-user-select: none;
     border-bottom: 1px solid var(--sidebar-border);
+  }
+
+  .titlebar-left {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    min-width: 0;
+    overflow: hidden;
+    gap: 8px;
+  }
+
+  .titlebar-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .title-bar-title {
@@ -251,26 +273,15 @@
     letter-spacing: 0.5px;
     user-select: none;
     -webkit-user-select: none;
-    flex-shrink: 0;
+    white-space: nowrap;
   }
 
-  .title-bar-slot {
-    display: none;
-    flex: 1;
-    height: 100%;
-    align-items: center;
-    min-width: 0;
-  }
-
-  /* chat 页面 portal 激活时：slot 占满整个标题栏 */
-  .title-bar:has(.title-bar-slot:not(:empty)) .title-bar-title,
-  .title-bar:has(.title-bar-slot:not(:empty)) .titlebar-loading {
-    display: none;
-  }
-
-  .title-bar:has(.title-bar-slot:not(:empty)) .title-bar-slot {
+  .titlebar-right {
     display: flex;
-    justify-content: stretch;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
   }
 
   /* ===== 标题栏加载指示器（常驻右侧） ===== */
@@ -281,7 +292,6 @@
     font-size: 12px;
     font-weight: 500;
     color: var(--accent);
-    margin-left: auto;
     opacity: 0;
     transition: opacity 0.25s ease;
     pointer-events: none;

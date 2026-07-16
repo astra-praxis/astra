@@ -4,26 +4,9 @@
     import { onMount, onDestroy, tick } from "svelte";
     import MarkdownMessage from "./MarkdownMessage.svelte";
     import { workspaceStore, type ProjectItem } from "$lib/workspace.svelte";
-    import { toolbarState } from "$lib/chat-state.svelte";
+    import { toolbarState, type ProviderConfig, type ModelInfo, type RunningModelInfo } from "$lib/chat-state.svelte";
 
     // ===== 类型 =====
-    interface RunningModelInfo {
-        name: string;
-        port: number;
-        status: string;
-        pid: number | null;
-    }
-    interface ProviderConfig {
-        id: string;
-        name: string;
-        base_url: string;
-        api_key: string;
-        active_model: string | null;
-    }
-    interface ModelInfo {
-        id: string;
-        owned_by: string | null;
-    }
     interface ChatMessage {
         role: "user" | "assistant";
         content: string;
@@ -78,10 +61,7 @@
     let error = $state("");
     let messagesEl: HTMLElement | null = null;
 
-    let sourceType = $state<"provider" | "model">("provider");
-    let selectedProviderId = $state<string | null>(null);
-    let selectedModelPort = $state<number | null>(null);
-    let overrideModelName = $state<string | null>(null);
+    // 选择状态直接使用 toolbarState（与全局 ChatToolbar 同步）
 
     // ===== 参数 =====
     let showSettings = $state(false);
@@ -178,14 +158,18 @@
             workspaceStore.loadFromSettings(),
         ]);
 
-        if (providers.length > 0) {
-            selectedProviderId = providers[0].id;
-            handleFetchModels();
+        // 优先复用 toolbarState 的已选值（用户在 toolbar 上可能已切换过）
+        if (toolbarState.selectedProviderId && providers.some(p => p.id === toolbarState.selectedProviderId)) {
+            // keep existing selection
+        } else if (providers.length > 0) {
+            toolbarState.selectedProviderId = providers[0].id;
         }
+        if (toolbarState.selectedProviderId) handleFetchModels();
 
-        if (runningModels.length > 0) {
-            sourceType = "model";
-            selectedModelPort = runningModels[0].port;
+        if (toolbarState.selectedModelPort && runningModels.some(m => m.port === toolbarState.selectedModelPort)) {
+            // keep existing selection
+        } else if (runningModels.length > 0) {
+            toolbarState.selectedModelPort = runningModels[0].port;
         }
 
         const unChunk = await listen<string>("chat-chunk", (e) => {
@@ -235,26 +219,26 @@
 
     // ===== 派生 =====
     const selectedProvider = $derived(
-        providers.find((p) => p.id === selectedProviderId) ?? null,
+        providers.find((p) => p.id === toolbarState.selectedProviderId) ?? null,
     );
     const selectedModel = $derived(
-        runningModels.find((m) => m.port === selectedModelPort) ?? null,
+        runningModels.find((m) => m.port === toolbarState.selectedModelPort) ?? null,
     );
 
     const currentModelName = $derived.by(() => {
-        if (sourceType === "model") return selectedModel?.name ?? "local";
-        return overrideModelName ?? selectedProvider?.active_model ?? null;
+        if (toolbarState.sourceType === "model") return selectedModel?.name ?? "local";
+        return toolbarState.overrideModelName ?? selectedProvider?.active_model ?? null;
     });
 
     const currentSourceLabel = $derived.by(() => {
-        if (sourceType === "model") return selectedModel?.name ?? "本地模型";
+        if (toolbarState.sourceType === "model") return selectedModel?.name ?? "本地模型";
         return selectedProvider?.name ?? "未选择";
     });
 
     const canSend = $derived.by(() => {
         if (isSending || input.trim().length === 0) return false;
-        if (sourceType === "model") return !!selectedModelPort;
-        return !!selectedProviderId && !!currentModelName;
+        if (toolbarState.sourceType === "model") return !!toolbarState.selectedModelPort;
+        return !!toolbarState.selectedProviderId && !!currentModelName;
     });
 
     // ===== 加载 =====
@@ -309,22 +293,22 @@
     }
 
     function onSwitchType(t: "provider" | "model") {
-        if (sourceType === t || isSending) return;
-        sourceType = t;
+        if (toolbarState.sourceType === t || isSending) return;
+        toolbarState.sourceType = t;
         error = "";
-        if (t === "model" && runningModels.length > 0 && !selectedModelPort) {
-            selectedModelPort = runningModels[0].port;
+        if (t === "model" && runningModels.length > 0 && !toolbarState.selectedModelPort) {
+            toolbarState.selectedModelPort = runningModels[0].port;
         }
-        if (t === "provider" && providers.length > 0 && !selectedProviderId) {
-            selectedProviderId = providers[0].id;
+        if (t === "provider" && providers.length > 0 && !toolbarState.selectedProviderId) {
+            toolbarState.selectedProviderId = providers[0].id;
             handleFetchModels();
         }
     }
 
     function onSelectProviderChange() {
-        overrideModelName = null;
+        toolbarState.overrideModelName = null;
         providerModels = [];
-        if (selectedProviderId) handleFetchModels();
+        if (toolbarState.selectedProviderId) handleFetchModels();
     }
 
     function newChat() {
@@ -333,7 +317,7 @@
         messages = [];
         error = "";
         input = "";
-        overrideModelName = null;
+        toolbarState.overrideModelName = null;
         sidebarOpen = false;
     }
 
@@ -355,16 +339,16 @@
         }));
 
         if (s.source.type === "provider") {
-            sourceType = "provider";
+            toolbarState.sourceType = "provider";
             const sid = s.source.provider_id;
-            selectedProviderId = sid;
+            toolbarState.selectedProviderId = sid;
             const provider = providers.find((p) => p.id === sid);
-            overrideModelName =
+            toolbarState.overrideModelName =
                 s.source.model ?? provider?.active_model ?? null;
             if (provider) handleFetchModels();
         } else if (s.source.type === "model") {
-            sourceType = "model";
-            selectedModelPort = s.source.port;
+            toolbarState.sourceType = "model";
+            toolbarState.selectedModelPort = s.source.port;
         }
 
         sidebarOpen = false;
@@ -394,17 +378,17 @@
     }
 
     function buildSource(): ChatSource {
-        if (sourceType === "model") {
+        if (toolbarState.sourceType === "model") {
             return {
                 type: "model",
-                port: selectedModelPort!,
+                port: toolbarState.selectedModelPort!,
                 model_name: selectedModel?.name ?? "local",
             };
         }
         return {
             type: "provider",
-            provider_id: selectedProviderId!,
-            model: overrideModelName,
+            provider_id: toolbarState.selectedProviderId!,
+            model: toolbarState.overrideModelName,
         };
     }
 
@@ -448,11 +432,11 @@
         const text = input.trim();
         if (!text || isSending) return;
 
-        if (sourceType === "model" && !selectedModelPort) {
+        if (toolbarState.sourceType === "model" && !toolbarState.selectedModelPort) {
             error = "请先选择一个运行中的本地模型";
             return;
         }
-        if (sourceType === "provider") {
+        if (toolbarState.sourceType === "provider") {
             if (!selectedProvider) {
                 error = "请先选择一个 API 提供者";
                 return;
@@ -515,12 +499,12 @@
         }
 
         let source: ChatSource;
-        if (sourceType === "model") {
+        if (toolbarState.sourceType === "model") {
             source = buildSource();
         } else {
             source = {
                 type: "provider",
-                provider_id: selectedProviderId!,
+                provider_id: toolbarState.selectedProviderId!,
                 model: currentModelName,
             };
         }
@@ -823,6 +807,18 @@
         toolbarState.isSending = isSending;
         toolbarState.showSettings = showSettings;
         toolbarState.sessionsCount = sessions.length;
+    });
+
+    // 同步 Provider / 模型数据到 toolbarState（全局 ChatToolbar 的数据源）
+    $effect(() => {
+        toolbarState.providers = providers;
+    });
+    $effect(() => {
+        toolbarState.runningModels = runningModels;
+    });
+    $effect(() => {
+        toolbarState.providerModels = providerModels;
+        toolbarState.modelsLoading = modelsLoading;
     });
 
     onMount(() => {

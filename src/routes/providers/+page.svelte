@@ -1,6 +1,7 @@
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
     import { onMount } from "svelte";
+    import { loadProviders as syncToolbarProviders } from "$lib/chat-state.svelte";
     import { goto } from "$app/navigation";
 
     // ===== 类型 =====
@@ -86,6 +87,7 @@
             });
             showAddModal = false;
             await loadProviders();
+            syncToolbarProviders(); // 同步全局 toolbarState
         } catch (e) {
             formError = `保存失败: ${e}`;
         } finally {
@@ -128,6 +130,7 @@
             showEditModal = false;
             editTarget = null;
             await loadProviders();
+            syncToolbarProviders(); // 同步全局 toolbarState
         } catch (e) {
             editError = `保存失败: ${e}`;
         } finally {
@@ -142,6 +145,7 @@
         try {
             await invoke("delete_provider", { id: target.id });
             providers = providers.filter((p) => p.id !== target.id);
+            syncToolbarProviders(); // 同步全局 toolbarState
             deleteTarget = null;
         } catch (e) {
             error = `删除失败: ${e}`;

@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{AppHandle, Emitter, Manager};
 
 // ===== llama-server 管理 =====
 
@@ -1047,6 +1047,7 @@ struct NodeModulesInfo {
 
 #[tauri::command]
 async fn scan_node_modules(
+    app: AppHandle,
     workspace_path: String,
     max_depth: Option<usize>,
 ) -> Result<Vec<NodeModulesInfo>, String> {
@@ -1058,6 +1059,7 @@ async fn scan_node_modules(
         let mut results: Vec<NodeModulesInfo> = Vec::new();
 
         fn scan_dir(
+            app: &AppHandle,
             path: &Path,
             depth: usize,
             max_depth: usize,
@@ -1068,6 +1070,16 @@ async fn scan_node_modules(
             }
             if !path.exists() || !path.is_dir() {
                 return;
+            }
+
+            // 顶层及项目目录扫描时通知前端当前进度
+            if depth <= 1 {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                let _ = app.emit("nm-scan-progress", name);
             }
 
             if let Ok(entries) = fs::read_dir(path) {
@@ -1118,14 +1130,14 @@ async fn scan_node_modules(
                             && name != "dist"
                             && name != "build"
                         {
-                            scan_dir(&entry_path, depth + 1, max_depth, results);
+                            scan_dir(app, &entry_path, depth + 1, max_depth, results);
                         }
                     }
                 }
             }
         }
 
-        scan_dir(Path::new(&workspace_path), 0, max_depth, &mut results);
+        scan_dir(&app, Path::new(&workspace_path), 0, max_depth, &mut results);
         results.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
         Ok(results)
     })

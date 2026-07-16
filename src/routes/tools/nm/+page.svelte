@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
 
@@ -41,6 +42,7 @@
   let nmScanning = $state(false);
   let nmList = $state<NodeModulesInfo[]>([]);
   let nmScanned = $state(false);
+  let nmScanProgress = $state('');
 
   // 编辑器
   let editorCommand = $state('');
@@ -98,6 +100,11 @@
     nmCleanIndex = 0;
     nmCleanStopped = false;
     nmDone = false;
+    nmScanProgress = '正在扫描 node_modules...';
+    // 监听后端实时推送的扫描进度（当前文件夹名）
+    const unlisten = await listen<string>('nm-scan-progress', (e) => {
+      nmScanProgress = `正在扫描: ${e.payload}`;
+    });
     try {
       const result = await invoke<NodeModulesInfo[]>('scan_node_modules', { workspacePath: activeWorkspace, maxDepth: 15 });
       nmList = result;
@@ -105,7 +112,9 @@
     } catch (e) {
       console.error('扫描失败:', e);
     } finally {
+      unlisten();
       nmScanning = false;
+      nmScanProgress = '';
     }
   }
 
@@ -232,6 +241,14 @@
       {/if}
     {/if}
   </div>
+
+  <!-- 扫描进度 -->
+  {#if nmScanning && nmScanProgress}
+    <div class="scan-progress">
+      <div class="scan-progress-spinner"></div>
+      <span class="scan-progress-text" title={nmScanProgress}>{nmScanProgress}</span>
+    </div>
+  {/if}
 
   <!-- 扫描结果 -->
   {#if nmScanned}
@@ -415,6 +432,39 @@
     align-items: center;
     gap: 10px;
     margin-bottom: 20px;
+  }
+
+  /* 扫描进度 */
+  .scan-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-width: 0;
+  }
+
+  .scan-progress-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  .scan-progress-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    font-family: var(--font-mono, 'SF Mono', Menlo, monospace);
   }
 
   .scan-btn, .clean-all-btn, .stop-btn {

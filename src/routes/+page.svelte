@@ -473,6 +473,13 @@
             </button>
           </div>
 
+          {#if nm.scanning && nm.progress}
+            <div class="nm-scan-progress">
+              <div class="nm-scan-progress-spinner"></div>
+              <span class="nm-scan-progress-text" title={nm.progress}>{nm.progress}</span>
+            </div>
+          {/if}
+
           {#if nodeModulesScannedPath === selectedProject?.path && !nm.scanning}
             {#if nodeModulesError}
               <div class="nm-error">{nodeModulesError}</div>
@@ -1885,6 +1892,38 @@
   .nm-scan-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .nm-scan-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 10px 0;
+    padding: 8px 14px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 0;
+  }
+
+  .nm-scan-progress-spinner {
+    width: 13px;
+    height: 13px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  .nm-scan-progress-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono, 'SF Mono', Menlo, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .nm-error {

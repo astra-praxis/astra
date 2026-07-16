@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 // ===== 类型 =====
 export interface NodeModulesInfo {
@@ -49,6 +50,12 @@ export async function startScan(workspacePath: string) {
   nm.error = '';
   nm.progress = '正在扫描 node_modules...';
   nm.activePath = workspacePath;
+  // 监听后端实时推送的扫描进度（当前文件夹名）
+  const unlisten = await listen<string>('nm-scan-progress', (e) => {
+    if (!nm.cancelled) {
+      nm.progress = `正在扫描: ${e.payload}`;
+    }
+  });
   try {
     const result = await invoke<NodeModulesInfo[]>('scan_node_modules', {
       workspacePath,
@@ -67,6 +74,7 @@ export async function startScan(workspacePath: string) {
     nm.progress = '';
     return [];
   } finally {
+    unlisten();
     nm.scanning = false;
     nm.cancelled = false;
     nm.activePath = null;

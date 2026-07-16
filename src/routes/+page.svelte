@@ -21,8 +21,6 @@
     path: string;
     has_readme: boolean;
     sub_projects: SubProject[];
-    size_bytes: number;
-    size_display: string;
   }
 
   interface EditorSetting {
@@ -649,10 +647,6 @@
                 </div>
               {/if}
               <div class="card-footer">
-                <div class="footer-left">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                  <span class="card-size">{project.size_display}</span>
-                </div>
                 <div class="footer-right">
                   <button class="open-editor-btn" onclick={(e) => { e.stopPropagation(); openProject(project.path); }} title="在 {editorSetting.name || '编辑器'} 中打开"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>打开</button>
                 </div>
@@ -1263,24 +1257,8 @@
   .card-footer {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     margin-top: auto;
-  }
-
-  .footer-left {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--text-muted);
-    font-size: 12px;
-  }
-
-  .footer-left svg {
-    flex-shrink: 0;
-  }
-
-  .card-size {
-    font-weight: 500;
   }
 
   .footer-right {

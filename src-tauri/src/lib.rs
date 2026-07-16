@@ -72,8 +72,6 @@ struct ProjectCard {
     path: String,
     has_readme: bool,
     sub_projects: Vec<SubProject>,
-    size_bytes: u64,
-    size_display: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -188,15 +186,11 @@ async fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, String> {
                 folder_name.clone()
             };
 
-            let size_bytes = get_project_size(&entry_path);
-
             projects.push(ProjectCard {
                 name: project_name,
                 path: entry_path.to_string_lossy().to_string(),
                 has_readme,
                 sub_projects: scan_sub_projects(&entry_path),
-                size_bytes,
-                size_display: format_file_size(size_bytes),
             });
         }
 
@@ -470,15 +464,11 @@ fn create_project(
     let readme_path = project_dir.join("README.md");
     fs::write(&readme_path, &readme_content).map_err(|e| format!("创建 README.md 失败: {}", e))?;
 
-    let size_bytes = get_project_size(&project_dir);
-
     Ok(ProjectCard {
         name: project_name,
         path: project_dir.to_string_lossy().to_string(),
         has_readme: true,
         sub_projects: scan_sub_projects(&project_dir),
-        size_bytes,
-        size_display: format_file_size(size_bytes),
     })
 }
 
@@ -1158,77 +1148,6 @@ fn get_dir_size(path: &std::path::Path) -> u64 {
     }
 
     total_size
-}
-
-/// 快速计算项目源码大小（只算前两层目录 + 常见源码目录递归）
-fn get_project_size(path: &std::path::Path) -> u64 {
-    fn scan_dir(path: &std::path::Path, depth: usize, max_depth: usize) -> u64 {
-        use std::fs;
-
-        let skip_dirs: [&str; 13] = [
-            "node_modules",
-            ".git",
-            ".svn",
-            "target",
-            "dist",
-            "build",
-            ".next",
-            ".nuxt",
-            ".output",
-            ".cache",
-            ".idea",
-            ".vscode",
-            "__pycache__",
-        ];
-
-        let source_dirs: [&str; 6] = ["src", "lib", "src-tauri", "app", "components", "pages"];
-
-        if depth > max_depth {
-            return 0;
-        }
-
-        if !path.is_dir() {
-            return if path.is_file() {
-                path.metadata().map(|m| m.len()).unwrap_or(0)
-            } else {
-                0
-            };
-        }
-
-        let mut total: u64 = 0;
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let entry_path = entry.path();
-                let file_name = entry_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                if entry_path.is_dir() {
-                    if depth == 0 {
-                        if !skip_dirs.contains(&file_name.as_str()) {
-                            total += scan_dir(&entry_path, depth + 1, 2);
-                        }
-                    } else if depth == 1 {
-                        if source_dirs.contains(&file_name.as_str()) || !file_name.starts_with('.')
-                        {
-                            total += scan_dir(&entry_path, depth + 1, max_depth);
-                        }
-                    } else {
-                        total += scan_dir(&entry_path, depth + 1, max_depth);
-                    }
-                } else if entry_path.is_file() {
-                    if let Ok(metadata) = entry.metadata() {
-                        total += metadata.len();
-                    }
-                }
-            }
-        }
-        total
-    }
-
-    scan_dir(path, 0, 3)
 }
 
 #[derive(Debug, serde::Serialize)]

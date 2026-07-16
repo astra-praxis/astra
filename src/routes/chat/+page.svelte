@@ -4,9 +4,7 @@
     import { onMount, onDestroy, tick } from "svelte";
     import MarkdownMessage from "./MarkdownMessage.svelte";
     import { workspaceStore, type ProjectItem } from "$lib/workspace.svelte";
-
-    // 标题栏 slot id（layout 里定义）
-    const TITLEBAR_SLOT_ID = "titlebar-slot";
+    import { toolbarState } from "$lib/chat-state.svelte";
 
     // ===== 类型 =====
     interface RunningModelInfo {
@@ -79,7 +77,6 @@
     let isSending = $state(false);
     let error = $state("");
     let messagesEl: HTMLElement | null = null;
-    let toolbarEl: HTMLElement | null = $state(null);
 
     let sourceType = $state<"provider" | "model">("provider");
     let selectedProviderId = $state<string | null>(null);
@@ -233,12 +230,6 @@
     });
 
     onDestroy(() => {
-        // 清理 portal 残留
-        const target = document.getElementById(TITLEBAR_SLOT_ID);
-        if (target) {
-            target.innerHTML = "";
-            target.classList.remove("has-toolbar");
-        }
         unlisteners.forEach((fn) => fn());
     });
 
@@ -827,14 +818,16 @@
         saveCurrentSession();
     }
 
-    // 工具栏 DOM 传送到全局标题栏
+    // 同步状态到工具栏 store + 设置回调
     $effect(() => {
-        if (!toolbarEl) return;
-        const target = document.getElementById(TITLEBAR_SLOT_ID);
-        if (target && toolbarEl.parentElement !== target) {
-            target.appendChild(toolbarEl);
-            target.classList.add("has-toolbar");
-        }
+        toolbarState.isSending = isSending;
+        toolbarState.showSettings = showSettings;
+        toolbarState.sessionsCount = sessions.length;
+    });
+
+    onMount(() => {
+        toolbarState.onClear = handleClear;
+        toolbarState.onToggleSidebar = () => (sidebarOpen = !sidebarOpen);
     });
 </script>
 
@@ -983,234 +976,6 @@
 
     <!-- ===== 主对话区 ===== -->
     <section class="chat-main">
-        <!-- 工具栏（会被挂载到全局顶部标题栏） -->
-        <div class="toolbar-row" bind:this={toolbarEl}>
-            <!-- 左侧：模式切换 + 选择器 -->
-            <div class="tb-left">
-                <div class="seg-control">
-                    <button
-                        class:active={sourceType === "provider"}
-                        onclick={() => onSwitchType("provider")}
-                        title="API 提供者"
-                    >
-                        <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            ><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg
-                        >
-                    </button>
-                    <button
-                        class:active={sourceType === "model"}
-                        onclick={() => onSwitchType("model")}
-                        title="本地模型"
-                    >
-                        <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            ><rect
-                                x="2"
-                                y="3"
-                                width="20"
-                                height="14"
-                                rx="2"
-                                ry="2"
-                            /><line x1="8" y1="21" x2="16" y2="21" /><line
-                                x1="12"
-                                y1="17"
-                                x2="12"
-                                y2="21"
-                            /></svg
-                        >
-                    </button>
-                </div>
-
-                {#if sourceType === "provider"}
-                    <select
-                        class="picker"
-                        bind:value={selectedProviderId}
-                        onchange={onSelectProviderChange}
-                        disabled={isSending}
-                        title="选择 Provider"
-                    >
-                        {#if providers.length === 0}
-                            <option value={null}>尚未配置</option>
-                        {/if}
-                        {#each providers as p (p.id)}
-                            <option value={p.id}>{p.name}</option>
-                        {/each}
-                    </select>
-
-                    <div class="picker-group">
-                        <select
-                            class="picker mono"
-                            value={currentModelName}
-                            onchange={(e) =>
-                                (overrideModelName =
-                                    (e.target as HTMLSelectElement).value ||
-                                    null)}
-                            disabled={isSending || modelsLoading}
-                            title="选择模型"
-                        >
-                            {#if !currentModelName}
-                                <option value="">未选模型</option>
-                            {/if}
-                            {#if modelsLoading}
-                                <option value="">加载中…</option>
-                            {/if}
-                            {#if currentModelName && providerModels.findIndex((m) => m.id === currentModelName) < 0}
-                                <option value={currentModelName}
-                                    >{currentModelName}</option
-                                >
-                            {/if}
-                            {#each providerModels as m (m.id)}
-                                <option value={m.id}>{m.id}</option>
-                            {/each}
-                        </select>
-                        <button
-                            class="icon-btn sm"
-                            onclick={handleFetchModels}
-                            disabled={isSending || modelsLoading}
-                            title="刷新模型列表"
-                            aria-label="刷新模型"
-                        >
-                            <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2.5"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                class:spinning={modelsLoading}
-                                ><polyline points="23 4 23 10 17 10" /><path
-                                    d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"
-                                /></svg
-                            >
-                        </button>
-                    </div>
-                {:else}
-                    <select
-                        class="picker mono"
-                        bind:value={selectedModelPort}
-                        disabled={isSending}
-                        title="选择本地模型"
-                    >
-                        {#if runningModels.length === 0}
-                            <option value={null}>无运行模型</option>
-                        {/if}
-                        {#each runningModels as m (m.port)}
-                            <option value={m.port}>{m.name} :{m.port}</option>
-                        {/each}
-                    </select>
-                    <button
-                        class="icon-btn sm"
-                        onclick={loadRunningModels}
-                        disabled={isSending}
-                        title="刷新"
-                        aria-label="刷新"
-                    >
-                        <svg
-                            width="13"
-                            height="13"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.5"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            ><polyline points="23 4 23 10 17 10" /><path
-                                d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"
-                            /></svg
-                        >
-                    </button>
-                {/if}
-            </div>
-
-            <!-- 右侧：功能按钮 -->
-            <div class="tb-right">
-                <button
-                    class="icon-btn"
-                    class:active={showSettings}
-                    onclick={() => (showSettings = !showSettings)}
-                    title="参数设置"
-                    aria-label="参数设置"
-                >
-                    <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><circle cx="12" cy="12" r="3" /><path
-                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
-                        /></svg
-                    >
-                </button>
-                <button
-                    class="icon-btn"
-                    onclick={handleClear}
-                    disabled={isSending || messages.length === 0}
-                    title="清空对话"
-                    aria-label="清空对话"
-                >
-                    <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><polyline points="3 6 5 6 21 6" /><path
-                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                        /></svg
-                    >
-                </button>
-                <button
-                    class="icon-btn"
-                    onclick={() => (sidebarOpen = !sidebarOpen)}
-                    title="历史记录"
-                    aria-label="历史记录"
-                >
-                    <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><line x1="3" y1="6" x2="21" y2="6" /><line
-                            x1="3"
-                            y1="12"
-                            x2="21"
-                            y2="12"
-                        /><line x1="3" y1="18" x2="21" y2="18" /></svg
-                    >
-                    {#if sessions.length > 0}
-                        <span class="tb-badge">{sessions.length}</span>
-                    {/if}
-                </button>
-            </div>
-        </div>
 
         {#if showSettings}
             <div class="settings-sheet">
@@ -1842,163 +1607,7 @@
         min-height: 0;
     }
 
-    /* ===== 工具栏（单行） ===== */
-    .toolbar-row {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 0 20px;
-        position: relative;
-        flex-shrink: 0;
-        white-space: nowrap;
-    }
-
-    .tb-left {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-shrink: 0;
-        min-width: 0;
-    }
-
-    .tb-right {
-        display: flex;
-        align-items: center;
-        gap: 2px;
-        flex-shrink: 0;
-    }
-
-    .icon-btn {
-        position: relative;
-        width: 28px;
-        height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: transparent;
-        border: none;
-        border-radius: 6px;
-        color: var(--sidebar-text);
-        cursor: pointer;
-        transition: all 0.15s;
-        flex-shrink: 0;
-    }
-
-    .icon-btn:hover:not(:disabled) {
-        background: var(--sidebar-hover-bg);
-        color: var(--sidebar-text-hover);
-    }
-
-    .icon-btn.active {
-        background: var(--accent-bg);
-        color: var(--accent);
-    }
-
-    .icon-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
-
-    .icon-btn.sm {
-        width: 26px;
-        height: 26px;
-    }
-
-    .tb-badge {
-        position: absolute;
-        top: 3px;
-        right: 3px;
-        min-width: 16px;
-        height: 16px;
-        padding: 0 4px;
-        background: var(--accent);
-        color: white;
-        font-size: 10px;
-        font-weight: 700;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 1;
-    }
-
-    .seg-control {
-        display: inline-flex;
-        background: rgba(255, 255, 255, 0.08);
-        border-radius: 7px;
-        padding: 2px;
-        gap: 2px;
-    }
-
-    .seg-control button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 26px;
-        height: 22px;
-        background: transparent;
-        border: none;
-        border-radius: 5px;
-        color: var(--sidebar-text);
-        cursor: pointer;
-        transition: all 0.12s;
-    }
-
-    .seg-control button:hover {
-        color: var(--sidebar-text-hover);
-    }
-
-    .seg-control button.active {
-        background: var(--sidebar-active-bg);
-        color: var(--sidebar-active-text);
-    }
-
-    .picker {
-        padding: 3px 8px;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 6px;
-        font-size: 12px;
-        color: var(--sidebar-text);
-        cursor: pointer;
-        outline: none;
-        transition: all 0.12s;
-        max-width: 160px;
-        font-family: inherit;
-    }
-
-    .picker:hover {
-        color: var(--sidebar-text-hover);
-        border-color: rgba(255, 255, 255, 0.2);
-    }
-
-    .picker.mono {
-        font-family: ui-monospace, monospace;
-    }
-
-    .picker:focus {
-        color: var(--sidebar-accent);
-        border-color: var(--sidebar-accent);
-    }
-
-    .picker:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    .picker-group {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        min-width: 0;
-    }
-
-    .spinning {
-        animation: spin 0.8s linear infinite;
-    }
-
+    /* ===== 设置面板 ===== */
     @keyframes spin {
         to {
             transform: rotate(360deg);
@@ -2830,10 +2439,6 @@
 
         .dock {
             padding: 8px 16px 16px;
-        }
-
-        .toolbar-row {
-            padding: 8px 16px;
         }
 
         .composer-hint {

@@ -6,10 +6,19 @@
   import { goto } from '$app/navigation';
   import { invoke } from '@tauri-apps/api/core';
   import { nm, stopScan } from '$lib/nm-store.svelte';
+  import ChatToolbar from '$lib/ChatToolbar.svelte';
   let { children } = $props();
 
-  // 标题栏插槽 id，暴露给 chat 页面 portal 使用
-  const titlebarSlotId = 'titlebar-slot';
+  // 将 store 状态同步到局部 state（确保跨页面导航时响应式不丢失）
+  let titleBusy = $state(false);
+  let titleProgress = $state('');
+  let titleScanning = $state(false);
+
+  $effect(() => {
+    titleBusy = nm.scanning || nm.cleaning;
+    titleProgress = nm.progress;
+    titleScanning = nm.scanning;
+  });
 
   initTheme();
 
@@ -83,17 +92,18 @@
   <!-- 顶部标题栏（可拖拽） -->
   <header use:windowDrag class="title-bar">
     <span class="title-bar-title">星野</span>
+    <div class="titlebar-loading" class:titlebar-visible={titleBusy}>
+      <div class="titlebar-spinner" class:spinner-visible={titleBusy}></div>
+      <span class="titlebar-progress" class:progress-visible={titleBusy}>{titleProgress}</span>
+      {#if titleScanning}
+        <button class="titlebar-stop-btn" onclick={stopScan} title="停止">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+        </button>
+      {/if}
+    </div>
     <div id="titlebar-slot" class="title-bar-slot">
-      {#if nm.scanning || nm.cleaning}
-        <div class="titlebar-loading">
-          <div class="titlebar-spinner"></div>
-          <span>{nm.progress}</span>
-          {#if nm.scanning}
-            <button class="titlebar-stop-btn" onclick={stopScan} title="停止">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-            </button>
-          {/if}
-        </div>
+      {#if $page.url.pathname === '/chat'}
+        <ChatToolbar />
       {/if}
     </div>
   </header>
@@ -225,7 +235,9 @@
     background: var(--sidebar-bg);
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    padding: 0 80px 0 70px; /* 左 70px 留给 macOS 三按钮 */
+    gap: 12px;
     flex-shrink: 0;
     user-select: none;
     -webkit-user-select: none;
@@ -250,14 +262,9 @@
     min-width: 0;
   }
 
-  /* 有工具栏时隐藏标题，slot 占满整个 title bar */
-  .title-bar:has(.title-bar-slot:not(:empty)) {
-    justify-content: flex-start;
-    padding-left: 80px;
-    padding-right: 24px;
-  }
-
-  .title-bar:has(.title-bar-slot:not(:empty)) .title-bar-title {
+  /* chat 页面 portal 激活时：slot 占满整个标题栏 */
+  .title-bar:has(.title-bar-slot:not(:empty)) .title-bar-title,
+  .title-bar:has(.title-bar-slot:not(:empty)) .titlebar-loading {
     display: none;
   }
 
@@ -266,7 +273,7 @@
     justify-content: stretch;
   }
 
-  /* ===== 标题栏加载指示器 ===== */
+  /* ===== 标题栏加载指示器（常驻右侧） ===== */
   .titlebar-loading {
     display: flex;
     align-items: center;
@@ -275,8 +282,38 @@
     font-weight: 500;
     color: var(--accent);
     margin-left: auto;
-    opacity: 1;
+    opacity: 0;
     transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+
+  .titlebar-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .titlebar-spinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: conic-gradient(transparent 0deg, transparent 270deg, var(--accent) 360deg);
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .spinner-visible {
+    opacity: 1;
+    animation: titlebar-spin 0.7s linear infinite;
+  }
+
+  .titlebar-progress {
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .progress-visible {
+    opacity: 1;
   }
 
   .titlebar-stop-btn {

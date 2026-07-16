@@ -5,6 +5,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { invoke } from '@tauri-apps/api/core';
+  import { nm, stopScan } from '$lib/nm-store.svelte';
   let { children } = $props();
 
   // 标题栏插槽 id，暴露给 chat 页面 portal 使用
@@ -82,7 +83,19 @@
   <!-- 顶部标题栏（可拖拽） -->
   <header use:windowDrag class="title-bar">
     <span class="title-bar-title">星野</span>
-    <div id="titlebar-slot" class="title-bar-slot"></div>
+    <div id="titlebar-slot" class="title-bar-slot">
+      {#if nm.scanning || nm.cleaning}
+        <div class="titlebar-loading">
+          <div class="titlebar-spinner"></div>
+          <span>{nm.progress}</span>
+          {#if nm.scanning}
+            <button class="titlebar-stop-btn" onclick={stopScan} title="停止">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </div>
   </header>
 
   <div class="app-body">
@@ -251,6 +264,47 @@
   .title-bar:has(.title-bar-slot:not(:empty)) .title-bar-slot {
     display: flex;
     justify-content: stretch;
+  }
+
+  /* ===== 标题栏加载指示器 ===== */
+  .titlebar-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    margin-left: auto;
+    opacity: 1;
+    transition: opacity 0.25s ease;
+  }
+
+  .titlebar-stop-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: rgba(255,255,255,0.15);
+    border: none;
+    border-radius: 4px;
+    color: white;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+
+  .titlebar-stop-btn:hover {
+    background: rgba(255,255,255,0.3);
+  }
+
+  .titlebar-spinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: conic-gradient(transparent 0deg, transparent 270deg, var(--accent) 360deg);
+    flex-shrink: 0;
+    animation: titlebar-spin 0.7s linear infinite;
   }
 
   .sidebar {

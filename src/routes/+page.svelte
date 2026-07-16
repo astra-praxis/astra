@@ -1,6 +1,14 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import {
+    type NodeModulesInfo,
+    nm,
+    nmCache,
+    startScan,
+    cleanSingle,
+    cleanAll,
+  } from '$lib/nm-store.svelte';
 
   // ===== 类型 =====
   interface SubProject {
@@ -58,13 +66,11 @@
   let editorSetting = $state<EditorSetting>({ name: '', command: '' });
   let workspaces = $state<WorkspaceConfig[]>([]);
 
-  // ===== node_modules 管理状态 =====
-  let nodeModulesScanning = $state(false);
+  // ===== node_modules 管理状态（使用全局 store） =====
   let nodeModulesList = $state<NodeModulesInfo[]>([]);
-  let nodeModulesCleaning = $state(false);
+  let nodeModulesScannedPath = $state<string | null>(null);
   let nodeModulesError = $state('');
-  let nodeModulesScannedPath = $state<string | null>(null); // 记录已扫描的项目路径
-  let deletingPath = $state<string | null>(null); // 当前确认删除的路径
+  let deletingPath = $state<string | null>(null);
 
   // 按项目名分组统计
   let nmProjectCount = $derived(new Set(nodeModulesList.map(r => r.project_name)).size);
@@ -271,12 +277,20 @@
     document.querySelector('.content')?.scrollTo(0, 0);
     detailLoading = true;
     error = '';
+    nodeModulesError = '';
+    // 从缓存读取扫描结果
+    const cached = nmCache.get(project.path);
     try {
       const detail = await invoke<ProjectDetail>('get_project_detail', { path: project.path });
       selectedProject = detail;
-      // 如果还没有扫描过这个项目，自动扫描 node_modules
-      if (nodeModulesScannedPath !== project.path) {
-        scanNodeModules();
+      if (cached) {
+        // 有缓存：直接展示上次的扫描结果
+        nodeModulesList = cached;
+        nodeModulesScannedPath = project.path;
+      } else {
+        // 无缓存：清空，等待用户手动扫描
+        nodeModulesList = [];
+        nodeModulesScannedPath = null;
       }
     } catch (e) {
       error = `加载详情失败: ${e}`;
@@ -303,18 +317,14 @@
 
   // ===== node_modules 扫描（当前项目） =====
   async function scanNodeModules() {
-    if (!selectedProject || nodeModulesScanning) return;
-    nodeModulesScanning = true;
+    if (!selectedProject || nm.scanning) return;
     nodeModulesList = [];
     nodeModulesError = '';
-    try {
-      const result = await invoke<NodeModulesInfo[]>('scan_node_modules', { workspacePath: selectedProject.path, maxDepth: 5 });
-      nodeModulesList = result;
-      nodeModulesScannedPath = selectedProject.path; // 记录已扫描的项目
-    } catch (e) {
-      nodeModulesError = `扫描失败: ${e}`;
-    } finally {
-      nodeModulesScanning = false;
+    const result = await startScan(selectedProject.path);
+    nodeModulesList = result || [];
+    nodeModulesScannedPath = selectedProject.path;
+    if (nm.error) {
+      nodeModulesError = nm.error;
     }
   }
 
@@ -342,47 +352,31 @@
   async function doDeleteNodeModule() {
     if (!deletingPath) return;
     const path = deletingPath;
-    nodeModulesCleaning = true;
-    nodeModulesError = '';
-    try {
-      const result = await invoke<CleanResult>('clean_node_modules', { paths: [path] });
-      nodeModulesList = nodeModulesList.filter(r => !result.cleaned_paths.includes(r.path));
-      if (result.failed_paths.length > 0) {
-        nodeModulesError = `删除失败: ${result.failed_paths[0][1]}`;
-      }
-    } catch (e) {
-      nodeModulesError = `删除失败: ${e}`;
-    } finally {
-      nodeModulesCleaning = false;
-      deletingPath = null;
+    const cleaned = await cleanSingle(path);
+    nodeModulesList = nodeModulesList.filter(r => !cleaned.includes(r.path));
+    // 更新缓存
+    if (selectedProject) {
+      nmCache.set(selectedProject.path, nodeModulesList);
     }
+    if (nm.error) {
+      nodeModulesError = nm.error;
+    }
+    deletingPath = null;
   }
 
   // ===== 一键清理全部 =====
   async function cleanAllNodeModules() {
-    if (nodeModulesList.length === 0 || nodeModulesCleaning) return;
-    const nonPnpm = nodeModulesList.filter(n => !n.has_pnpm_lock);
-    if (nonPnpm.length === 0) {
-      nodeModulesError = '所有 node_modules 都使用了 pnpm，无需清理';
-      return;
+    if (nodeModulesList.length === 0 || nm.cleaning) return;
+    const cleaned = await cleanAll(nodeModulesList.map(r => r.path));
+    if (cleaned) {
+      nodeModulesList = nodeModulesList.filter(r => !cleaned.includes(r.path));
+      // 更新缓存
+      if (selectedProject) {
+        nmCache.set(selectedProject.path, nodeModulesList);
+      }
     }
-    nodeModulesCleaning = true;
-    nodeModulesError = '';
-    const pnpmSkipped = nodeModulesList.length - nonPnpm.length;
-    try {
-      const allPaths = nonPnpm.map(r => r.path);
-      const result = await invoke<CleanResult>('clean_node_modules', { paths: allPaths });
-      nodeModulesList = nodeModulesList.filter(r => !result.cleaned_paths.includes(r.path));
-      if (result.failed_paths.length > 0) {
-        nodeModulesError = `${result.failed_paths.length} 个目录删除失败`;
-      }
-      if (pnpmSkipped > 0) {
-        nodeModulesError = (nodeModulesError ? nodeModulesError + '；' : '') + `${pnpmSkipped} 个 pnpm 项目已跳过`;
-      }
-    } catch (e) {
-      nodeModulesError = `清理失败: ${e}`;
-    } finally {
-      nodeModulesCleaning = false;
+    if (nm.error) {
+      nodeModulesError = nm.error;
     }
   }
 </script>
@@ -469,8 +463,8 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
               <span>node_modules 清理</span>
             </div>
-            <button class="nm-scan-btn" onclick={scanNodeModules} disabled={nodeModulesScanning}>
-              {#if nodeModulesScanning}
+            <button class="nm-scan-btn" onclick={scanNodeModules} disabled={nm.scanning}>
+              {#if nm.scanning}
                 <div class="btn-spinner"></div>
                 扫描中...
               {:else}
@@ -480,7 +474,7 @@
             </button>
           </div>
 
-          {#if nodeModulesScannedPath === selectedProject?.path && !nodeModulesScanning}
+          {#if nodeModulesScannedPath === selectedProject?.path && !nm.scanning}
             {#if nodeModulesError}
               <div class="nm-error">{nodeModulesError}</div>
             {/if}
@@ -494,8 +488,8 @@
               <div class="nm-summary-inline">
                 <span class="nm-stat"><strong>{nmProjectCount}</strong> 个项目下共 <strong>{nodeModulesList.length}</strong> 个 node_modules</span>
                 <span class="nm-stat">总计 <strong>{formatBytes(totalNodeModulesSize)}</strong></span>
-                <button class="nm-clean-btn" onclick={cleanAllNodeModules} disabled={nodeModulesCleaning}>
-                  {#if nodeModulesCleaning}
+                <button class="nm-clean-btn" onclick={cleanAllNodeModules} disabled={nm.cleaning}>
+                  {#if nm.cleaning}
                     <div class="btn-spinner"></div>
                     清理中...
                   {:else}
@@ -507,21 +501,16 @@
 
               <div class="nm-list-inline">
                 {#each nodeModulesList as nm (nm.path)}
-                  <div class="nm-item-inline" class:nm-item-pnpm={nm.has_pnpm_lock}>
+                  <div class="nm-item-inline">
                     <div class="nm-item-inline-content">
                       <div class="nm-item-inline-path" title={nm.path}>{nm.path.replace(selectedProject.path, '.')}</div>
                       <div class="nm-item-inline-right">
                         <span class="nm-item-inline-size">{nm.size_display}</span>
-                        {#if nm.has_pnpm_lock}
-                          <span class="nm-badge-pnpm">pnpm</span>
-                        {/if}
                       </div>
                     </div>
-                    {#if !nm.has_pnpm_lock}
-                      <button class="nm-item-delete-btn" onclick={() => confirmDeleteNodeModule(nm.path)} title="删除此 node_modules">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                      </button>
-                    {/if}
+                    <button class="nm-item-delete-btn" onclick={() => confirmDeleteNodeModule(nm.path)} title="删除此 node_modules">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
                   </div>
                 {/each}
               </div>
@@ -542,9 +531,9 @@
                 <p class="nm-confirm-path">{deletingPath.replace(selectedProject?.path || '', '.')}</p>
               </div>
               <div class="modal-footer">
-                <button class="btn-cancel" onclick={cancelDeleteNodeModule} disabled={nodeModulesCleaning}>取消</button>
-                <button class="nm-confirm-delete-btn" onclick={doDeleteNodeModule} disabled={nodeModulesCleaning}>
-                  {#if nodeModulesCleaning}
+                <button class="btn-cancel" onclick={cancelDeleteNodeModule} disabled={nm.cleaning}>取消</button>
+                <button class="nm-confirm-delete-btn" onclick={doDeleteNodeModule} disabled={nm.cleaning}>
+                  {#if nm.cleaning}
                     <div class="btn-spinner"></div>
                     删除中...
                   {:else}
@@ -1869,6 +1858,7 @@
   }
 
   /* ========== node_modules 详情页内联面板 ========== */
+
   .detail-nm {
     margin-top: 20px;
     margin-bottom: 24px;
@@ -2006,20 +1996,6 @@
     gap: 8px;
     flex-shrink: 0;
     margin-left: 12px;
-  }
-
-  .nm-badge-pnpm {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: rgba(96, 165, 250, 0.15);
-    color: #60a5fa;
-    letter-spacing: 0.3px;
-  }
-
-  .nm-item-pnpm {
-    opacity: 0.65;
   }
 
   .nm-item-inline-path {

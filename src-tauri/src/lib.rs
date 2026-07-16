@@ -132,79 +132,79 @@ fn get_settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Strin
 // ===== 命令：扫描工作空间 =====
 
 #[tauri::command]
-fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, String> {
-    let dir = Path::new(&path);
+async fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, String> {
+    tokio::task::spawn_blocking(move || {
+        let dir = Path::new(&path);
 
-    if !dir.is_dir() {
-        return Err(format!("路径不是有效的目录: {}", path));
-    }
-
-    let entries = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
-
-    let mut projects = Vec::new();
-
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
-        let entry_path = entry.path();
-
-        if !entry_path.is_dir() {
-            continue;
+        if !dir.is_dir() {
+            return Err(format!("路径不是有效的目录: {}", path));
         }
 
-        // 跳过隐藏目录（以 . 开头）
-        let folder_name = entry_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+        let entries = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
 
-        if folder_name.starts_with('.') {
-            continue;
+        let mut projects = Vec::new();
+
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
+            let entry_path = entry.path();
+
+            if !entry_path.is_dir() {
+                continue;
+            }
+
+            // 跳过隐藏目录（以 . 开头）
+            let folder_name = entry_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+
+            if folder_name.starts_with('.') {
+                continue;
+            }
+
+            // 检查 README.md
+            let readme_path = entry_path.join("README.md");
+            let has_readme = readme_path.exists();
+
+            let project_name = if has_readme {
+                match fs::read_to_string(&readme_path) {
+                    Ok(content) => content
+                        .lines()
+                        .next()
+                        .unwrap_or(&folder_name)
+                        .trim()
+                        .trim_start_matches("# ")
+                        .trim()
+                        .to_string(),
+                    Err(_) => folder_name.clone(),
+                }
+            } else {
+                let readme_content =
+                    format!("# {}\n\nThis is the {} project.", folder_name, folder_name);
+                if let Err(e) = fs::write(&readme_path, &readme_content) {
+                    eprintln!("创建 README.md 失败: {}", e);
+                }
+                folder_name.clone()
+            };
+
+            let size_bytes = get_project_size(&entry_path);
+
+            projects.push(ProjectCard {
+                name: project_name,
+                path: entry_path.to_string_lossy().to_string(),
+                has_readme,
+                sub_projects: scan_sub_projects(&entry_path),
+                size_bytes,
+                size_display: format_file_size(size_bytes),
+            });
         }
 
-        // 检查 README.md
-        let readme_path = entry_path.join("README.md");
-        let has_readme = readme_path.exists();
-
-        let project_name = if has_readme {
-            // 读取 README.md 的第一行作为项目名称
-            match fs::read_to_string(&readme_path) {
-                Ok(content) => content
-                    .lines()
-                    .next()
-                    .unwrap_or(&folder_name)
-                    .trim()
-                    .trim_start_matches("# ")
-                    .trim()
-                    .to_string(),
-                Err(_) => folder_name.clone(),
-            }
-        } else {
-            // 如果没有 README.md，自动生成一个
-            let readme_content =
-                format!("# {}\n\nThis is the {} project.", folder_name, folder_name);
-            if let Err(e) = fs::write(&readme_path, &readme_content) {
-                eprintln!("创建 README.md 失败: {}", e);
-            }
-            folder_name.clone()
-        };
-
-        let size_bytes = get_project_size(&entry_path);
-
-        projects.push(ProjectCard {
-            name: project_name,
-            path: entry_path.to_string_lossy().to_string(),
-            has_readme,
-            sub_projects: scan_sub_projects(&entry_path),
-            size_bytes,
-            size_display: format_file_size(size_bytes),
-        });
-    }
-
-    // 按名称排序
-    projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    Ok(projects)
+        projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(projects)
+    })
+    .await
+    .map_err(|e| format!("扫描工作空间失败: {}", e))?
 }
 
 // ===== 扫描项目子目录 =====
@@ -1160,49 +1160,75 @@ fn get_dir_size(path: &std::path::Path) -> u64 {
     total_size
 }
 
-/// 计算项目源码大小（跳过 node_modules、.git、target 等非源码目录）
+/// 快速计算项目源码大小（只算前两层目录 + 常见源码目录递归）
 fn get_project_size(path: &std::path::Path) -> u64 {
-    use std::fs;
+    fn scan_dir(path: &std::path::Path, depth: usize, max_depth: usize) -> u64 {
+        use std::fs;
 
-    let skip_dirs: [&str; 10] = [
-        "node_modules",
-        ".git",
-        ".svn",
-        "target",
-        "dist",
-        "build",
-        ".next",
-        ".nuxt",
-        ".output",
-        ".cache",
-    ];
+        let skip_dirs: [&str; 13] = [
+            "node_modules",
+            ".git",
+            ".svn",
+            "target",
+            "dist",
+            "build",
+            ".next",
+            ".nuxt",
+            ".output",
+            ".cache",
+            ".idea",
+            ".vscode",
+            "__pycache__",
+        ];
 
-    let mut total_size: u64 = 0;
+        let source_dirs: [&str; 6] = ["src", "lib", "src-tauri", "app", "components", "pages"];
 
-    if path.is_dir() {
+        if depth > max_depth {
+            return 0;
+        }
+
+        if !path.is_dir() {
+            return if path.is_file() {
+                path.metadata().map(|m| m.len()).unwrap_or(0)
+            } else {
+                0
+            };
+        }
+
+        let mut total: u64 = 0;
         if let Ok(entries) = fs::read_dir(path) {
             for entry in entries.flatten() {
                 let entry_path = entry.path();
                 let file_name = entry_path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .unwrap_or("");
+                    .unwrap_or("")
+                    .to_string();
 
                 if entry_path.is_dir() {
-                    // 跳过已知的非源码目录
-                    if !skip_dirs.contains(&file_name) && !file_name.starts_with('.') {
-                        total_size += get_project_size(&entry_path);
+                    if depth == 0 {
+                        if !skip_dirs.contains(&file_name.as_str()) {
+                            total += scan_dir(&entry_path, depth + 1, 2);
+                        }
+                    } else if depth == 1 {
+                        if source_dirs.contains(&file_name.as_str()) || !file_name.starts_with('.')
+                        {
+                            total += scan_dir(&entry_path, depth + 1, max_depth);
+                        }
+                    } else {
+                        total += scan_dir(&entry_path, depth + 1, max_depth);
                     }
                 } else if entry_path.is_file() {
                     if let Ok(metadata) = entry.metadata() {
-                        total_size += metadata.len();
+                        total += metadata.len();
                     }
                 }
             }
         }
+        total
     }
 
-    total_size
+    scan_dir(path, 0, 3)
 }
 
 #[derive(Debug, serde::Serialize)]

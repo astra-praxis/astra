@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 // ===== 类型 =====
 export interface NodeModulesInfo {
   path: string;
+  project_path: string;
   size_bytes: number;
   size_display: string;
   project_name: string;
@@ -51,7 +52,7 @@ export async function startScan(workspacePath: string) {
   try {
     const result = await invoke<NodeModulesInfo[]>('scan_node_modules', {
       workspacePath,
-      maxDepth: 5,
+      maxDepth: 15,
     });
     if (nm.cancelled) {
       // 用户已取消，丢弃结果

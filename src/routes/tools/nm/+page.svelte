@@ -18,6 +18,7 @@
 
   interface NodeModulesInfo {
     path: string;
+    project_path: string;
     size_bytes: number;
     size_display: string;
     project_name: string;
@@ -40,6 +41,10 @@
   let nmScanning = $state(false);
   let nmList = $state<NodeModulesInfo[]>([]);
   let nmScanned = $state(false);
+
+  // 编辑器
+  let editorCommand = $state('');
+  let editorName = $state('');
 
   // 清理状态
   let nmCleaning = $state(false);
@@ -74,6 +79,8 @@
     try {
       const settings = await invoke<AppSettings>('get_settings');
       activeWorkspace = settings.active_workspace;
+      editorCommand = settings.editor.command;
+      editorName = settings.editor.name;
     } catch (e) {
       console.error('加载设置失败:', e);
     } finally {
@@ -92,7 +99,7 @@
     nmCleanStopped = false;
     nmDone = false;
     try {
-      const result = await invoke<NodeModulesInfo[]>('scan_node_modules', { workspacePath: activeWorkspace, maxDepth: 5 });
+      const result = await invoke<NodeModulesInfo[]>('scan_node_modules', { workspacePath: activeWorkspace, maxDepth: 15 });
       nmList = result;
       nmScanned = true;
     } catch (e) {
@@ -161,6 +168,16 @@
 
   function stopCleaning() {
     nmCleanStopped = true;
+  }
+
+  // ===== 用编辑器打开所在项目目录 =====
+  async function openInEditor(path: string) {
+    if (!editorCommand) return;
+    try {
+      await invoke('open_in_editor', { path, editorCommand });
+    } catch (e) {
+      console.error('打开编辑器失败:', e);
+    }
   }
 </script>
 
@@ -286,10 +303,16 @@
         {#each nmList as nm (nm.path)}
           {@const cleaned = nmCleanLogs.find(l => l.path === nm.path && l.success)}
           <div class="nm-item" class:nm-item-cleaned={!!cleaned} class:nm-item-pnpm={nm.has_pnpm_lock}>
-            <div class="nm-item-left">
-              <span class="nm-item-project">{nm.project_name}</span>
-              <span class="nm-item-sep">/</span>
-              <span class="nm-item-folder">node_modules</span>
+            <div class="nm-item-left" title={nm.path}>
+              <span class="nm-item-path">{nm.path}</span>
+              <button
+                class="nm-item-open-btn"
+                onclick={() => openInEditor(nm.project_path)}
+                title={`在 ${editorName || '编辑器'} 中打开 ${nm.project_name}`}
+                aria-label={`在 ${editorName || '编辑器'} 中打开 ${nm.project_name}`}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </button>
             </div>
             <div class="nm-item-right">
               <span class="nm-item-size">{nm.size_display}</span>
@@ -614,24 +637,44 @@
   .nm-item-left {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .nm-item-path {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-family: var(--font-mono, 'SF Mono', Menlo, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     min-width: 0;
   }
 
-  .nm-item-project {
-    color: var(--text-primary);
-    font-weight: 500;
-    font-size: 14px;
-  }
-
-  .nm-item-sep {
+  .nm-item-open-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
     color: var(--text-muted);
-    font-size: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
   }
 
-  .nm-item-folder {
-    color: var(--accent);
-    font-size: 14px;
+  .nm-item:hover .nm-item-open-btn {
+    opacity: 1;
+  }
+
+  .nm-item-open-btn:hover {
+    background: var(--accent);
+    color: white;
   }
 
   .nm-item-right {

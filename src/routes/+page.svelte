@@ -41,6 +41,7 @@
 
   interface NodeModulesInfo {
     path: string;
+    project_path: string;
     size_bytes: number;
     size_display: string;
     project_name: string;
@@ -501,8 +502,16 @@
                 {#each nodeModulesList as nm (nm.path)}
                   <div class="nm-item-inline">
                     <div class="nm-item-inline-content">
-                      <div class="nm-item-inline-path" title={nm.path}>{nm.path.replace(selectedProject.path, '.')}</div>
+                      <div class="nm-item-inline-path" title={nm.path}>{nm.path}</div>
                       <div class="nm-item-inline-right">
+                        <button
+                          class="nm-item-inline-open-btn"
+                          onclick={() => openEditorForPath(nm.project_path)}
+                          title={`在 ${editorSetting.name || '编辑器'} 中打开`}
+                          aria-label="在编辑器中打开"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </button>
                         <span class="nm-item-inline-size">{nm.size_display}</span>
                       </div>
                     </div>
@@ -1979,9 +1988,36 @@
   .nm-item-inline-path {
     font-size: 13px;
     color: var(--text-secondary);
+    font-family: var(--font-mono, 'SF Mono', Menlo, monospace);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .nm-item-inline-open-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
+  }
+
+  .nm-item-inline:hover .nm-item-inline-open-btn {
+    opacity: 1;
+  }
+
+  .nm-item-inline-open-btn:hover {
+    background: var(--accent);
+    color: white;
   }
 
   .nm-item-inline-size {

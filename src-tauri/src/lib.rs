@@ -1038,6 +1038,7 @@ fn get_preset_editors() -> Vec<EditorSetting> {
 #[derive(Debug, Clone, serde::Serialize)]
 struct NodeModulesInfo {
     path: String,
+    project_path: String,
     size_bytes: u64,
     size_display: String,
     project_name: String,
@@ -1053,7 +1054,7 @@ async fn scan_node_modules(
         use std::fs;
         use std::path::Path;
 
-        let max_depth = max_depth.unwrap_or(5);
+        let max_depth = max_depth.unwrap_or(15);
         let mut results: Vec<NodeModulesInfo> = Vec::new();
 
         fn scan_dir(
@@ -1094,8 +1095,13 @@ async fn scan_node_modules(
                             .map(|p| p.join("pnpm-lock.yaml").exists())
                             .unwrap_or(false);
 
+                        let project_path = parent_path
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+
                         results.push(NodeModulesInfo {
                             path: entry_path.to_string_lossy().to_string(),
+                            project_path,
                             size_bytes: size,
                             size_display: format_file_size(size),
                             project_name,

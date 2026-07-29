@@ -17,12 +17,16 @@ use uuid::Uuid;
 /// 卡片子目录信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DevCardInfo {
-    /// 卡片目录名
-    pub name: String,
+    /// 显示名称（优先取 README.md 首行标题，否则同 folder_name）
+    pub display_name: String,
+    /// 文件夹名称
+    pub folder_name: String,
     /// 卡片完整路径
     pub path: String,
     /// 前端子目录列表（可直接执行 pnpm dev 的目录）
     pub sub_dirs: Vec<DevSubDir>,
+    /// 卡片类别: template / main / card
+    pub category: String,
 }
 
 /// 卡片的前端子目录
@@ -106,10 +110,12 @@ fn build_full_path() -> String {
 // ===== 命令 =====
 
 /// 扫描项目目录下的所有卡片子目录
-/// 支持三种目录结构:
-/// 1. cus-card-* / cus-comp-card-* 类: web/mobile/component-web 在 src/main/ 下
-/// 2. casp-portal-webapps: 主项目，src/main/ 下有 master/ 和 sys-template-universal/ 等子项目
-/// 3. casp-common-components: 无前端项目，跳过
+///
+/// 目录结构:
+/// 1. casp-portal-webapps: 主项目，只保留 master 子目录
+/// 2. cus-card-* / cus-comp-card-*: web/mobile/component-web 在 src/main/ 下
+/// 3. cus-template-*: 模板卡片
+/// 4. casp-common-components / casp-portal-core: 跳过
 #[tauri::command]
 pub fn scan_dev_dirs(project_path: String) -> Result<Vec<DevCardInfo>, String> {
     let dir = Path::new(&project_path);
@@ -117,7 +123,9 @@ pub fn scan_dev_dirs(project_path: String) -> Result<Vec<DevCardInfo>, String> {
         return Err("项目目录不存在".to_string());
     }
 
-    let mut cards: Vec<DevCardInfo> = Vec::new();
+    let mut main_cards: Vec<DevCardInfo> = Vec::new();
+    let mut template_cards: Vec<DevCardInfo> = Vec::new();
+    let mut regular_cards: Vec<DevCardInfo> = Vec::new();
 
     let entries = std::fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
 
@@ -133,12 +141,11 @@ pub fn scan_dev_dirs(project_path: String) -> Result<Vec<DevCardInfo>, String> {
             .to_string_lossy()
             .to_string();
 
-        // 跳过隐藏目录
         if folder_name.starts_with('.') {
             continue;
         }
 
-        // 跳过非前端项目的目录
+        // 跳过非前端目录
         if folder_name == "target"
             || folder_name == "casp-common-components"
             || folder_name == "casp-portal-core"
@@ -147,134 +154,122 @@ pub fn scan_dev_dirs(project_path: String) -> Result<Vec<DevCardInfo>, String> {
             continue;
         }
 
-        let mut sub_dirs: Vec<DevSubDir> = Vec::new();
-
+        // casp-portal-webapps: 主项目，只保留 master
         if folder_name == "casp-portal-webapps" {
-            // 主项目: 扫描 src/main/ 下的子项目
-            sub_dirs = scan_webapps_subdirs(&entry_path);
-        } else {
-            // 卡片类: 检测 src/main/ 下的 web / mobile / component-web
-            let src_main = entry_path.join("src/main");
-
-            let web_path = src_main.join("web");
-            if web_path.is_dir() {
-                let has_pkg = web_path.join("package.json").exists();
-                sub_dirs.push(DevSubDir {
-                    label: "Web".to_string(),
-                    key: "web".to_string(),
-                    work_dir: web_path.to_string_lossy().to_string(),
-                    has_package_json: has_pkg,
+            let master_dir = entry_path.join("src/main/master");
+            if master_dir.is_dir() && master_dir.join("package.json").exists() {
+                main_cards.push(DevCardInfo {
+                    display_name: "Portal 主站点".to_string(),
+                    folder_name: "casp-portal-webapps/master".to_string(),
+                    path: master_dir.to_string_lossy().to_string(),
+                    sub_dirs: vec![DevSubDir {
+                        label: "Master".to_string(),
+                        key: "master".to_string(),
+                        work_dir: master_dir.to_string_lossy().to_string(),
+                        has_package_json: true,
+                    }],
+                    category: "main".to_string(),
                 });
             }
-
-            let mobile_path = src_main.join("mobile");
-            if mobile_path.is_dir() {
-                let has_pkg = mobile_path.join("package.json").exists();
-                sub_dirs.push(DevSubDir {
-                    label: "Mobile".to_string(),
-                    key: "mobile".to_string(),
-                    work_dir: mobile_path.to_string_lossy().to_string(),
-                    has_package_json: has_pkg,
-                });
-            }
-
-            let component_web_path = src_main.join("component-web");
-            if component_web_path.is_dir() {
-                let has_pkg = component_web_path.join("package.json").exists();
-                sub_dirs.push(DevSubDir {
-                    label: "Component".to_string(),
-                    key: "component-web".to_string(),
-                    work_dir: component_web_path.to_string_lossy().to_string(),
-                    has_package_json: has_pkg,
-                });
-            }
+            continue;
         }
 
-        // 至少有一个前端子目录才算卡片
+        // 普通卡片目录: 检测 src/main/ 下的 web / mobile / component-web
+        let sub_dirs = scan_card_subdirs(&entry_path, &folder_name);
         if !sub_dirs.is_empty() {
-            cards.push(DevCardInfo {
-                name: folder_name,
+            let display_name = read_readme_title(&entry_path, &folder_name);
+            let category = if folder_name.contains("template") {
+                "template"
+            } else {
+                "card"
+            };
+            let card = DevCardInfo {
+                display_name,
+                folder_name,
                 path: entry_path.to_string_lossy().to_string(),
                 sub_dirs,
-            });
+                category: category.to_string(),
+            };
+            if category == "template" {
+                template_cards.push(card);
+            } else {
+                regular_cards.push(card);
+            }
         }
     }
 
-    // 按名称排序，casp-portal-webapps 排在最前面
-    cards.sort_by(|a, b| {
-        if a.name == "casp-portal-webapps" {
-            std::cmp::Ordering::Less
-        } else if b.name == "casp-portal-webapps" {
-            std::cmp::Ordering::Greater
-        } else {
-            a.name.cmp(&b.name)
-        }
-    });
+    // 排序: 主项目 → 模板 → 常规卡片
+    template_cards.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+    regular_cards.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+    let mut cards = main_cards;
+    cards.append(&mut template_cards);
+    cards.append(&mut regular_cards);
 
     Ok(cards)
 }
 
-/// 检测是否为日期目录（如 20260717、20260728）
+/// 检测是否为日期目录（如 20260717）
 fn is_date_folder(name: &str) -> bool {
     name.len() == 8 && name.chars().all(|c| c.is_ascii_digit())
 }
 
-/// 扫描 casp-portal-webapps 的子项目
-/// 结构: src/main/{master, sys-template-universal/{web,mobile}, ...}
-fn scan_webapps_subdirs(webapps_path: &Path) -> Vec<DevSubDir> {
-    let src_main = webapps_path.join("src/main");
-    if !src_main.is_dir() {
-        return Vec::new();
-    }
-
-    let mut sub_dirs: Vec<DevSubDir> = Vec::new();
-    let entries = match std::fs::read_dir(&src_main) {
-        Ok(e) => e,
-        Err(_) => return sub_dirs,
-    };
-
-    for entry in entries.flatten() {
-        let entry_path = entry.path();
-        if !entry_path.is_dir() {
-            continue;
-        }
-
-        let name = match entry_path.file_name() {
-            Some(n) => n.to_string_lossy().to_string(),
-            None => continue,
-        };
-
-        // 跳过 java / resources 等非前端目录
-        if name.starts_with('.') || name == "java" || name == "resources" {
-            continue;
-        }
-
-        // 模式1: 直接有 package.json（如 master/）
-        if entry_path.join("package.json").exists() {
-            sub_dirs.push(DevSubDir {
-                label: name.clone(),
-                key: name.clone(),
-                work_dir: entry_path.to_string_lossy().to_string(),
-                has_package_json: true,
-            });
-            continue;
-        }
-
-        // 模式2: 包含 web/mobile 子目录（如 sys-template-universal/）
-        for subdir_name in &["web", "mobile"] {
-            let subdir_path = entry_path.join(subdir_name);
-            if subdir_path.is_dir() && subdir_path.join("package.json").exists() {
-                sub_dirs.push(DevSubDir {
-                    label: format!("{} · {}", name, subdir_name),
-                    key: format!("{}-{}", name, subdir_name),
-                    work_dir: subdir_path.to_string_lossy().to_string(),
-                    has_package_json: true,
-                });
+/// 读取目录下 README.md 的首行标题作为显示名
+/// 如果没有 README 或首行为空，返回 fallback
+fn read_readme_title(dir: &Path, fallback: &str) -> String {
+    let readme = dir.join("README.md");
+    if let Ok(content) = std::fs::read_to_string(&readme) {
+        if let Some(first_line) = content.lines().next() {
+            let title = first_line.trim().trim_start_matches('#').trim();
+            if !title.is_empty() {
+                return title.to_string();
             }
         }
     }
+    fallback.to_string()
+}
+
+/// 扫描卡片目录下的前端子目录
+/// 检测 src/main/ 下的 web / mobile / component-web
+/// 对于 webapps 下的模板目录，检测根级 web / mobile
+fn scan_card_subdirs(card_path: &Path, _folder_name: &str) -> Vec<DevSubDir> {
+    let mut sub_dirs: Vec<DevSubDir> = Vec::new();
+
+    // 标准卡片: src/main/ 下的 web / mobile / component-web
+    let src_main = card_path.join("src/main");
+    if src_main.is_dir() {
+        check_subdir(&mut sub_dirs, &src_main.join("web"), "Web", "web");
+        check_subdir(&mut sub_dirs, &src_main.join("mobile"), "Mobile", "mobile");
+        check_subdir(
+            &mut sub_dirs,
+            &src_main.join("component-web"),
+            "Component",
+            "component-web",
+        );
+    }
+
+    // 如果 src/main 下没找到，检测根级 web / mobile（模板项目可能如此）
+    if sub_dirs.is_empty() {
+        check_subdir(&mut sub_dirs, &card_path.join("web"), "Web", "web");
+        check_subdir(&mut sub_dirs, &card_path.join("mobile"), "Mobile", "mobile");
+    }
 
     sub_dirs
+}
+
+/// 辅助: 检查单个子目录是否存在，存在则加入列表
+fn check_subdir(sub_dirs: &mut Vec<DevSubDir>, dir: &Path, label: &str, key: &str) {
+    if dir.is_dir() {
+        let has_pkg = dir.join("package.json").exists();
+        if has_pkg {
+            sub_dirs.push(DevSubDir {
+                label: label.to_string(),
+                key: key.to_string(),
+                work_dir: dir.to_string_lossy().to_string(),
+                has_package_json: true,
+            });
+        }
+    }
 }
 
 /// 在指定工作目录下执行命令（pnpm install / pnpm dev）

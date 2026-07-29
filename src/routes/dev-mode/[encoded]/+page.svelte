@@ -12,9 +12,11 @@
   }
 
   interface DevCardInfo {
-    name: string;
+    display_name: string;
+    folder_name: string;
     path: string;
     sub_dirs: DevSubDir[];
+    category: string; // template / main / card
   }
 
   interface DevServerInfo {
@@ -100,7 +102,7 @@
       if (card && event.payload.command === 'install') {
         const subDir = card.sub_dirs.find(sd => sd.work_dir === event.payload.work_dir);
         if (subDir) {
-          const installKey = `${card.name}:${subDir.key}`;
+          const installKey = `${card.folder_name}:${subDir.key}`;
           installing = { ...installing, [installKey]: false };
         }
       }
@@ -135,25 +137,25 @@
   }
 
   function isRunning(card: DevCardInfo, subDir: DevSubDir): boolean {
-    return activeKeys.has(`${card.name}:${subDir.key}`);
+    return activeKeys.has(`${card.folder_name}:${subDir.key}`);
   }
 
   function serverIdFor(card: DevCardInfo, subDir: DevSubDir): string | undefined {
-    return Object.values(runningServers).find(s => s.card_name === card.name && s.subdir === subDir.key)?.id;
+    return Object.values(runningServers).find(s => s.card_name === card.folder_name && s.subdir === subDir.key)?.id;
   }
 
   async function startDev(card: DevCardInfo, subDir: DevSubDir) {
     try {
       const id = await invoke<string>('start_dev_server', {
         workDir: subDir.work_dir,
-        cardName: card.name,
+        cardName: card.folder_name,
         subdirKey: subDir.key,
       });
       runningServers = {
         ...runningServers,
         [id]: {
           id,
-          card_name: card.name,
+          card_name: card.folder_name,
           subdir: subDir.key,
           work_dir: subDir.work_dir,
           command: 'pnpm dev',
@@ -179,7 +181,7 @@
   }
 
   async function runInstall(card: DevCardInfo, subDir: DevSubDir) {
-    const installKey = `${card.name}:${subDir.key}`;
+    const installKey = `${card.folder_name}:${subDir.key}`;
     installing = { ...installing, [installKey]: true };
     const cmdKey = `${subDir.work_dir}:install`;
     cmdLogs[cmdKey] = [];
@@ -238,9 +240,12 @@
         <div class="card-item">
           <div class="card-item-header">
             <div class="card-item-name">
-              {card.name}
-              {#if card.name === 'casp-portal-webapps'}
-                <span class="card-badge-main">主项目</span>
+              <span class="card-title-text">{card.display_name}</span>
+              <span class="card-folder-name">{card.folder_name}</span>
+              {#if card.category === 'main'}
+                <span class="card-badge cat-main">主项目</span>
+              {:else if card.category === 'template'}
+                <span class="card-badge cat-template">模板</span>
               {/if}
             </div>
             <div class="card-item-dirs">{subDirTags(card)}</div>
@@ -264,8 +269,8 @@
                     </button>
                   {/if}
                   {#if subDir.has_package_json}
-                    <button class="btn-install" onclick={() => runInstall(card, subDir)} disabled={installing[`${card.name}:${subDir.key}`]}>
-                      {installing[`${card.name}:${subDir.key}`] ? '安装中...' : 'pnpm install'}
+                    <button class="btn-install" onclick={() => runInstall(card, subDir)} disabled={installing[`${card.folder_name}:${subDir.key}`]}>
+                      {installing[`${card.folder_name}:${subDir.key}`] ? '安装中...' : 'pnpm install'}
                     </button>
                   {/if}
                 </div>
@@ -302,7 +307,7 @@
           {#each card.sub_dirs as subDir (subDir.key)}
             {#if cmdLogs[`${subDir.work_dir}:install`]?.length > 0}
               {@const logs = cmdLogs[`${subDir.work_dir}:install`]}
-              {@const isInstalling = installing[`${card.name}:${subDir.key}`]}
+              {@const isInstalling = installing[`${card.folder_name}:${subDir.key}`]}
               <div class="server-log">
                 <div class="server-log-header">
                   <span class="server-log-status" class:installing={isInstalling} class:completed={!isInstalling}></span>
@@ -457,22 +462,43 @@
     font-size: 15px;
     font-weight: 600;
     color: var(--text-primary);
-    font-family: 'SF Mono', 'Cascadia Code', monospace;
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
-  .card-badge-main {
+  .card-title-text {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .card-folder-name {
+    font-size: 11px;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .card-badge {
     font-size: 10px;
     padding: 2px 8px;
     border-radius: 4px;
-    background: var(--accent-bg);
-    color: var(--accent);
-    border: 1px solid var(--accent-ring);
     font-weight: 600;
     font-family: -apple-system, sans-serif;
     white-space: nowrap;
+  }
+
+  .card-badge.cat-main {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent-ring);
+  }
+
+  .card-badge.cat-template {
+    background: var(--success-bg);
+    color: var(--success-text);
+    border: 1px solid var(--success-text);
   }
 
   .card-item-dirs {

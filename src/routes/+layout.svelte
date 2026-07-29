@@ -27,7 +27,8 @@
   const menuItems = [
     { id: 'workspace', label: '工作空间', path: '/', icon: '📁' },
     { id: 'chat', label: '对话', path: '/chat', icon: '💬' },
-    { id: 'tools', label: '工具箱', path: '/tools', icon: '🧰' }
+    { id: 'tools', label: '工具箱', path: '/tools', icon: '🧰' },
+    { id: 'logs', label: '日志', path: '/logs', icon: '📋' }
   ];
 
   let sidebarOpen = $state(false);

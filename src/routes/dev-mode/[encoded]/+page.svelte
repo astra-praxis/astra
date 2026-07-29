@@ -3,6 +3,7 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
+  import { logs } from '$lib/logs-store.svelte';
 
   interface DevSubDir {
     label: string;

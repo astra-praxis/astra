@@ -16,7 +16,7 @@
     folder_name: string;
     path: string;
     sub_dirs: DevSubDir[];
-    category: string; // template / main / card
+    category: string;
   }
 
   interface DevServerInfo {
@@ -38,32 +38,23 @@
   let loading = $state(true);
   let error = $state('');
   let refreshing = $state(false);
-
-  // 当前选中的卡片（folder_name）
   let selectedFolder = $state<string | null>(null);
 
   let runningServers = $state<Record<string, DevServerInfo>>({});
   let activeKeys = $derived(new Set(
-    Object.values(runningServers)
-      .filter(s => s.status === 'running')
-      .map(s => `${s.card_name}:${s.subdir}`)
+    Object.values(runningServers).filter(s => s.status === 'running').map(s => `${s.card_name}:${s.subdir}`)
   ));
-
   let logsMap = $state<Record<string, { stream: string; line: string }[]>>({});
   let installing = $state<Record<string, boolean>>({});
   let cmdLogs = $state<Record<string, string[]>>({});
   let unlisteners: UnlistenFn[] = [];
 
-  // 分类
   let mainCards = $derived(cards.filter(c => c.category === 'main'));
   let templateCards = $derived(cards.filter(c => c.category === 'template'));
   let cardList = $derived(cards.filter(c => c.category === 'card'));
 
-  // 运行中列表
   let runningList = $derived(
-    Object.values(runningServers)
-      .filter(s => s.status === 'running')
-      .sort((a, b) => a.started_at - b.started_at)
+    Object.values(runningServers).filter(s => s.status === 'running').sort((a, b) => a.started_at - b.started_at)
   );
   let runningBase = $derived(runningList.filter(s => {
     const c = cards.find(c => c.folder_name === s.card_name);
@@ -74,7 +65,6 @@
     return !c || c.category === 'card';
   }));
 
-  // 选中的卡片（派生）
   let selectedCard = $derived(cards.find(c => c.folder_name === selectedFolder) ?? null);
 
   onMount(() => {
@@ -104,10 +94,8 @@
     });
     unlisteners.push(uncdone);
 
-    const unst = await listen<{ server_id: string; exit_code?: number; success?: boolean }>('dev-server-stopped', (e) => {
-      const ns = { ...runningServers };
-      delete ns[e.payload.server_id];
-      runningServers = ns;
+    const unst = await listen<{ server_id: string }>('dev-server-stopped', (e) => {
+      const ns = { ...runningServers }; delete ns[e.payload.server_id]; runningServers = ns;
       delete logsMap[e.payload.server_id];
     });
     unlisteners.push(unst);
@@ -118,7 +106,6 @@
       const sMap: Record<string, DevServerInfo> = {};
       for (const s of servers) sMap[s.id] = s;
       runningServers = sMap;
-      // 默认选中第一个卡片
       if (cardList.length > 0) selectedFolder = cardList[0].folder_name;
     } catch (e) {
       error = `加载失败: ${e}`;
@@ -165,11 +152,6 @@
     } catch (e) { error = `安装失败: ${e}`; }
   }
 
-  function clearInstall(card: DevCardInfo, subDir: DevSubDir) {
-    installing = { ...installing, [`${card.folder_name}:${subDir.key}`]: false };
-  }
-
-  // 切换卡片：停止所有运行中的卡片服务，启动新的
   let switching = $state(false);
   async function quickSwitch(card: DevCardInfo, subDir: DevSubDir) {
     if (isRunning(card, subDir)) return;
@@ -196,14 +178,21 @@
   }
   function serverSubDirLabel(server: DevServerInfo): string {
     const c = serverCard(server);
-    const sd = c?.sub_dirs.find(s => s.key === server.subdir);
-    return sd?.label ?? server.subdir;
+    return c?.sub_dirs.find(s => s.key === server.subdir)?.label ?? server.subdir;
   }
   function formatTime(ts: number): string {
     const d = new Date(ts * 1000);
     return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
   }
   function serverLogs(id: string) { return logsMap[id] || []; }
+
+  // 停止所有卡片服务
+  async function stopAllCards() {
+    for (const s of runningCards) {
+      await invoke<boolean>('stop_dev_server', { serverId: s.id });
+      const ns = { ...runningServers }; delete ns[s.id]; runningServers = ns;
+    }
+  }
 </script>
 
 <div class="dev-mode-page">
@@ -227,149 +216,243 @@
     </button>
   </div>
 
+  {#if error}
+    <div class="dev-error">{error} <button class="error-dismiss" onclick={() => error = ''}>✕</button></div>
+  {/if}
+
   {#if loading}
     <div class="dev-loading"><div class="spinner"></div><span>正在扫描卡片目录...</span></div>
-  {:else if error}
-    <div class="dev-error">{error} <button class="error-dismiss" onclick={() => error = ''}>✕</button></div>
   {:else}
-    <!-- 标签选择区 -->
-    <div class="tag-section">
-      {#if mainCards.length > 0 || templateCards.length > 0}
-        <div class="tag-group">
-          <span class="tag-group-label">基础</span>
-          <div class="tag-items">
-            {#each mainCards as card (card.folder_name)}
-              <button class="tag" class:tag-active={selectedFolder === card.folder_name} class:tag-running={cardHasRunning(card)} onclick={() => selectedFolder = card.folder_name}>
-                {#if cardHasRunning(card)}<span class="tag-dot"></span>{/if}
-                {card.display_name}
-              </button>
-            {/each}
-            {#each templateCards as card (card.folder_name)}
-              <button class="tag" class:tag-active={selectedFolder === card.folder_name} class:tag-running={cardHasRunning(card)} onclick={() => selectedFolder = card.folder_name}>
-                {#if cardHasRunning(card)}<span class="tag-dot"></span>{/if}
-                {card.display_name}
-              </button>
-            {/each}
-          </div>
+    <!-- 两栏布局 -->
+    <div class="two-col">
+      <!-- 左栏：基础服务 -->
+      <div class="col-left">
+        <div class="col-header">
+          <span class="col-title">基础服务</span>
+          <span class="col-hint">主站点 + 模板</span>
         </div>
-      {/if}
-      <div class="tag-group">
-        <span class="tag-group-label">卡片</span>
-        <div class="tag-items">
-          {#each cardList as card (card.folder_name)}
-            <button class="tag" class:tag-active={selectedFolder === card.folder_name} class:tag-running={cardHasRunning(card)} onclick={() => selectedFolder = card.folder_name}>
-              {#if cardHasRunning(card)}<span class="tag-dot"></span>{/if}
-              {card.display_name}
-            </button>
-          {/each}
-        </div>
-      </div>
-    </div>
 
-    <!-- 选中卡片操作面板 -->
-    {#if selectedCard}
-      <div class="control-panel">
-        <div class="control-panel-header">
-          <div class="control-panel-title">
-            <span class="cp-name">{selectedCard.display_name}</span>
-            <span class="cp-folder">{selectedCard.folder_name}</span>
-          </div>
-        </div>
-        <div class="control-panel-actions">
-          {#each selectedCard.sub_dirs as subDir (subDir.key)}
-            {#if subDir.has_package_json}
-              <div class="cp-subdir">
-                <span class="cp-subdir-label">{subDir.label}</span>
-                <span class="cp-subdir-path" title={subDir.work_dir}>{subDir.work_dir.split('/').slice(-3).join('/')}</span>
-                <div class="cp-subdir-btns">
-                  {#if isRunning(selectedCard, subDir)}
-                    <button class="btn-action btn-stop" onclick={() => { const id = serverIdFor(selectedCard, subDir); if (id) stopDev(id); }}>停止</button>
-                  {:else}
-                    {#if selectedCard.category === 'card'}
-                      <button class="btn-action btn-switch" onclick={() => quickSwitch(selectedCard, subDir)} disabled={switching}>
-                        {#if switching}⏳{:else}⇄{/if} 切换
-                      </button>
-                      <button class="btn-action btn-start-sm" onclick={() => startDev(selectedCard, subDir)}>启动</button>
+        {#each mainCards as card (card.folder_name)}
+          {@const cardRunning = cardHasRunning(card)}
+          <div class="base-card" class:base-running={cardRunning}>
+            <div class="base-card-head">
+              <span class="base-card-name">{card.display_name}</span>
+              {#if cardRunning}<span class="run-dot-sm"></span>{/if}
+            </div>
+            <div class="base-card-folder">{card.folder_name}</div>
+            <div class="base-card-actions">
+              {#each card.sub_dirs as subDir (subDir.key)}
+                {#if subDir.has_package_json}
+                  <div class="base-action-row">
+                    <span class="base-action-label">{subDir.label}</span>
+                    {#if isRunning(card, subDir)}
+                      <button class="btn-sm btn-stop" onclick={() => { const id = serverIdFor(card, subDir); if (id) stopDev(id); }}>停止</button>
                     {:else}
-                      <button class="btn-action btn-start" onclick={() => startDev(selectedCard, subDir)}>启动</button>
+                      <button class="btn-sm btn-start" onclick={() => startDev(card, subDir)}>启动</button>
                     {/if}
-                  {/if}
-                  <button class="btn-action btn-install" onclick={() => runInstall(selectedCard, subDir)} disabled={installing[`${selectedCard.folder_name}:${subDir.key}`]}>
-                    {installing[`${selectedCard.folder_name}:${subDir.key}`] ? '安装中' : 'install'}
-                  </button>
-                </div>
-              </div>
-              <!-- 安装日志 -->
+                    <button class="btn-sm btn-install" onclick={() => runInstall(card, subDir)} disabled={installing[`${card.folder_name}:${subDir.key}`]}>
+                      {installing[`${card.folder_name}:${subDir.key}`] ? '...' : 'Install'}
+                    </button>
+                  </div>
+                {/if}
+              {/each}
+            </div>
+            <!-- 运行中日志 -->
+            {#each card.sub_dirs as subDir (subDir.key)}
+              {#if isRunning(card, subDir)}
+                {@const sid = serverIdFor(card, subDir)}
+                {#if sid}
+                  <div class="base-log">
+                    <div class="base-log-head">
+                      <span class="run-dot-sm"></span>
+                      <span class="base-log-sub">{subDir.label}</span>
+                      <span class="base-log-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
+                      <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                      </button>
+                    </div>
+                    <div class="base-log-body">
+                      {#each serverLogs(sid) as log}
+                        <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
+                      {/each}
+                      {#if serverLogs(sid).length === 0}
+                        <div class="log-empty">等待输出...</div>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+              {/if}
+            {/each}
+            <!-- 安装日志 -->
+            {#each card.sub_dirs as subDir (subDir.key)}
               {#if cmdLogs[`${subDir.work_dir}:install`]?.length > 0}
-                <div class="mini-log" data-collapsed={installing[`${selectedCard.folder_name}:${subDir.key}`] ? 'false' : 'true'}>
+                <div class="mini-log">
                   {#each cmdLogs[`${subDir.work_dir}:install`] as line}
                     <div class="log-line">{line}</div>
                   {/each}
                 </div>
               {/if}
-            {/if}
+            {/each}
+          </div>
+        {/each}
+
+        {#each templateCards as card (card.folder_name)}
+          {@const cardRunning = cardHasRunning(card)}
+          <div class="base-card" class:base-running={cardRunning}>
+            <div class="base-card-head">
+              <span class="base-card-name">{card.display_name}</span>
+              <span class="base-card-badge">模板</span>
+              {#if cardRunning}<span class="run-dot-sm"></span>{/if}
+            </div>
+            <div class="base-card-folder">{card.folder_name}</div>
+            <div class="base-card-actions">
+              {#each card.sub_dirs as subDir (subDir.key)}
+                {#if subDir.has_package_json}
+                  <div class="base-action-row">
+                    <span class="base-action-label">{subDir.label}</span>
+                    {#if isRunning(card, subDir)}
+                      <button class="btn-sm btn-stop" onclick={() => { const id = serverIdFor(card, subDir); if (id) stopDev(id); }}>停止</button>
+                    {:else}
+                      <button class="btn-sm btn-start" onclick={() => startDev(card, subDir)}>启动</button>
+                    {/if}
+                    <button class="btn-sm btn-install" onclick={() => runInstall(card, subDir)} disabled={installing[`${card.folder_name}:${subDir.key}`]}>
+                      {installing[`${card.folder_name}:${subDir.key}`] ? '...' : 'Install'}
+                    </button>
+                  </div>
+                {/if}
+              {/each}
+            </div>
+            {#each card.sub_dirs as subDir (subDir.key)}
+              {#if isRunning(card, subDir)}
+                {@const sid = serverIdFor(card, subDir)}
+                {#if sid}
+                  <div class="base-log">
+                    <div class="base-log-head">
+                      <span class="run-dot-sm"></span>
+                      <span class="base-log-sub">{subDir.label}</span>
+                      <span class="base-log-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
+                      <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                      </button>
+                    </div>
+                    <div class="base-log-body">
+                      {#each serverLogs(sid) as log}
+                        <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
+                      {/each}
+                      {#if serverLogs(sid).length === 0}
+                        <div class="log-empty">等待输出...</div>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+              {/if}
+            {/each}
+            {#each card.sub_dirs as subDir (subDir.key)}
+              {#if cmdLogs[`${subDir.work_dir}:install`]?.length > 0}
+                <div class="mini-log">
+                  {#each cmdLogs[`${subDir.work_dir}:install`] as line}
+                    <div class="log-line">{line}</div>
+                  {/each}
+                </div>
+              {/if}
+            {/each}
+          </div>
+        {/each}
+      </div>
+
+      <!-- 右栏：卡片 -->
+      <div class="col-right">
+        <div class="col-header">
+          <span class="col-title">卡片</span>
+          <span class="col-hint">{cardList.length} 个</span>
+          {#if runningCards.length > 0}
+            <button class="btn-sm btn-stop-all" onclick={stopAllCards}>全部停止</button>
+          {/if}
+        </div>
+
+        <!-- 卡片标签 -->
+        <div class="card-tags">
+          {#each cardList as card (card.folder_name)}
+            {@const cardRunning = cardHasRunning(card)}
+            <button class="card-tag" class:tag-active={selectedFolder === card.folder_name} class:tag-running={cardRunning} onclick={() => selectedFolder = card.folder_name}>
+              {#if cardRunning}<span class="tag-dot"></span>{/if}
+              {card.display_name}
+            </button>
           {/each}
         </div>
-      </div>
-    {/if}
 
-    <!-- 运行中：基础服务 -->
-    {#if runningBase.length > 0}
-      <div class="running-section">
-        <div class="running-section-header">基础服务</div>
-        {#each runningBase as srv (srv.id)}
-          {@const sc = serverCard(srv)}
-          <div class="run-card">
-            <div class="run-card-header">
-              <span class="run-dot"></span>
-              <span class="run-name">{sc?.display_name ?? srv.card_name}</span>
-              <span class="run-sub">{serverSubDirLabel(srv)}</span>
-              <span class="run-time">{formatTime(srv.started_at)}</span>
-              <button class="run-stop-btn" onclick={() => stopDev(srv.id)} title="停止">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-              </button>
+        <!-- 选中卡片操作 -->
+        {#if selectedCard}
+          <div class="card-panel">
+            <div class="card-panel-head">
+              <span class="card-panel-name">{selectedCard.display_name}</span>
+              <span class="card-panel-folder">{selectedCard.folder_name}</span>
             </div>
-            <div class="run-log-body">
-              {#each serverLogs(srv.id) as log}
-                <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
+            <div class="card-panel-actions">
+              {#each selectedCard.sub_dirs as subDir (subDir.key)}
+                {#if subDir.has_package_json}
+                  <div class="card-action-row">
+                    <span class="card-action-label">{subDir.label}</span>
+                    <span class="card-action-path" title={subDir.work_dir}>{subDir.work_dir.split('/').slice(-3).join('/')}</span>
+                    <div class="card-action-btns">
+                      {#if isRunning(selectedCard, subDir)}
+                        <button class="btn-sm btn-stop" onclick={() => { const id = serverIdFor(selectedCard, subDir); if (id) stopDev(id); }}>停止</button>
+                      {:else}
+                        <button class="btn-sm btn-switch" onclick={() => quickSwitch(selectedCard, subDir)} disabled={switching}>
+                          {switching ? '⏳' : '⇄'} 切换
+                        </button>
+                        <button class="btn-sm btn-start-sm" onclick={() => startDev(selectedCard, subDir)}>启动</button>
+                      {/if}
+                      <button class="btn-sm btn-install" onclick={() => runInstall(selectedCard, subDir)} disabled={installing[`${selectedCard.folder_name}:${subDir.key}`]}>
+                        {installing[`${selectedCard.folder_name}:${subDir.key}`] ? '...' : 'Install'}
+                      </button>
+                    </div>
+                  </div>
+                {/if}
               {/each}
-              {#if serverLogs(srv.id).length === 0}
-                <div class="log-empty">等待输出...</div>
-              {/if}
             </div>
+            <!-- 安装日志 -->
+            {#each selectedCard.sub_dirs as subDir (subDir.key)}
+              {#if cmdLogs[`${subDir.work_dir}:install`]?.length > 0}
+                <div class="mini-log">
+                  {#each cmdLogs[`${subDir.work_dir}:install`] as line}
+                    <div class="log-line">{line}</div>
+                  {/each}
+                </div>
+              {/if}
+            {/each}
           </div>
-        {/each}
-      </div>
-    {/if}
+        {/if}
 
-    <!-- 运行中：卡片服务 -->
-    {#if runningCards.length > 0}
-      <div class="running-section">
-        <div class="running-section-header">卡片服务</div>
-        {#each runningCards as srv (srv.id)}
-          {@const sc = serverCard(srv)}
-          <div class="run-card">
-            <div class="run-card-header">
-              <span class="run-dot"></span>
-              <span class="run-name">{sc?.display_name ?? srv.card_name}</span>
-              <span class="run-sub">{serverSubDirLabel(srv)}</span>
-              <span class="run-time">{formatTime(srv.started_at)}</span>
-              <button class="run-stop-btn" onclick={() => stopDev(srv.id)} title="停止">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-              </button>
-            </div>
-            <div class="run-log-body">
-              {#each serverLogs(srv.id) as log}
-                <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
-              {/each}
-              {#if serverLogs(srv.id).length === 0}
-                <div class="log-empty">等待输出...</div>
-              {/if}
-            </div>
+        <!-- 运行中的卡片服务 -->
+        {#if runningCards.length > 0}
+          <div class="running-cards">
+            {#each runningCards as srv (srv.id)}
+              {@const sc = serverCard(srv)}
+              <div class="run-card">
+                <div class="run-card-head">
+                  <span class="run-dot"></span>
+                  <span class="run-name">{sc?.display_name ?? srv.card_name}</span>
+                  <span class="run-sub">{serverSubDirLabel(srv)}</span>
+                  <span class="run-time">{formatTime(srv.started_at)}</span>
+                  <button class="log-stop-btn" onclick={() => stopDev(srv.id)} title="停止">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                  </button>
+                </div>
+                <div class="run-card-body">
+                  {#each serverLogs(srv.id) as log}
+                    <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
+                  {/each}
+                  {#if serverLogs(srv.id).length === 0}
+                    <div class="log-empty">等待输出...</div>
+                  {/if}
+                </div>
+              </div>
+            {/each}
           </div>
-        {/each}
+        {/if}
       </div>
-    {/if}
+    </div>
 
     {#if cards.length === 0}
       <div class="empty-state">
@@ -382,50 +465,31 @@
 </div>
 
 <style>
-  .dev-mode-page {
-    padding: 20px;
-    max-width: 900px;
-    margin: 0 auto;
-  }
+  .dev-mode-page { padding: 16px 20px; height: 100%; display: flex; flex-direction: column; }
 
   /* ===== 导航栏 ===== */
   .dev-nav {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
-
   .back-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 7px 12px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all .2s;
-    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 7px; font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; transition: all .2s; white-space: nowrap;
   }
   .back-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-
-  .dev-nav-info { display: flex; align-items: center; gap: 8px; color: var(--accent); }
-  .dev-nav-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+  .dev-nav-info { display: flex; align-items: center; gap: 6px; color: var(--accent); }
+  .dev-nav-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
   .dev-nav-badge {
-    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; padding: 2px 7px; border-radius: 10px;
     background: var(--accent-bg); color: var(--accent);
     border: 1px solid var(--accent-ring); font-weight: 600;
   }
-
   .refresh-btn {
-    margin-left: auto;
-    display: flex; align-items: center; justify-content: center;
-    width: 34px; height: 34px; border-radius: 8px;
+    margin-left: auto; display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 7px;
     background: var(--bg-card); border: 1px solid var(--border);
     color: var(--text-secondary); cursor: pointer; transition: all .2s;
   }
@@ -440,152 +504,183 @@
 
   .dev-loading, .empty-state {
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: 12px; padding: 60px 0;
-    color: var(--text-secondary);
+    justify-content: center; gap: 12px; padding: 60px 0; color: var(--text-secondary);
   }
   .spinner {
-    width: 28px; height: 28px;
+    width: 24px; height: 24px;
     border: 3px solid var(--border); border-top-color: var(--accent);
     border-radius: 50%; animation: spin .8s linear infinite;
   }
   .empty-state svg { opacity: .35; }
-  .empty-state h3 { margin: 0; font-size: 17px; color: var(--text-primary); }
-  .empty-state p { margin: 0; font-size: 14px; }
+  .empty-state h3 { margin: 0; font-size: 16px; color: var(--text-primary); }
+  .empty-state p { margin: 0; font-size: 13px; }
 
   .dev-error {
-    padding: 14px 16px; background: var(--error-bg); border: 1px solid var(--error-border);
-    border-radius: 10px; color: var(--error-text); font-size: 13px;
-    display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+    padding: 10px 14px; background: var(--error-bg); border: 1px solid var(--error-border);
+    border-radius: 8px; color: var(--error-text); font-size: 12px;
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
   }
-  .error-dismiss { background: none; border: none; color: var(--error-text); cursor: pointer; font-size: 14px; }
+  .error-dismiss { background: none; border: none; color: var(--error-text); cursor: pointer; font-size: 13px; }
 
-  /* ===== 标签选择区 ===== */
-  .tag-section { margin-bottom: 20px; }
-  .tag-group { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
-  .tag-group-label {
-    font-size: 11px; font-weight: 700; color: var(--text-muted);
-    text-transform: uppercase; letter-spacing: .05em;
-    min-width: 32px; padding-top: 7px; flex-shrink: 0;
+  /* ===== 两栏布局 ===== */
+  .two-col {
+    display: grid; grid-template-columns: 280px 1fr; gap: 16px;
+    flex: 1; min-height: 0; overflow: hidden;
   }
-  .tag-items { display: flex; flex-wrap: wrap; gap: 7px; }
-
-  .tag {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 6px 13px; border-radius: 7px; font-size: 13px;
-    font-weight: 500; background: var(--bg-card); border: 1px solid var(--border);
-    color: var(--text-secondary); cursor: pointer; transition: all .15s;
-    white-space: nowrap;
-  }
-  .tag:hover { background: var(--bg-card-hover); border-color: var(--border-strong); color: var(--text-primary); }
-  .tag-active {
-    background: var(--accent-bg); border-color: var(--accent);
-    color: var(--accent); font-weight: 600;
-  }
-  .tag-running { border-color: var(--success-text); }
-  .tag-running.tag-active { border-color: var(--accent); }
-  .tag-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--success-text); box-shadow: 0 0 4px rgba(76,175,80,.7);
-    flex-shrink: 0;
+  .col-left, .col-right {
+    display: flex; flex-direction: column; gap: 10px;
+    overflow-y: auto; padding-right: 4px;
   }
 
-  /* ===== 操作面板 ===== */
-  .control-panel {
+  .col-header {
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  }
+  .col-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+  .col-hint { font-size: 11px; color: var(--text-muted); }
+
+  /* ===== 左栏：基础卡片 ===== */
+  .base-card {
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 18px 20px; margin-bottom: 20px;
+    border-radius: 10px; padding: 14px; flex-shrink: 0;
   }
-  .control-panel-header { margin-bottom: 14px; }
-  .control-panel-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .cp-name { font-size: 16px; font-weight: 700; color: var(--text-primary); }
-  .cp-folder {
-    font-size: 11px; font-family: 'SF Mono','Cascadia Code',monospace;
-    color: var(--text-muted);
+  .base-running { border-color: var(--success-text); box-shadow: 0 0 0 1px var(--success-text); }
+  .base-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .base-card-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .base-card-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 4px;
+    background: var(--success-bg); color: var(--success-text); font-weight: 600;
+  }
+  .base-card-folder {
+    font-size: 10px; font-family: 'SF Mono','Cascadia Code',monospace;
+    color: var(--text-muted); margin-bottom: 10px;
+  }
+  .base-card-actions { display: flex; flex-direction: column; gap: 6px; }
+  .base-action-row { display: flex; align-items: center; gap: 6px; }
+  .base-action-label { font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 54px; }
+  .run-dot-sm {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--success-text); box-shadow: 0 0 4px rgba(76,175,80,.7); flex-shrink: 0;
   }
 
-  .control-panel-actions { display: flex; flex-direction: column; gap: 8px; }
-  .cp-subdir {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 0;
+  /* ===== 通用按钮 ===== */
+  .btn-sm {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 3px; padding: 4px 10px; border-radius: 6px; font-size: 11px;
+    font-weight: 600; cursor: pointer; transition: all .15s; border: none; white-space: nowrap;
   }
-  .cp-subdir-label { font-size: 13px; font-weight: 600; color: var(--text-primary); min-width: 65px; }
-  .cp-subdir-path {
-    font-size: 11px; font-family: 'SF Mono','Cascadia Code',monospace;
-    color: var(--text-muted); flex: 1;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
-  }
-  .cp-subdir-btns { display: flex; gap: 6px; flex-shrink: 0; }
-
-  .btn-action {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 600;
-    cursor: pointer; transition: all .15s; border: none; white-space: nowrap;
-  }
+  .btn-start { background: var(--success-bg); color: var(--success-text); }
+  .btn-start:hover { background: var(--accent-bg); }
   .btn-switch { background: var(--accent); color: #fff; }
   .btn-switch:hover:not(:disabled) { background: var(--accent-hover); }
   .btn-switch:disabled { opacity: .5; cursor: wait; }
-  .btn-start { background: var(--success-bg); color: var(--success-text); }
-  .btn-start:hover { background: var(--accent-bg); }
   .btn-start-sm { background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border); }
   .btn-start-sm:hover { background: var(--bg-card-hover); color: var(--text-primary); }
   .btn-stop { background: var(--error-bg); color: var(--error-text); }
   .btn-stop:hover { background: var(--error-hover-bg); }
-  .btn-install { background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border); }
+  .btn-install { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border); }
   .btn-install:hover:not(:disabled) { background: var(--bg-card-hover); }
   .btn-install:disabled { opacity: .5; cursor: not-allowed; }
-
-  .mini-log {
-    margin: 4px 0 8px; padding: 8px 12px; background: var(--bg-subtle);
-    border-radius: 6px; border: 1px solid var(--border-light);
-    max-height: 120px; overflow-y: auto;
+  .btn-stop-all {
+    margin-left: auto; padding: 3px 8px; border-radius: 5px;
+    background: var(--error-bg); color: var(--error-text);
+    border: none; font-size: 10px; font-weight: 600; cursor: pointer;
   }
+  .btn-stop-all:hover { background: var(--error-hover-bg); }
 
-  /* ===== 运行服务区 ===== */
-  .running-section { margin-bottom: 20px; }
-  .running-section-header {
-    font-size: 12px; font-weight: 700; color: var(--text-muted);
-    text-transform: uppercase; letter-spacing: .05em;
-    margin-bottom: 10px; padding-left: 4px;
+  /* ===== 日志 ===== */
+  .base-log {
+    margin-top: 8px; border: 1px solid var(--border-light);
+    border-radius: 7px; overflow: hidden; background: var(--bg-subtle);
   }
-
-  .run-card {
-    background: var(--bg-subtle); border: 1px solid var(--border-light);
-    border-radius: 10px; overflow: hidden; margin-bottom: 10px;
-  }
-  .run-card-header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 14px; background: var(--bg-card);
+  .base-log-head {
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 10px; background: var(--bg-card);
     border-bottom: 1px solid var(--border-light);
   }
-  .run-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--success-text); box-shadow: 0 0 5px rgba(76,175,80,.6);
-    flex-shrink: 0;
-  }
-  .run-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .run-sub { font-size: 11px; color: var(--text-muted); }
-  .run-time {
-    font-size: 11px; color: var(--text-muted); margin-left: auto;
-    font-family: 'SF Mono','Cascadia Code',monospace;
-  }
-  .run-stop-btn {
+  .base-log-sub { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .base-log-time { font-size: 10px; color: var(--text-muted); margin-left: auto; font-family: 'SF Mono','Cascadia Code',monospace; }
+  .log-stop-btn {
     display: flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; border-radius: 5px; border: none;
+    width: 18px; height: 18px; border-radius: 4px; border: none;
     background: var(--error-bg); color: var(--error-text);
     cursor: pointer; transition: all .15s; padding: 0;
   }
-  .run-stop-btn:hover { background: var(--error-hover-bg); }
-
-  .run-log-body {
-    padding: 8px 14px; max-height: 200px; overflow-y: auto;
+  .log-stop-btn:hover { background: var(--error-hover-bg); }
+  .base-log-body { padding: 6px 10px; max-height: 150px; overflow-y: auto; }
+  .mini-log {
+    margin-top: 6px; padding: 6px 10px; background: var(--bg-subtle);
+    border: 1px solid var(--border-light); border-radius: 7px;
+    max-height: 100px; overflow-y: auto;
   }
   .log-line {
     font-family: 'SF Mono','Cascadia Code',monospace;
-    font-size: 12px; color: var(--text-secondary); line-height: 1.55;
+    font-size: 11px; color: var(--text-secondary); line-height: 1.5;
     white-space: pre-wrap; word-break: break-all;
   }
   .log-stderr { color: var(--error-text); }
   .log-empty {
     font-family: 'SF Mono','Cascadia Code',monospace;
-    font-size: 12px; color: var(--text-muted); font-style: italic;
+    font-size: 11px; color: var(--text-muted); font-style: italic;
   }
+
+  /* ===== 右栏：卡片标签 ===== */
+  .card-tags { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
+  .card-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 11px; border-radius: 6px; font-size: 12px;
+    font-weight: 500; background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-secondary); cursor: pointer; transition: all .15s;
+  }
+  .card-tag:hover { background: var(--bg-card-hover); border-color: var(--border-strong); color: var(--text-primary); }
+  .tag-active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .tag-running { border-color: var(--success-text); }
+  .tag-running.tag-active { border-color: var(--accent); }
+  .tag-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--success-text); box-shadow: 0 0 4px rgba(76,175,80,.7); flex-shrink: 0;
+  }
+
+  /* ===== 选中卡片面板 ===== */
+  .card-panel {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; flex-shrink: 0;
+  }
+  .card-panel-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .card-panel-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .card-panel-folder {
+    font-size: 10px; font-family: 'SF Mono','Cascadia Code',monospace;
+    color: var(--text-muted);
+  }
+  .card-panel-actions { display: flex; flex-direction: column; gap: 7px; }
+  .card-action-row { display: flex; align-items: center; gap: 8px; }
+  .card-action-label { font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 54px; }
+  .card-action-path {
+    font-size: 10px; font-family: 'SF Mono','Cascadia Code',monospace;
+    color: var(--text-muted); flex: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .card-action-btns { display: flex; gap: 5px; flex-shrink: 0; }
+
+  /* ===== 运行中的卡片服务 ===== */
+  .running-cards { display: flex; flex-direction: column; gap: 8px; }
+  .run-card {
+    background: var(--bg-subtle); border: 1px solid var(--border-light);
+    border-radius: 9px; overflow: hidden;
+  }
+  .run-card-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; background: var(--bg-card);
+    border-bottom: 1px solid var(--border-light);
+  }
+  .run-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--success-text); box-shadow: 0 0 4px rgba(76,175,80,.6); flex-shrink: 0;
+  }
+  .run-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .run-sub { font-size: 10px; color: var(--text-muted); }
+  .run-time {
+    font-size: 10px; color: var(--text-muted); margin-left: auto;
+    font-family: 'SF Mono','Cascadia Code',monospace;
+  }
+  .run-card-body { padding: 6px 12px; max-height: 180px; overflow-y: auto; }
 </style>

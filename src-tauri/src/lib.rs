@@ -93,6 +93,12 @@ fn default_scan_depth() -> u32 {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct DevModeFavorite {
+    path: String,
+    name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct AppSettings {
     editor: EditorSetting,
     workspaces: Vec<WorkspaceConfig>,
@@ -101,6 +107,8 @@ struct AppSettings {
     scan_depth: u32,
     #[serde(default)]
     models: Vec<ModelConfig>,
+    #[serde(default)]
+    favorite_dev_mode: Option<DevModeFavorite>,
 }
 
 impl Default for AppSettings {
@@ -114,6 +122,7 @@ impl Default for AppSettings {
             active_workspace: None,
             scan_depth: 3,
             models: Vec::new(),
+            favorite_dev_mode: None,
         }
     }
 }
@@ -530,7 +539,25 @@ fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), Str
     Ok(())
 }
 
-// ===== 工作空间管理 =====
+// ===== 命令：设置收藏的开发模式 =====
+
+#[tauri::command]
+fn set_favorite_dev_mode(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    name: Option<String>,
+) -> Result<AppSettings, String> {
+    let mut settings = get_settings(app.clone());
+    settings.favorite_dev_mode = path.map(|p| DevModeFavorite {
+        path: p,
+        name: name.unwrap_or_else(|| "开发模式".to_string()),
+    });
+    let path = get_settings_path(&app)?;
+    let json =
+        serde_json::to_string_pretty(&settings).map_err(|e| format!("序列化设置失败: {}", e))?;
+    fs::write(&path, json).map_err(|e| format!("写入设置文件失败: {}", e))?;
+    Ok(settings)
+}
 
 #[tauri::command]
 fn add_workspace(app: tauri::AppHandle, name: String, path: String) -> Result<AppSettings, String> {
@@ -1355,6 +1382,7 @@ pub fn run() {
             add_workspace,
             remove_workspace,
             set_active_workspace,
+            set_favorite_dev_mode,
             minimize_to_tray,
             drag_window,
             set_window_background,

@@ -39,7 +39,7 @@
   let filterLevel = $state<'all' | 'error' | 'warn' | 'info'>('all');
   let filterSource = $state('');
 
-  let filteredEntries = $derived(() => {
+  let filteredEntries = $derived.by(() => {
     let result = logs.entries;
     if (filterLevel !== 'all') {
       result = result.filter(e => e.level === filterLevel);

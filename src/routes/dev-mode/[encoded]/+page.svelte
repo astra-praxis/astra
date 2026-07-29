@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { logs } from '$lib/logs-store.svelte';
+  import { favoriteStore } from '$lib/favorite-store.svelte';
 
   interface DevSubDir {
     label: string;
@@ -70,7 +71,22 @@
 
   let selectedCard = $derived(cards.find(c => c.folder_name === selectedFolder) ?? null);
 
+  // 检查是否是从快捷入口进入（无返回按钮）
+  let isQuickMode = $derived(new URLSearchParams(window.location.search).get('quick') === '1');
+  // 是否已收藏当前项目
+  let isFavorited = $derived(favoriteStore.favorite?.path === projectPath);
+
+  // 切换收藏状态
+  async function toggleFavorite() {
+    if (isFavorited) {
+      await favoriteStore.clear();
+    } else {
+      await favoriteStore.set(projectPath, projectName);
+    }
+  }
+
   onMount(() => {
+    favoriteStore.load();
     init();
     return () => { for (const u of unlisteners) u(); };
   });
@@ -94,6 +110,14 @@
       const key = `${e.payload.work_dir}:${e.payload.command}`;
       if (!cmdLogs[key]) cmdLogs[key] = [];
       cmdLogs[key] = [...cmdLogs[key], `─── 完成 (退出码 ${e.payload.exit_code}) ───`];
+      // 记录日志
+      if (e.payload.command === 'install') {
+        if (e.payload.success) {
+          logs.info('install', `安装完成 (${e.payload.work_dir})`);
+        } else {
+          logs.error('install', `安装失败 (退出码 ${e.payload.exit_code}): ${e.payload.work_dir}`);
+        }
+      }
     });
     unlisteners.push(uncdone);
 
@@ -104,9 +128,11 @@
       if (!e.payload.success) {
         failedServers = { ...failedServers, [e.payload.server_id]: e.payload.exit_code };
         if (info) failedInfo = { ...failedInfo, [e.payload.server_id]: info };
-        // 日志保留在 logsMap 中供后台调试
+        // 记录错误日志
+        logs.error('dev-server', `${info?.card_name ?? e.payload.server_id} 启动失败 (退出码 ${e.payload.exit_code})`);
       } else {
         delete logsMap[e.payload.server_id];
+        logs.info('dev-server', `${info?.card_name ?? e.payload.server_id} 已停止`);
       }
     });
     unlisteners.push(unst);
@@ -145,6 +171,7 @@
         delete logsMap[sid];
       }
     }
+    logs.info('dev-server', `启动 ${card.display_name}/${subDir.label}`);
     try {
       const id = await invoke<string>('start_dev_server', {
         workDir: subDir.work_dir, cardName: card.folder_name, subdirKey: subDir.key,
@@ -154,23 +181,26 @@
         command: 'pnpm dev', started_at: Math.floor(Date.now()/1000), status: 'running', pid: null,
       };
       runningServers = { ...runningServers, [id]: info };
-    } catch (e) { error = `启动失败: ${e}`; }
+    } catch (e) { error = `启动失败: ${e}`; logs.error('dev-server', `启动失败: ${e}`); }
   }
 
   async function stopDev(serverId: string) {
+    const info = runningServers[serverId];
     try {
       await invoke<boolean>('stop_dev_server', { serverId });
       const ns = { ...runningServers }; delete ns[serverId]; runningServers = ns;
-    } catch (e) { error = `停止失败: ${e}`; }
+      logs.info('dev-server', `${info?.card_name ?? serverId} 已停止`);
+    } catch (e) { error = `停止失败: ${e}`; logs.error('dev-server', `停止失败: ${e}`); }
   }
 
   async function runInstall(card: DevCardInfo, subDir: DevSubDir) {
     const k = `${card.folder_name}:${subDir.key}`;
     installing = { ...installing, [k]: true };
     cmdLogs[`${subDir.work_dir}:install`] = [];
+    logs.info('install', `${card.display_name}/${subDir.label} pnpm install`);
     try {
       await invoke<string>('run_card_command', { workDir: subDir.work_dir, subdirKey: subDir.key, commandName: 'install' });
-    } catch (e) { error = `安装失败: ${e}`; }
+    } catch (e) { error = `安装失败: ${e}`; logs.error('install', `${card.display_name}/${subDir.label} 安装失败: ${e}`); }
   }
 
   let switching = $state(false);
@@ -300,15 +330,24 @@
 <div class="dev-mode-page">
   <!-- 导航栏 -->
   <div class="dev-nav">
-    <button class="back-btn" onclick={goBack}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-      返回
-    </button>
+    {#if !isQuickMode}
+      <button class="back-btn" onclick={goBack}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        返回
+      </button>
+    {/if}
     <div class="dev-nav-info">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       <span class="dev-nav-title">{projectName}</span>
       <span class="dev-nav-badge">开发模式</span>
     </div>
+    <button class="fav-btn" class:fav-active={isFavorited} onclick={toggleFavorite} title={isFavorited ? '取消收藏' : '收藏为快捷入口'}>
+      {#if isFavorited}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>
+      {:else}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>
+      {/if}
+    </button>
     <button class="refresh-btn" onclick={refresh} disabled={refreshing} title="刷新目录">
       {#if refreshing}
         <div class="btn-spinner-sm"></div>
@@ -602,6 +641,16 @@
     background: var(--accent-bg); color: var(--accent);
     border: 1px solid var(--accent-ring); font-weight: 600;
   }
+  .fav-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 7px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-muted); cursor: pointer; transition: all .2s;
+    margin-left: 8px;
+  }
+  .fav-btn:hover { background: var(--bg-card-hover); color: var(--warning-text, #f59e0b); }
+  .fav-btn.fav-active { color: var(--warning-text, #f59e0b); border-color: var(--warning-text, #f59e0b); }
+  .fav-btn.fav-active:hover { color: var(--error-text); border-color: var(--error-text); }
   .refresh-btn {
     margin-left: auto; display: flex; align-items: center; justify-content: center;
     width: 32px; height: 32px; border-radius: 7px;

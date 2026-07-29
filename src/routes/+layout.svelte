@@ -8,6 +8,7 @@
   import { nm, stopScan } from '$lib/nm-store.svelte';
   import ChatToolbar from '$lib/ChatToolbar.svelte';
   import { loadInitialToolbarData } from '$lib/chat-state.svelte';
+  import { favoriteStore } from '$lib/favorite-store.svelte';
   let { children } = $props();
 
   // 将 store 状态同步到局部 state（确保跨页面导航时响应式不丢失）
@@ -23,6 +24,11 @@
 
   initTheme();
   loadInitialToolbarData();
+
+  // 加载收藏的开发模式
+  $effect(() => {
+    favoriteStore.load();
+  });
 
   const menuItems = [
     { id: 'workspace', label: '工作空间', path: '/', icon: '📁' },
@@ -105,6 +111,16 @@
 
     <div class="titlebar-right">
       <ChatToolbar side="right" />
+      {#if favoriteStore.favorite}
+        <button
+          class="titlebar-dev-entry"
+          onclick={() => goto(`/dev-mode/${encodeURIComponent(favoriteStore.favorite!.path)}?quick=1`)}
+          title="开发模式: {favoriteStore.favorite.name}"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <span class="dev-entry-name">{favoriteStore.favorite.name}</span>
+        </button>
+      {/if}
       <div class="titlebar-loading" class:titlebar-visible={titleBusy}>
         <div class="titlebar-spinner" class:spinner-visible={titleBusy}></div>
         <span class="titlebar-progress" class:progress-visible={titleBusy}>{titleProgress}</span>
@@ -283,6 +299,33 @@
     justify-content: flex-end;
     gap: 8px;
     min-width: 0;
+  }
+
+  .titlebar-dev-entry {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-ring);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .titlebar-dev-entry:hover {
+    background: var(--accent);
+    color: var(--accent-text, #fff);
+  }
+  .dev-entry-name {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* ===== 标题栏加载指示器（常驻右侧） ===== */

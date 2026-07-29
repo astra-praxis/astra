@@ -1,10 +1,12 @@
 mod chat;
 mod chat_sessions;
 mod command_runner;
+mod dev_mode;
 mod downloader;
 mod providers;
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -1228,6 +1230,9 @@ pub fn run() {
             false,
         )))
         .manage(downloader::DownloadManager::new())
+        .manage(Mutex::new(
+            HashMap::<String, dev_mode::RunningDevProcess>::new(),
+        ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -1268,6 +1273,12 @@ pub fn run() {
                         }
                     }
                     "quit" => {
+                        // 清理所有运行中的开发服务器
+                        let state = app.state::<dev_mode::DevServerState>();
+                        let mut servers = state.lock().unwrap();
+                        for (_, mut server) in servers.drain() {
+                            let _ = server.child.kill();
+                        }
                         app.exit(0);
                     }
                     _ => {}
@@ -1347,6 +1358,12 @@ pub fn run() {
             chat_sessions::update_chat_session_title,
             chat_sessions::delete_chat_session,
             chat_sessions::get_chat_session,
+            // Dev Mode
+            dev_mode::scan_dev_dirs,
+            dev_mode::run_card_command,
+            dev_mode::start_dev_server,
+            dev_mode::stop_dev_server,
+            dev_mode::list_dev_servers,
             // Downloader
             downloader::list_downloads,
             downloader::add_download,

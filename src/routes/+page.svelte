@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import {
     type NodeModulesInfo,
     nm,
@@ -73,6 +74,39 @@
 
   // 按项目名分组统计
   let nmProjectCount = $derived(new Set(nodeModulesList.map(r => r.project_name)).size);
+
+  // 检查项目是否有 casp-portal 子目录（用于显示「开发模式」按钮）
+  let hasCaspPortal = $derived.by(() => {
+    const proj = selectedProject;
+    if (!proj) return false;
+    if ((proj.path.split('/').pop() || '').startsWith('casp-portal')) return true;
+    function check(items: SubDetail[]): boolean {
+      for (const item of items) {
+        if ((item.path.split('/').pop() || '').startsWith('casp-portal')) return true;
+        if (item.children?.length && check(item.children)) return true;
+      }
+      return false;
+    }
+    return check(proj.sub_items);
+  });
+
+  // 查找第一个以 casp-portal 开头的子目录路径
+  function findCaspPortalPath(): string | null {
+    const proj = selectedProject;
+    if (!proj) return null;
+    if ((proj.path.split('/').pop() || '').startsWith('casp-portal')) return proj.path;
+    function find(items: SubDetail[]): string | null {
+      for (const item of items) {
+        if ((item.path.split('/').pop() || '').startsWith('casp-portal')) return item.path;
+        if (item.children?.length) {
+          const found = find(item.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+    return find(proj.sub_items);
+  }
 
   // ===== 页面加载时自动读取设置并扫描 =====
   onMount(async () => {
@@ -447,6 +481,15 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             在 {editorSetting.name || '编辑器'} 中打开
           </button>
+          {#if hasCaspPortal}
+            <button class="dev-mode-btn" onclick={() => {
+              const devPath = findCaspPortalPath() ?? selectedProject!.path;
+              goto(`/dev-mode/${encodeURIComponent(devPath)}`);
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              开发模式
+            </button>
+          {/if}
         </div>
         {#if selectedProject.readme_preview}
           <div class="detail-readme">
@@ -1472,6 +1515,29 @@
   .editor-open-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px var(--accent-shadow-hover);
+  }
+
+  .dev-mode-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+    margin-left: 10px;
+  }
+
+  .dev-mode-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
   }
 
   /* 区域标题 */

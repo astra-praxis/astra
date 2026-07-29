@@ -64,6 +64,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "tokio",
+ "uuid",
  "which",
 ]
 

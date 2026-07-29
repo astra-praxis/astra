@@ -74,12 +74,42 @@ pub struct RunningDevProcess {
 
 pub type DevServerState = Mutex<HashMap<String, RunningDevProcess>>;
 
+/// 构建 PATH 环境变量，补充打包后可能缺失的路径（nvm/fnm/homebrew 等）
+fn build_full_path() -> String {
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    let mut extra: Vec<String> = vec![
+        "/usr/local/bin".into(),
+        "/opt/homebrew/bin".into(),
+        "/opt/homebrew/sbin".into(),
+        "/usr/bin".into(),
+        "/bin".into(),
+    ];
+
+    if !home.is_empty() {
+        // npm global bins
+        extra.push(format!("{}/.npm-global/bin", home));
+        // nvm
+        extra.push(format!("{}/.nvm/versions/node/current/bin", home));
+        // fnm
+        extra.push(format!("{}/Library/fnm/aliases/default/bin", home));
+        // volta
+        extra.push(format!("{}/.volta/bin", home));
+    }
+
+    // 去重
+    extra.push(existing);
+    extra.join(":")
+}
+
 // ===== 命令 =====
 
 /// 扫描项目目录下的所有卡片子目录
-/// 支持两种目录结构:
-/// 1. cus-card-* 类: web/mobile 在 src/main/ 下
-/// 2. casp-common-components 类: mobile/pc/component 在根目录下
+/// 支持三种目录结构:
+/// 1. cus-card-* / cus-comp-card-* 类: web/mobile/component-web 在 src/main/ 下
+/// 2. casp-portal-webapps: 主项目，src/main/ 下有 master/ 和 sys-template-universal/ 等子项目
+/// 3. casp-common-components: 无前端项目，跳过
 #[tauri::command]
 pub fn scan_dev_dirs(project_path: String) -> Result<Vec<DevCardInfo>, String> {
     let dir = Path::new(&project_path);
@@ -110,88 +140,51 @@ pub fn scan_dev_dirs(project_path: String) -> Result<Vec<DevCardInfo>, String> {
 
         // 跳过非前端项目的目录
         if folder_name == "target"
-            || folder_name == "20260728"
-            || folder_name == "null"
-            || folder_name == "casp-portal-webapps"
+            || folder_name == "casp-common-components"
+            || folder_name == "casp-portal-core"
+            || is_date_folder(&folder_name)
         {
             continue;
         }
 
         let mut sub_dirs: Vec<DevSubDir> = Vec::new();
 
-        // 模式1: cus-card-* 类 — web/mobile 在 src/main/ 下
-        let src_main_web = entry_path.join("src/main/web");
-        let src_main_mobile = entry_path.join("src/main/mobile");
-        let src_main_component = entry_path.join("src/main/component");
+        if folder_name == "casp-portal-webapps" {
+            // 主项目: 扫描 src/main/ 下的子项目
+            sub_dirs = scan_webapps_subdirs(&entry_path);
+        } else {
+            // 卡片类: 检测 src/main/ 下的 web / mobile / component-web
+            let src_main = entry_path.join("src/main");
 
-        // 模式2: casp-common-components 类 — 在根目录下
-        let root_web = entry_path.join("web");
-        let root_mobile = entry_path.join("mobile");
-        let root_component = entry_path.join("component");
-        let root_pc = entry_path.join("pc");
-
-        // 优先检测 src/main/ 下的子目录
-        if src_main_web.is_dir() {
-            let has_pkg = src_main_web.join("package.json").exists();
-            sub_dirs.push(DevSubDir {
-                label: "Web".to_string(),
-                key: "web".to_string(),
-                work_dir: src_main_web.to_string_lossy().to_string(),
-                has_package_json: has_pkg,
-            });
-        }
-        if src_main_mobile.is_dir() {
-            let has_pkg = src_main_mobile.join("package.json").exists();
-            sub_dirs.push(DevSubDir {
-                label: "Mobile".to_string(),
-                key: "mobile".to_string(),
-                work_dir: src_main_mobile.to_string_lossy().to_string(),
-                has_package_json: has_pkg,
-            });
-        }
-        if src_main_component.is_dir() {
-            let has_pkg = src_main_component.join("package.json").exists();
-            sub_dirs.push(DevSubDir {
-                label: "Component".to_string(),
-                key: "component".to_string(),
-                work_dir: src_main_component.to_string_lossy().to_string(),
-                has_package_json: has_pkg,
-            });
-        }
-
-        // 如果 src/main/ 下没有找到，再检测根目录下的
-        if sub_dirs.is_empty() {
-            if root_web.is_dir() && root_web.join("package.json").exists() {
+            let web_path = src_main.join("web");
+            if web_path.is_dir() {
+                let has_pkg = web_path.join("package.json").exists();
                 sub_dirs.push(DevSubDir {
                     label: "Web".to_string(),
                     key: "web".to_string(),
-                    work_dir: root_web.to_string_lossy().to_string(),
-                    has_package_json: true,
+                    work_dir: web_path.to_string_lossy().to_string(),
+                    has_package_json: has_pkg,
                 });
             }
-            if root_mobile.is_dir() && root_mobile.join("package.json").exists() {
+
+            let mobile_path = src_main.join("mobile");
+            if mobile_path.is_dir() {
+                let has_pkg = mobile_path.join("package.json").exists();
                 sub_dirs.push(DevSubDir {
                     label: "Mobile".to_string(),
                     key: "mobile".to_string(),
-                    work_dir: root_mobile.to_string_lossy().to_string(),
-                    has_package_json: true,
+                    work_dir: mobile_path.to_string_lossy().to_string(),
+                    has_package_json: has_pkg,
                 });
             }
-            if root_pc.is_dir() && root_pc.join("package.json").exists() {
-                sub_dirs.push(DevSubDir {
-                    label: "PC".to_string(),
-                    key: "pc".to_string(),
-                    work_dir: root_pc.to_string_lossy().to_string(),
-                    has_package_json: true,
-                });
-            }
-            if root_component.is_dir() {
-                // component 可能没有 package.json（它可能是纯组件目录）
-                let has_pkg = root_component.join("package.json").exists();
+
+            let component_web_path = src_main.join("component-web");
+            if component_web_path.is_dir() {
+                let has_pkg = component_web_path.join("package.json").exists();
                 sub_dirs.push(DevSubDir {
                     label: "Component".to_string(),
-                    key: "component".to_string(),
-                    work_dir: root_component.to_string_lossy().to_string(),
+                    key: "component-web".to_string(),
+                    work_dir: component_web_path.to_string_lossy().to_string(),
                     has_package_json: has_pkg,
                 });
             }
@@ -207,10 +200,81 @@ pub fn scan_dev_dirs(project_path: String) -> Result<Vec<DevCardInfo>, String> {
         }
     }
 
-    // 按名称排序
-    cards.sort_by(|a, b| a.name.cmp(&b.name));
+    // 按名称排序，casp-portal-webapps 排在最前面
+    cards.sort_by(|a, b| {
+        if a.name == "casp-portal-webapps" {
+            std::cmp::Ordering::Less
+        } else if b.name == "casp-portal-webapps" {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.cmp(&b.name)
+        }
+    });
 
     Ok(cards)
+}
+
+/// 检测是否为日期目录（如 20260717、20260728）
+fn is_date_folder(name: &str) -> bool {
+    name.len() == 8 && name.chars().all(|c| c.is_ascii_digit())
+}
+
+/// 扫描 casp-portal-webapps 的子项目
+/// 结构: src/main/{master, sys-template-universal/{web,mobile}, ...}
+fn scan_webapps_subdirs(webapps_path: &Path) -> Vec<DevSubDir> {
+    let src_main = webapps_path.join("src/main");
+    if !src_main.is_dir() {
+        return Vec::new();
+    }
+
+    let mut sub_dirs: Vec<DevSubDir> = Vec::new();
+    let entries = match std::fs::read_dir(&src_main) {
+        Ok(e) => e,
+        Err(_) => return sub_dirs,
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+
+        let name = match entry_path.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
+
+        // 跳过 java / resources 等非前端目录
+        if name.starts_with('.') || name == "java" || name == "resources" {
+            continue;
+        }
+
+        // 模式1: 直接有 package.json（如 master/）
+        if entry_path.join("package.json").exists() {
+            sub_dirs.push(DevSubDir {
+                label: name.clone(),
+                key: name.clone(),
+                work_dir: entry_path.to_string_lossy().to_string(),
+                has_package_json: true,
+            });
+            continue;
+        }
+
+        // 模式2: 包含 web/mobile 子目录（如 sys-template-universal/）
+        for subdir_name in &["web", "mobile"] {
+            let subdir_path = entry_path.join(subdir_name);
+            if subdir_path.is_dir() && subdir_path.join("package.json").exists() {
+                sub_dirs.push(DevSubDir {
+                    label: format!("{} · {}", name, subdir_name),
+                    key: format!("{}-{}", name, subdir_name),
+                    work_dir: subdir_path.to_string_lossy().to_string(),
+                    has_package_json: true,
+                });
+            }
+        }
+    }
+
+    sub_dirs
 }
 
 /// 在指定工作目录下执行命令（pnpm install / pnpm dev）
@@ -251,6 +315,7 @@ pub async fn run_card_command(
         .arg(shell_flag)
         .arg(&run_cmd)
         .current_dir(&work_dir)
+        .env("PATH", build_full_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -366,6 +431,7 @@ pub fn start_dev_server(
         .arg(shell_flag)
         .arg("pnpm dev")
         .current_dir(&work_dir)
+        .env("PATH", build_full_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

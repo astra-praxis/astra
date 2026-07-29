@@ -237,7 +237,12 @@
       {#each cards as card (card.path)}
         <div class="card-item">
           <div class="card-item-header">
-            <div class="card-item-name">{card.name}</div>
+            <div class="card-item-name">
+              {card.name}
+              {#if card.name === 'casp-portal-webapps'}
+                <span class="card-badge-main">主项目</span>
+              {/if}
+            </div>
             <div class="card-item-dirs">{subDirTags(card)}</div>
           </div>
 
@@ -453,6 +458,21 @@
     font-weight: 600;
     color: var(--text-primary);
     font-family: 'SF Mono', 'Cascadia Code', monospace;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card-badge-main {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent-ring);
+    font-weight: 600;
+    font-family: -apple-system, sans-serif;
+    white-space: nowrap;
   }
 
   .card-item-dirs {

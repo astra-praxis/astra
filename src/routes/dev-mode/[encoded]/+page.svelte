@@ -193,12 +193,23 @@
       const ns = { ...runningServers }; delete ns[s.id]; runningServers = ns;
     }
   }
+
+  // 返回：优先返回到项目详情页（通过 ?from= 携带的项目路径）
+  function goBack() {
+    const params = new URLSearchParams(window.location.search);
+    const from = params.get('from');
+    if (from) {
+      goto(`/?detail=${encodeURIComponent(from)}`);
+    } else {
+      goto('/');
+    }
+  }
 </script>
 
 <div class="dev-mode-page">
   <!-- 导航栏 -->
   <div class="dev-nav">
-    <button class="back-btn" onclick={() => goto('/')}>
+    <button class="back-btn" onclick={goBack}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
       返回
     </button>

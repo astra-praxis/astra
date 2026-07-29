@@ -76,41 +76,43 @@
   let nmProjectCount = $derived(new Set(nodeModulesList.map(r => r.project_name)).size);
 
   // 检查项目是否有 casp-portal 子目录（用于显示「开发模式」按钮）
-  let hasCaspPortal = $derived.by(() => {
-    const proj = selectedProject;
-    if (!proj) return false;
-    if ((proj.path.split('/').pop() || '').startsWith('casp-portal')) return true;
-    function check(items: SubDetail[]): boolean {
-      for (const item of items) {
-        if ((item.path.split('/').pop() || '').startsWith('casp-portal')) return true;
-        if (item.children?.length && check(item.children)) return true;
-      }
-      return false;
-    }
-    return check(proj.sub_items);
-  });
+  // 直接通过 Tauri 命令扫描项目目录，不依赖 sub_items（git 仓库时 sub_items 为空）
+  let hasCaspPortal = $state(false);
+  let caspPortalPath = $state<string | null>(null);
 
-  // 查找第一个以 casp-portal 开头的子目录路径
-  function findCaspPortalPath(): string | null {
-    const proj = selectedProject;
-    if (!proj) return null;
-    if ((proj.path.split('/').pop() || '').startsWith('casp-portal')) return proj.path;
-    function find(items: SubDetail[]): string | null {
-      for (const item of items) {
-        if ((item.path.split('/').pop() || '').startsWith('casp-portal')) return item.path;
-        if (item.children?.length) {
-          const found = find(item.children);
-          if (found) return found;
-        }
+  async function detectCaspPortal(projectPath: string) {
+    hasCaspPortal = false;
+    caspPortalPath = null;
+    try {
+      // 先检查项目本身是否以 casp-portal 开头
+      const folderName = projectPath.split('/').pop() || '';
+      if (folderName.startsWith('casp-portal')) {
+        hasCaspPortal = true;
+        caspPortalPath = projectPath;
+        return;
       }
-      return null;
+      // 调用后端扫描项目目录下的子目录，查找 casp-portal* 目录
+      const found = await invoke<string | null>('find_casp_portal_dir', { path: projectPath });
+      if (found) {
+        hasCaspPortal = true;
+        caspPortalPath = found;
+      }
+    } catch {
+      // 忽略错误
     }
-    return find(proj.sub_items);
   }
 
   // ===== 页面加载时自动读取设置并扫描 =====
   onMount(async () => {
     await loadAndScan();
+    // 如果带有 ?detail= 参数（如从开发模式页面返回），自动打开项目详情
+    const searchParams = new URLSearchParams(window.location.search);
+    const detailPath = searchParams.get('detail');
+    if (detailPath) {
+      showDetail({ path: detailPath } as ProjectCard);
+      // 清除查询参数，避免刷新时重复打开
+      window.history.replaceState(null, '', window.location.pathname);
+    }
   });
 
   // ===== 加载设置并扫描 =====
@@ -316,6 +318,8 @@
     try {
       const detail = await invoke<ProjectDetail>('get_project_detail', { path: project.path });
       selectedProject = detail;
+      // 检测 casp-portal 目录（用于开发模式按钮）
+      detectCaspPortal(project.path);
       if (cached) {
         // 有缓存：直接展示上次的扫描结果
         nodeModulesList = cached;
@@ -483,8 +487,8 @@
           </button>
           {#if hasCaspPortal}
             <button class="dev-mode-btn" onclick={() => {
-              const devPath = findCaspPortalPath() ?? selectedProject!.path;
-              goto(`/dev-mode/${encodeURIComponent(devPath)}`);
+              const devPath = caspPortalPath ?? selectedProject!.path;
+              goto(`/dev-mode/${encodeURIComponent(devPath)}?from=${encodeURIComponent(selectedProject!.path)}`);
             }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
               开发模式

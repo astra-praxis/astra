@@ -420,6 +420,32 @@ fn get_project_detail(app: tauri::AppHandle, path: String) -> Result<ProjectDeta
     })
 }
 
+// ===== 命令：查找 casp-portal 目录（用于「开发模式」按钮判断） =====
+
+#[tauri::command]
+fn find_casp_portal_dir(path: String) -> Result<Option<String>, String> {
+    let dir = Path::new(&path);
+    if !dir.is_dir() {
+        return Err("目录不存在".to_string());
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => return Err(format!("读取目录失败: {}", e)),
+    };
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with("casp-portal") {
+                return Ok(Some(entry_path.to_string_lossy().to_string()));
+            }
+        }
+    }
+    Ok(None)
+}
+
 // ===== 命令：创建新项目 =====
 
 #[tauri::command]
@@ -1325,6 +1351,7 @@ pub fn run() {
             delete_skill,
             read_skill_doc,
             get_project_detail,
+            find_casp_portal_dir,
             add_workspace,
             remove_workspace,
             set_active_workspace,

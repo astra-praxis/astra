@@ -1391,6 +1391,9 @@ pub fn run() {
             dev_mode::start_dev_server,
             dev_mode::stop_dev_server,
             dev_mode::list_dev_servers,
+            dev_mode::read_dev_config,
+            dev_mode::save_dev_cookie,
+            dev_mode::open_login_url,
             // Downloader
             downloader::list_downloads,
             downloader::add_download,

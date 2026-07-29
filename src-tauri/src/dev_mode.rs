@@ -78,6 +78,108 @@ pub struct RunningDevProcess {
 
 pub type DevServerState = Mutex<HashMap<String, RunningDevProcess>>;
 
+/// 开发配置（从 master vue.config.js 读取）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DevConfig {
+    /// Cookie 值，如 "WISCPSID=a2acc58b-..."
+    pub cookie: String,
+    /// 后端代理地址，如 "https://i.ygu.edu.cn/"
+    pub proxy_target: String,
+    /// master devServer 端口
+    pub port: Option<u16>,
+}
+
+// ===== vue.config.js 解析辅助 =====
+
+/// 从 vue.config.js 内容中提取 Cookie 值（）
+/// 匹配: setHeader("Cookie", "VALUE")
+fn extract_cookie(content: &str) -> String {
+    let key = "\"Cookie\"";
+    let pos = match content.find(key) {
+        Some(p) => p,
+        None => return String::new(),
+    };
+    let rest = &content[pos + key.len()..];
+    // 找第一个 "（Cookie 值的起始引号）
+    let q1 = match rest.find('"') {
+        Some(p) => p,
+        None => return String::new(),
+    };
+    let rest2 = &rest[q1 + 1..];
+    // 找第二个 "（Cookie 值的结束引号）
+    let q2 = match rest2.find('"') {
+        Some(p) => p,
+        None => return String::new(),
+    };
+    rest2[..q2].to_string()
+}
+
+/// 从 vue.config.js 中提取后端代理地址（第一个非 localhost 的 target）
+fn extract_backend_target(content: &str) -> String {
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        // 跳过注释行
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        if trimmed.contains("target:") && trimmed.contains('"') {
+            if let Some(start) = trimmed.find('"') {
+                let after = &trimmed[start + 1..];
+                if let Some(end) = after.find('"') {
+                    let url = &after[..end];
+                    // 跳过 localhost / 127.0.0.1（卡片代理）
+                    if !url.contains("localhost") && !url.contains("127.0.0.1") {
+                        return url.to_string();
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+/// 从 vue.config.js 中提取 devServer.port
+fn extract_dev_server_port(content: &str) -> Option<u16> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        if trimmed.contains("port:") && !trimmed.contains("false") {
+            // 提取 port: 后面的数字
+            if let Some(idx) = trimmed.find("port:") {
+                let after = &trimmed[idx + 5..];
+                let num_str: String = after
+                    .trim()
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                if let Ok(port) = num_str.parse::<u16>() {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 替换 vue.config.js 中的 Cookie 值
+fn replace_cookie_value(content: &str, new_cookie: &str) -> Option<String> {
+    let key = "\"Cookie\"";
+    let pos = content.find(key)?;
+    let rest = &content[pos + key.len()..];
+    let q1 = rest.find('"')?;
+    let val_start = pos + key.len() + q1 + 1;
+    let rest2 = &content[val_start..];
+    let q2 = rest2.find('"')?;
+
+    let mut result = String::with_capacity(content.len() + new_cookie.len());
+    result.push_str(&content[..val_start]);
+    result.push_str(new_cookie);
+    result.push_str(&content[val_start + q2..]);
+    Some(result)
+}
+
 /// 构建 PATH 环境变量，补充打包后可能缺失的路径（nvm/fnm/homebrew 等）
 fn build_full_path() -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
@@ -588,4 +690,62 @@ pub fn list_dev_servers(app: AppHandle) -> Result<Vec<DevServerInfo>, String> {
     }
 
     Ok(result)
+}
+
+// ===== 开发配置（Cookie / 代理地址） =====
+
+/// 读取 master 目录下 vue.config.js 的开发配置
+#[tauri::command]
+pub fn read_dev_config(master_path: String) -> Result<DevConfig, String> {
+    let config_path = Path::new(&master_path).join("vue.config.js");
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取 vue.config.js 失败: {}", e))?;
+
+    Ok(DevConfig {
+        cookie: extract_cookie(&content),
+        proxy_target: extract_backend_target(&content),
+        port: extract_dev_server_port(&content),
+    })
+}
+
+/// 保存 Cookie 到 master vue.config.js 的 cookie1 函数
+/// cookie 参数应为完整值，如 "WISCPSID=a2acc58b-..."
+#[tauri::command]
+pub fn save_dev_cookie(master_path: String, cookie: String) -> Result<(), String> {
+    let config_path = Path::new(&master_path).join("vue.config.js");
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取 vue.config.js 失败: {}", e))?;
+
+    let new_content = replace_cookie_value(&content, &cookie).ok_or("未找到 Cookie 配置位置")?;
+
+    std::fs::write(&config_path, new_content)
+        .map_err(|e| format!("写入 vue.config.js 失败: {}", e))?;
+    Ok(())
+}
+
+/// 在系统默认浏览器中打开 URL（用于登录获取 Cookie）
+#[tauri::command]
+pub fn open_login_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    }
+    Ok(())
 }

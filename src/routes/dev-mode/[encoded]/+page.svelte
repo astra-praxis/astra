@@ -204,6 +204,76 @@
       goto('/');
     }
   }
+  // ===== 开发配置（Cookie / 代理地址） =====
+  interface DevConfig {
+    cookie: string;
+    proxy_target: string;
+    port: number | null;
+  }
+
+  let showConfig = $state(false);
+  let configLoading = $state(false);
+  let configSaving = $state(false);
+  let configError = $state('');
+  let configData = $state<DevConfig | null>(null);
+  let cookieInput = $state(''); // 用户粘贴的原始内容
+  let cookiePreview = $state(''); // 提取后的 WISCPSID=xxx
+
+  // 从粘贴文本中提取 WISCPSID=xxx
+  function extractWiscpsid(input: string): string {
+    const m = input.match(/WISCPSID=([^\s;]+)/i);
+    if (m) return `WISCPSID=${m[1]}`;
+    // 如果只粘贴了 UUID-like 值
+    if (/^[a-f0-9-]{8,}$/i.test(input.trim())) return `WISCPSID=${input.trim()}`;
+    return input.trim();
+  }
+
+  function onCookieInput() {
+    cookiePreview = extractWiscpsid(cookieInput);
+  }
+
+  // 配置按钮按下的主卡片路径
+  let configMasterPath = $state('');
+  async function openConfig(masterPath: string) {
+    configMasterPath = masterPath;
+    showConfig = true;
+    configLoading = true;
+    configError = '';
+    cookieInput = '';
+    cookiePreview = '';
+    try {
+      configData = await invoke<DevConfig>('read_dev_config', { masterPath });
+      cookieInput = configData.cookie;
+      cookiePreview = configData.cookie;
+    } catch (e) {
+      configError = `读取配置失败: ${e}`;
+    } finally {
+      configLoading = false;
+    }
+  }
+
+  async function saveConfig() {
+    if (!cookiePreview) return;
+    configSaving = true;
+    configError = '';
+    try {
+      await invoke('save_dev_cookie', { masterPath: configMasterPath, cookie: cookiePreview });
+      showConfig = false;
+    } catch (e) {
+      configError = `保存失败: ${e}`;
+    } finally {
+      configSaving = false;
+    }
+  }
+
+  async function openLogin() {
+    if (!configData?.proxy_target) return;
+    try {
+      await invoke('open_login_url', { url: configData.proxy_target });
+    } catch (e) {
+      configError = `打开浏览器失败: ${e}`;
+    }
+  }
 </script>
 
 <div class="dev-mode-page">
@@ -248,6 +318,7 @@
           <div class="base-card" class:base-running={cardRunning}>
             <div class="base-card-head">
               <span class="base-card-name">{card.display_name}</span>
+              <button class="btn-config" onclick={() => openConfig(card.path)} title="配置 Cookie / 代理地址">⚙</button>
               {#if cardRunning}<span class="run-dot-sm"></span>{/if}
             </div>
             <div class="base-card-folder">{card.folder_name}</div>
@@ -473,10 +544,79 @@
       </div>
     {/if}
   {/if}
+
+  <!-- 开发配置弹窗 -->
+  {#if showConfig}
+    <div class="config-overlay" onclick={() => showConfig = false} role="presentation">
+      <div class="config-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="开发配置" tabindex="-1">
+        <div class="config-header">
+          <h2>🔑 开发配置</h2>
+          <button class="config-close" onclick={() => showConfig = false} aria-label="关闭">✕</button>
+        </div>
+
+        {#if configLoading}
+          <div class="config-body"><div class="spinner"></div><span>正在读取配置...</span></div>
+        {:else if configData}
+          <div class="config-body">
+            {#if configError}
+              <div class="config-error">{configError} <button class="error-dismiss" onclick={() => configError = ''}>✕</button></div>
+            {/if}
+
+            <!-- 后端代理地址 + 打开登录 -->
+            <div class="config-section">
+              <label class="config-label">
+                🌐 后端代理地址
+                {#if configData.port}<span class="config-port">: {configData.port}</span>{/if}
+              </label>
+              <div class="proxy-row">
+                <input class="config-proxy-input" value={configData.proxy_target} readonly />
+                <button class="btn-open-login" onclick={openLogin} disabled={!configData.proxy_target} title="在浏览器中打开登录">
+                  打开登录
+                </button>
+              </div>
+            </div>
+
+            <!-- Cookie 配置 -->
+            <div class="config-section">
+              <label class="config-label" for="cookie-input">🍪 登录 Cookie</label>
+              <p class="config-hint">点「打开登录」→ 登录后端 → F12 复制 Cookie → 粘贴到下方</p>
+              <textarea
+                id="cookie-input"
+                class="config-textarea"
+                bind:value={cookieInput}
+                oninput={onCookieInput}
+                placeholder="粘贴完整 Cookie（会自动提取 WISCPSID）..."
+                rows="3"
+              ></textarea>
+
+              {#if cookiePreview && cookiePreview !== cookieInput.trim()}
+                <div class="cookie-preview">
+                  <span class="cookie-preview-label">✅ 提取结果：</span>
+                  <code>{cookiePreview}</code>
+                </div>
+              {:else if cookiePreview}
+                <div class="cookie-preview">
+                  <span class="cookie-preview-label">当前 Cookie：</span>
+                  <code>{cookiePreview}</code>
+                </div>
+              {/if}
+            </div>
+          </div>
+
+          <div class="config-footer">
+            <button class="btn-cancel" onclick={() => showConfig = false}>取消</button>
+            <button class="btn-save" onclick={saveConfig} disabled={configSaving || !cookiePreview}>
+              {configSaving ? '保存中...' : '保存 Cookie'}
+            </button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
-  .dev-mode-page { padding: 16px 20px; height: 100%; display: flex; flex-direction: column; }
+  .dev-mode-page { padding: 16px 20px; height: 100%; display: flex; flex-direction: column; overflow-x: hidden; }
 
   /* ===== 导航栏 ===== */
   .dev-nav {
@@ -694,4 +834,99 @@
     font-family: 'SF Mono','Cascadia Code',monospace;
   }
   .run-card-body { padding: 6px 12px; max-height: 180px; overflow-y: auto; }
+
+  /* ===== 配置按钮 ===== */
+  .btn-config {
+    width: 20px; height: 20px; border-radius: 5px; border: none;
+    background: var(--bg-subtle); color: var(--text-muted);
+    font-size: 13px; line-height: 1; cursor: pointer; transition: all .15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .btn-config:hover { background: var(--accent-bg); color: var(--accent); }
+
+  /* ===== 配置弹窗 ===== */
+  .config-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    display: flex; align-items: center; justify-content: center; z-index: 1000;
+  }
+  .config-modal {
+    width: 480px; max-width: 90vw; max-height: 85vh; overflow-y: auto; overflow-x: hidden;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.2);
+  }
+  .config-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  .config-header h2 { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0; }
+  .config-close {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: none; color: var(--text-muted); cursor: pointer; font-size: 15px;
+  }
+  .config-close:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+
+  .config-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 18px; }
+  .config-error {
+    padding: 8px 12px; background: var(--error-bg); border: 1px solid var(--error-border);
+    border-radius: 7px; color: var(--error-text); font-size: 12px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .config-section { display: flex; flex-direction: column; gap: 6px; }
+  .config-label {
+    font-size: 13px; font-weight: 600; color: var(--text-primary);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .config-port { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .config-hint { font-size: 11px; color: var(--text-muted); margin: 0; }
+
+  .proxy-row { display: flex; gap: 8px; }
+  .config-proxy-input {
+    flex: 1; padding: 7px 10px; font-size: 12px; font-family: monospace;
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    border-radius: 7px; color: var(--text-secondary); outline: none;
+    min-width: 0;
+  }
+  .btn-open-login {
+    padding: 7px 14px; font-size: 12px; font-weight: 600; white-space: nowrap;
+    background: var(--accent); color: #fff; border: none; border-radius: 7px;
+    cursor: pointer; transition: all .15s;
+  }
+  .btn-open-login:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn-open-login:disabled { opacity: .5; cursor: not-allowed; }
+
+  .config-textarea {
+    width: 100%; padding: 8px 10px; font-size: 12px; font-family: monospace;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 7px; color: var(--text-primary); outline: none; resize: vertical;
+    transition: border-color .2s; box-sizing: border-box;
+  }
+  .config-textarea:focus { border-color: var(--accent); }
+  .config-textarea::placeholder { color: var(--text-muted); }
+
+  .cookie-preview {
+    padding: 8px 10px; background: var(--success-bg); border: 1px solid var(--success-border, var(--success-text));
+    border-radius: 7px; font-size: 11px; display: flex; align-items: center; gap: 6px;
+    word-break: break-all;
+  }
+  .cookie-preview-label { color: var(--success-text); font-weight: 600; white-space: nowrap; }
+  .cookie-preview code { color: var(--text-primary); font-family: monospace; }
+
+  .config-footer {
+    display: flex; justify-content: flex-end; gap: 10px;
+    padding: 12px 20px; border-top: 1px solid var(--border);
+  }
+  .config-footer .btn-cancel {
+    padding: 8px 16px; font-size: 13px; font-weight: 500;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 7px; color: var(--text-secondary); cursor: pointer; transition: all .15s;
+  }
+  .config-footer .btn-cancel:hover { background: var(--bg-card-hover); }
+  .config-footer .btn-save {
+    padding: 8px 16px; font-size: 13px; font-weight: 600; white-space: nowrap;
+    background: var(--accent); color: #fff; border: none; border-radius: 7px;
+    cursor: pointer; transition: all .15s;
+  }
+  .config-footer .btn-save:hover:not(:disabled) { background: var(--accent-hover); }
+  .config-footer .btn-save:disabled { opacity: .5; cursor: not-allowed; }
 </style>

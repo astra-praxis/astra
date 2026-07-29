@@ -37,6 +37,7 @@
   let cards = $state<DevCardInfo[]>([]);
   let loading = $state(true);
   let error = $state('');
+  let refreshing = $state(false);
 
   // 运行中的服务器映射：server_id -> DevServerInfo
   let runningServers = $state<Record<string, DevServerInfo>>({});
@@ -208,6 +209,110 @@
   function subDirTags(card: DevCardInfo): string {
     return card.sub_dirs.map(sd => sd.label).join(' · ');
   }
+
+  // 运行中的服务列表（按启动时间排序）
+  let runningList = $derived(
+    Object.values(runningServers)
+      .filter(s => s.status === 'running')
+      .sort((a, b) => a.started_at - b.started_at)
+  );
+
+  // 按 category 分类运行中的服务
+  let runningMain = $derived(runningList.filter(s => 
+    cards.find(c => c.folder_name === s.card_name)?.category === 'main'
+  ));
+  let runningTemplates = $derived(runningList.filter(s => 
+    cards.find(c => c.folder_name === s.card_name)?.category === 'template'
+  ));
+  let runningCards = $derived(runningList.filter(s => {
+    const cat = cards.find(c => c.folder_name === s.card_name)?.category;
+    return cat === 'card' || cat === undefined;
+  }));
+
+  // 刷新目录
+  async function refresh() {
+    refreshing = true;
+    try {
+      cards = await invoke<DevCardInfo[]>('scan_dev_dirs', { projectPath });
+    } catch (e) {
+      error = `刷新失败: ${e}`;
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // 获取服务对应的卡片信息
+  function serverCard(server: DevServerInfo): DevCardInfo | undefined {
+    return cards.find(c => c.folder_name === server.card_name);
+  }
+
+  // 获取服务对应的子目录信息
+  function serverSubDir(server: DevServerInfo): DevSubDir | undefined {
+    return serverCard(server)?.sub_dirs.find(sd => sd.key === server.subdir);
+  }
+
+  // 停止该服务
+  function stopServer(server: DevServerInfo) {
+    stopDev(server.id);
+  }
+
+  // 快速切换：停止所有运行中的卡片服务（非 main/template），启动当前卡片的第一个 sub_dir
+  let switching = $state(false);
+  async function quickSwitch(card: DevCardInfo, subDir: DevSubDir) {
+    switching = true;
+    try {
+      // 停止所有运行中的卡片服务
+      const toStop = runningCards.map(s => s.id);
+      for (const sid of toStop) {
+        await invoke<boolean>('stop_dev_server', { serverId: sid });
+        const ns = { ...runningServers };
+        delete ns[sid];
+        runningServers = ns;
+      }
+      // 启动新卡片
+      await startDev(card, subDir);
+    } catch (e) {
+      error = `切换失败: ${e}`;
+    } finally {
+      switching = false;
+    }
+  }
+
+  // 一键启动：main + template 的第一个 sub_dir + 指定卡片的第一个 sub_dir
+  let launching = $state(false);
+  async function launchAll(card?: DevCardInfo, subDir?: DevSubDir) {
+    launching = true;
+    try {
+      // 启动 master（如果没运行）
+      const mainCard = cards.find(c => c.category === 'main');
+      if (mainCard && runningMain.length === 0) {
+        for (const sd of mainCard.sub_dirs) {
+          if (sd.has_package_json && !isRunning(mainCard, sd)) {
+            await startDev(mainCard, sd);
+            break;
+          }
+        }
+      }
+      // 启动模板（如果没运行）
+      for (const tmpl of cards.filter(c => c.category === 'template')) {
+        if (runningTemplates.find(s => s.card_name === tmpl.folder_name)) continue;
+        for (const sd of tmpl.sub_dirs) {
+          if (sd.has_package_json && !isRunning(tmpl, sd)) {
+            await startDev(tmpl, sd);
+            break;
+          }
+        }
+      }
+      // 启动指定卡片
+      if (card && subDir) {
+        await quickSwitch(card, subDir);
+      }
+    } catch (e) {
+      error = `启动失败: ${e}`;
+    } finally {
+      launching = false;
+    }
+  }
 </script>
 
 <div class="dev-mode-page">
@@ -224,6 +329,15 @@
       <span class="dev-nav-title">{projectName}</span>
       <span class="dev-nav-badge">开发模式</span>
     </div>
+    <button class="refresh-btn" onclick={refresh} disabled={refreshing} title="刷新目录">
+      {#if refreshing}
+        <div class="btn-spinner-sm"></div>
+      {:else}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 1 1-9-9"/><polyline points="21 3 21 9 15 9"/>
+        </svg>
+      {/if}
+    </button>
   </div>
 
   {#if loading}
@@ -234,10 +348,32 @@
   {:else if error}
     <div class="dev-error">{error}</div>
   {:else}
+    <!-- 运行状态栏 -->
+    {#if runningList.length > 0}
+      <div class="running-bar">
+        <div class="running-bar-label">
+          <span class="running-dot"></span>
+          {runningList.length} 个服务运行中
+        </div>
+        <div class="running-chips">
+          {#each runningList as srv (srv.id)}
+            {@const sc = serverCard(srv)}
+            <div class="run-chip" class:chip-card={sc?.category === 'card'} class:chip-main={sc?.category === 'main'} class:chip-template={sc?.category === 'template'}>
+              <span class="chip-text">{sc?.display_name ?? srv.card_name} · {srv.subdir}</span>
+              <span class="chip-time">{formatTime(srv.started_at)}</span>
+              <button class="chip-stop" onclick={() => stopDev(srv.id)} title="停止">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              </button>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     <!-- 卡片列表 -->
     <div class="card-grid">
       {#each cards as card (card.path)}
-        <div class="card-item">
+        <div class="card-item" class:card-running={card.sub_dirs.some(sd => isRunning(card, sd))}>
           <div class="card-item-header">
             <div class="card-item-name">
               <span class="card-title-text">{card.display_name}</span>
@@ -248,35 +384,63 @@
                 <span class="card-badge cat-template">模板</span>
               {/if}
             </div>
-            <div class="card-item-dirs">{subDirTags(card)}</div>
+            <!-- 卡片类型：快速切换按钮 -->
+            {#if card.category === 'card'}
+              <div class="quick-actions">
+                {#each card.sub_dirs as subDir (subDir.key)}
+                  {#if subDir.has_package_json}
+                    {#if isRunning(card, subDir)}
+                      <button class="btn-quick btn-stop" title="正在运行，点击停止" onclick={() => { const id = serverIdFor(card, subDir); if (id) stopDev(id); }}>
+                        <span class="chip-run-dot"></span>
+                        {subDir.label} 运行中
+                      </button>
+                    {:else}
+                      <button class="btn-quick btn-switch" title="切换到此卡片（停止其他卡片）" onclick={() => quickSwitch(card, subDir)} disabled={switching}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 20 4 20 4 12"/><line x1="12" y1="2" x2="12" y2="14"/></svg>
+                        切换 {subDir.label}
+                      </button>
+                      <button class="btn-quick btn-start-sm" title="直接启动（不影响其他卡片）" onclick={() => startDev(card, subDir)}>
+                        启动 {subDir.label}
+                      </button>
+                    {/if}
+                  {/if}
+                {/each}
+                {#if card.sub_dirs.some(sd => sd.has_package_json)}
+                  <button class="btn-link-install" onclick={() => { for (const sd of card.sub_dirs) if (sd.has_package_json) runInstall(card, sd); }}>全部安装</button>
+                {/if}
+              </div>
+            {/if}
           </div>
 
-          <div class="card-item-actions">
-            {#each card.sub_dirs as subDir (subDir.key)}
-              <div class="subdir-row">
-                <span class="subdir-label">{subDir.label}</span>
-                <div class="subdir-path" title={subDir.work_dir}>{subDir.work_dir.split('/').slice(-3).join('/')}</div>
-                <div class="subdir-btns">
-                  {#if isRunning(card, subDir)}
-                    <button class="btn-stop" onclick={() => { const id = serverIdFor(card, subDir); if (id) stopDev(id); }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                      停止
-                    </button>
-                  {:else if subDir.has_package_json}
-                    <button class="btn-start" onclick={() => startDev(card, subDir)}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="8,5 19,12 8,19"/></svg>
-                      启动
-                    </button>
-                  {/if}
-                  {#if subDir.has_package_json}
-                    <button class="btn-install" onclick={() => runInstall(card, subDir)} disabled={installing[`${card.folder_name}:${subDir.key}`]}>
-                      {installing[`${card.folder_name}:${subDir.key}`] ? '安装中...' : 'pnpm install'}
-                    </button>
-                  {/if}
+          <!-- main / template 的操作行 -->
+          {#if card.category !== 'card'}
+            <div class="card-item-actions">
+              {#each card.sub_dirs as subDir (subDir.key)}
+                <div class="subdir-row">
+                  <span class="subdir-label">{subDir.label}</span>
+                  <div class="subdir-path" title={subDir.work_dir}>{subDir.work_dir.split('/').slice(-3).join('/')}</div>
+                  <div class="subdir-btns">
+                    {#if isRunning(card, subDir)}
+                      <button class="btn-stop" onclick={() => { const id = serverIdFor(card, subDir); if (id) stopDev(id); }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                        停止
+                      </button>
+                    {:else if subDir.has_package_json}
+                      <button class="btn-start" onclick={() => startDev(card, subDir)}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="8,5 19,12 8,19"/></svg>
+                        启动
+                      </button>
+                    {/if}
+                    {#if subDir.has_package_json}
+                      <button class="btn-install" onclick={() => runInstall(card, subDir)} disabled={installing[`${card.folder_name}:${subDir.key}`]}>
+                        {installing[`${card.folder_name}:${subDir.key}`] ? '安装中...' : 'pnpm install'}
+                      </button>
+                    {/if}
+                  </div>
                 </div>
-              </div>
-            {/each}
-          </div>
+              {/each}
+            </div>
+          {/if}
 
           <!-- 运行中的服务器日志 -->
           {#each card.sub_dirs as subDir (subDir.key)}
@@ -702,5 +866,206 @@
   .empty-state p {
     margin: 0;
     font-size: 14px;
+  }
+
+  /* ===== 刷新按钮 ===== */
+  .refresh-btn {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .refresh-btn:hover:not(:disabled) {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
+
+  .refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-spinner-sm {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  /* ===== 运行状态栏 ===== */
+  .running-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 16px;
+  }
+
+  .running-bar-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--success-text);
+  }
+
+  .running-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success-text);
+    box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+    flex-shrink: 0;
+  }
+
+  .running-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .run-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  .run-chip.chip-main { border-color: var(--accent-ring); background: var(--accent-bg); }
+  .run-chip.chip-template { border-color: var(--success-text); background: var(--success-bg); }
+  .run-chip.chip-card { border-color: var(--accent-ring); }
+
+  .chip-text {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .chip-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+  }
+
+  .chip-stop {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: none;
+    background: var(--error-bg);
+    color: var(--error-text);
+    cursor: pointer;
+    transition: all 0.15s;
+    padding: 0;
+  }
+
+  .chip-stop:hover {
+    background: var(--error-hover-bg);
+  }
+
+  /* ===== 卡片运行高亮 ===== */
+  .card-item.card-running {
+    border-color: var(--success-text);
+    box-shadow: 0 0 0 1px var(--success-text);
+  }
+
+  /* ===== 快速操作区 ===== */
+  .quick-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .btn-quick {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+    white-space: nowrap;
+  }
+
+  .btn-switch {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .btn-switch:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .btn-switch:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+
+  .btn-start-sm {
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .btn-start-sm:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
+
+  .btn-stop.btn-quick {
+    background: var(--error-bg);
+    color: var(--error-text);
+  }
+
+  .btn-stop.btn-quick:hover {
+    background: var(--error-hover-bg);
+  }
+
+  .chip-run-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success-text);
+    box-shadow: 0 0 4px rgba(76, 175, 80, 0.6);
+    flex-shrink: 0;
+  }
+
+  .btn-link-install {
+    background: none;
+    border: none;
+    color: var(--link);
+    font-size: 11px;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 4px 6px;
+  }
+
+  .btn-link-install:hover {
+    color: var(--link-hover);
   }
 </style>

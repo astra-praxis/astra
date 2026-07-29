@@ -41,6 +41,8 @@
   let selectedFolder = $state<string | null>(null);
 
   let runningServers = $state<Record<string, DevServerInfo>>({});
+  let failedServers = $state<Record<string, number>>({}); // server_id → 退出码（启动失败）
+  let failedInfo = $state<Record<string, DevServerInfo>>({}); // 失败服务器的信息
   let activeKeys = $derived(new Set(
     Object.values(runningServers).filter(s => s.status === 'running').map(s => `${s.card_name}:${s.subdir}`)
   ));
@@ -94,9 +96,17 @@
     });
     unlisteners.push(uncdone);
 
-    const unst = await listen<{ server_id: string }>('dev-server-stopped', (e) => {
+    const unst = await listen<{ server_id: string; exit_code: number; success: boolean }>('dev-server-stopped', (e) => {
+      const info = runningServers[e.payload.server_id];
       const ns = { ...runningServers }; delete ns[e.payload.server_id]; runningServers = ns;
-      delete logsMap[e.payload.server_id];
+      // 内部记录失败信息（不在页面显示）
+      if (!e.payload.success) {
+        failedServers = { ...failedServers, [e.payload.server_id]: e.payload.exit_code };
+        if (info) failedInfo = { ...failedInfo, [e.payload.server_id]: info };
+        // 日志保留在 logsMap 中供后台调试
+      } else {
+        delete logsMap[e.payload.server_id];
+      }
     });
     unlisteners.push(unst);
 
@@ -125,14 +135,24 @@
   }
 
   async function startDev(card: DevCardInfo, subDir: DevSubDir) {
+    // 清除该卡片之前的失败记录
+    for (const sid of Object.keys(failedServers)) {
+      const info = failedInfo[sid];
+      if (info && info.card_name === card.folder_name && info.subdir === subDir.key) {
+        const fs = { ...failedServers }; delete fs[sid]; failedServers = fs;
+        const fi = { ...failedInfo }; delete fi[sid]; failedInfo = fi;
+        delete logsMap[sid];
+      }
+    }
     try {
       const id = await invoke<string>('start_dev_server', {
         workDir: subDir.work_dir, cardName: card.folder_name, subdirKey: subDir.key,
       });
-      runningServers = { ...runningServers, [id]: {
+      const info: DevServerInfo = {
         id, card_name: card.folder_name, subdir: subDir.key, work_dir: subDir.work_dir,
         command: 'pnpm dev', started_at: Math.floor(Date.now()/1000), status: 'running', pid: null,
-      }};
+      };
+      runningServers = { ...runningServers, [id]: info };
     } catch (e) { error = `启动失败: ${e}`; }
   }
 
@@ -339,40 +359,20 @@
                 {/if}
               {/each}
             </div>
-            <!-- 运行中日志 -->
+            <!-- 运行中状态条 -->
             {#each card.sub_dirs as subDir (subDir.key)}
               {#if isRunning(card, subDir)}
                 {@const sid = serverIdFor(card, subDir)}
                 {#if sid}
-                  <div class="base-log">
-                    <div class="base-log-head">
-                      <span class="run-dot-sm"></span>
-                      <span class="base-log-sub">{subDir.label}</span>
-                      <span class="base-log-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
-                      <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
-                        <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-                      </button>
-                    </div>
-                    <div class="base-log-body">
-                      {#each serverLogs(sid) as log}
-                        <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
-                      {/each}
-                      {#if serverLogs(sid).length === 0}
-                        <div class="log-empty">等待输出...</div>
-                      {/if}
-                    </div>
+                  <div class="running-status-bar">
+                    <span class="run-dot-sm"></span>
+                    <span class="running-status-label">{subDir.label} 运行中</span>
+                    <span class="running-status-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
+                    <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                    </button>
                   </div>
                 {/if}
-              {/if}
-            {/each}
-            <!-- 安装日志 -->
-            {#each card.sub_dirs as subDir (subDir.key)}
-              {#if cmdLogs[`${subDir.work_dir}:install`]?.length > 0}
-                <div class="mini-log">
-                  {#each cmdLogs[`${subDir.work_dir}:install`] as line}
-                    <div class="log-line">{line}</div>
-                  {/each}
-                </div>
               {/if}
             {/each}
           </div>
@@ -408,34 +408,15 @@
               {#if isRunning(card, subDir)}
                 {@const sid = serverIdFor(card, subDir)}
                 {#if sid}
-                  <div class="base-log">
-                    <div class="base-log-head">
-                      <span class="run-dot-sm"></span>
-                      <span class="base-log-sub">{subDir.label}</span>
-                      <span class="base-log-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
-                      <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
-                        <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-                      </button>
-                    </div>
-                    <div class="base-log-body">
-                      {#each serverLogs(sid) as log}
-                        <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
-                      {/each}
-                      {#if serverLogs(sid).length === 0}
-                        <div class="log-empty">等待输出...</div>
-                      {/if}
-                    </div>
+                  <div class="running-status-bar">
+                    <span class="run-dot-sm"></span>
+                    <span class="running-status-label">{subDir.label} 运行中</span>
+                    <span class="running-status-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
+                    <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                    </button>
                   </div>
                 {/if}
-              {/if}
-            {/each}
-            {#each card.sub_dirs as subDir (subDir.key)}
-              {#if cmdLogs[`${subDir.work_dir}:install`]?.length > 0}
-                <div class="mini-log">
-                  {#each cmdLogs[`${subDir.work_dir}:install`] as line}
-                    <div class="log-line">{line}</div>
-                  {/each}
-                </div>
               {/if}
             {/each}
           </div>
@@ -493,16 +474,6 @@
                 {/if}
               {/each}
             </div>
-            <!-- 安装日志 -->
-            {#each selectedCard.sub_dirs as subDir (subDir.key)}
-              {#if cmdLogs[`${subDir.work_dir}:install`]?.length > 0}
-                <div class="mini-log">
-                  {#each cmdLogs[`${subDir.work_dir}:install`] as line}
-                    <div class="log-line">{line}</div>
-                  {/each}
-                </div>
-              {/if}
-            {/each}
           </div>
         {/if}
 
@@ -520,14 +491,6 @@
                   <button class="log-stop-btn" onclick={() => stopDev(srv.id)} title="停止">
                     <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
                   </button>
-                </div>
-                <div class="run-card-body">
-                  {#each serverLogs(srv.id) as log}
-                    <div class="log-line" class:log-stderr={log.stream === 'stderr'}>{log.line}</div>
-                  {/each}
-                  {#if serverLogs(srv.id).length === 0}
-                    <div class="log-empty">等待输出...</div>
-                  {/if}
                 </div>
               </div>
             {/each}
@@ -738,18 +701,18 @@
   }
   .btn-stop-all:hover { background: var(--error-hover-bg); }
 
-  /* ===== 日志 ===== */
-  .base-log {
-    margin-top: 8px; border: 1px solid var(--border-light);
-    border-radius: 7px; overflow: hidden; background: var(--bg-subtle);
+  /* ===== 运行状态条（替代日志面板） ===== */
+  .running-status-bar {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 8px; padding: 5px 10px;
+    background: var(--bg-subtle); border: 1px solid var(--border-light);
+    border-radius: 7px;
   }
-  .base-log-head {
-    display: flex; align-items: center; gap: 5px;
-    padding: 5px 10px; background: var(--bg-card);
-    border-bottom: 1px solid var(--border-light);
+  .running-status-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .running-status-time {
+    font-size: 10px; color: var(--text-muted); margin-left: auto;
+    font-family: 'SF Mono','Cascadia Code',monospace;
   }
-  .base-log-sub { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
-  .base-log-time { font-size: 10px; color: var(--text-muted); margin-left: auto; font-family: 'SF Mono','Cascadia Code',monospace; }
   .log-stop-btn {
     display: flex; align-items: center; justify-content: center;
     width: 18px; height: 18px; border-radius: 4px; border: none;
@@ -757,22 +720,6 @@
     cursor: pointer; transition: all .15s; padding: 0;
   }
   .log-stop-btn:hover { background: var(--error-hover-bg); }
-  .base-log-body { padding: 6px 10px; max-height: 150px; overflow-y: auto; }
-  .mini-log {
-    margin-top: 6px; padding: 6px 10px; background: var(--bg-subtle);
-    border: 1px solid var(--border-light); border-radius: 7px;
-    max-height: 100px; overflow-y: auto;
-  }
-  .log-line {
-    font-family: 'SF Mono','Cascadia Code',monospace;
-    font-size: 11px; color: var(--text-secondary); line-height: 1.5;
-    white-space: pre-wrap; word-break: break-all;
-  }
-  .log-stderr { color: var(--error-text); }
-  .log-empty {
-    font-family: 'SF Mono','Cascadia Code',monospace;
-    font-size: 11px; color: var(--text-muted); font-style: italic;
-  }
 
   /* ===== 右栏：卡片标签 ===== */
   .card-tags { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
@@ -820,8 +767,7 @@
   }
   .run-card-head {
     display: flex; align-items: center; gap: 6px;
-    padding: 6px 12px; background: var(--bg-card);
-    border-bottom: 1px solid var(--border-light);
+    padding: 8px 12px; background: var(--bg-card);
   }
   .run-dot {
     width: 6px; height: 6px; border-radius: 50%;
@@ -829,11 +775,11 @@
   }
   .run-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
   .run-sub { font-size: 10px; color: var(--text-muted); }
+  .run-time { font-size: 10px; color: var(--text-muted); margin-left: auto; font-family: 'SF Mono','Cascadia Code',monospace; }
   .run-time {
     font-size: 10px; color: var(--text-muted); margin-left: auto;
     font-family: 'SF Mono','Cascadia Code',monospace;
   }
-  .run-card-body { padding: 6px 12px; max-height: 180px; overflow-y: auto; }
 
   /* ===== 配置按钮 ===== */
   .btn-config {

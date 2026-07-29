@@ -180,7 +180,7 @@ fn replace_cookie_value(content: &str, new_cookie: &str) -> Option<String> {
     Some(result)
 }
 
-/// 构建 PATH 环境变量，补充打包后可能缺失的路径（nvm/fnm/homebrew 等）
+/// 构建 PATH 环境变量，补充打包后可能缺失的路径（nvm/fnm/volta/homebrew 等）
 fn build_full_path() -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
     let home = std::env::var("HOME").unwrap_or_default();
@@ -194,17 +194,63 @@ fn build_full_path() -> String {
     ];
 
     if !home.is_empty() {
-        // npm global bins
+        // npm global
         extra.push(format!("{}/.npm-global/bin", home));
-        // nvm
-        extra.push(format!("{}/.nvm/versions/node/current/bin", home));
-        // fnm
+
+        // ===== fnm (Fast Node Manager) =====
+        // 现代版 fnm 默认目录: ~/.local/share/fnm/
+        // default alias: ~/.local/share/fnm/aliases/default → node-versions/vXX.X.X/installation
+        // 传统路径: ~/Library/fnm/
+        extra.push(format!("{}/.local/share/fnm/aliases/default/bin", home));
         extra.push(format!("{}/Library/fnm/aliases/default/bin", home));
-        // volta
+        // glob 所有版本目录（最新开发的 fallback）
+        for base in &[
+            format!("{}/.local/share/fnm/node-versions", home),
+            format!("{}/Library/fnm/node-versions", home),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(base) {
+                for entry in entries.flatten() {
+                    let bin = entry.path().join("installation/bin");
+                    if bin.is_dir() {
+                        extra.push(bin.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+
+        // ===== nvm =====
+        // nvm 没有 current 软链，需 glob 版本目录
+        let nvm_dir_base = format!("{}/.nvm/versions/node", home);
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir_base) {
+            for entry in entries.flatten() {
+                let bin = entry.path().join("bin");
+                if bin.is_dir() {
+                    extra.push(bin.to_string_lossy().to_string());
+                }
+            }
+        }
+        // nvm 也可能用 NVM_HOME 环境变量（$HOME/.nvm）
+        // 允许用户自定义 NVM_DIR
+        if let Ok(nvm_dir) = std::env::var("NVM_DIR") {
+            let nvm_versions = format!("{}/versions/node", nvm_dir);
+            if let Ok(entries) = std::fs::read_dir(&nvm_versions) {
+                for entry in entries.flatten() {
+                    let bin = entry.path().join("bin");
+                    if bin.is_dir() {
+                        extra.push(bin.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+
+        // ===== volta =====
         extra.push(format!("{}/.volta/bin", home));
+
+        // ===== pnpm global =====
+        extra.push(format!("{}/Library/pnpm", home));
     }
 
-    // 去重
+    // 现有 PATH 放最后（优先使用上面稳定的路径）
     extra.push(existing);
     extra.join(":")
 }
@@ -469,9 +515,10 @@ pub async fn run_card_command(
         }
     });
 
-    // 等待子进程
-    let status = child
-        .wait()
+    // 等待子进程（在 blocking 线程等待，不阻塞异步运行时）
+    let status = tokio::task::spawn_blocking(move || child.wait())
+        .await
+        .map_err(|e| format!("等待命令任务失败: {}", e))?
         .map_err(|e| format!("等待命令完成失败: {}", e))?;
 
     // 等待输出读取完成
@@ -566,7 +613,7 @@ pub fn start_dev_server(
     let app_bg = app.clone();
     let sid_bg = server_id.clone();
 
-    // stdout 读取线程（stdout EOF 代表进程退出，发送 stopped 事件）
+    // stdout 读取线程（stdout EOF 代表进程退出）
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
@@ -584,15 +631,27 @@ pub fn start_dev_server(
                 );
             }
         }
-        // stdout EOF → 通知前端进程已停止
-        let _ = app_bg.emit(
-            "dev-server-stopped",
-            serde_json::json!({
-                "server_id": sid_bg,
-                "exit_code": 0,
-                "success": true,
-            }),
-        );
+        // stdout EOF → 启动等待线程获取真实退出码
+        let app_wait = app_bg.clone();
+        let sid_wait = sid_bg.clone();
+        let state = app_wait.state::<DevServerState>();
+        let mut servers = state.lock().unwrap();
+        if let Some(mut proc) = servers.remove(&sid_wait) {
+            let status = proc.child.wait().ok();
+            drop(servers);
+            let (exit_code, success) = match status {
+                Some(s) => (s.code().unwrap_or(-1), s.success()),
+                None => (-1, false),
+            };
+            let _ = app_wait.emit(
+                "dev-server-stopped",
+                serde_json::json!({
+                    "server_id": sid_wait,
+                    "exit_code": exit_code,
+                    "success": success,
+                }),
+            );
+        }
     });
 
     // stderr 读取线程

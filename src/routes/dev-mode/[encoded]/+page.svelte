@@ -30,6 +30,16 @@
     started_at: number;
     status: string;
     pid: number | null;
+    port: number | null;
+  }
+
+  interface DevHistoryEntry {
+    work_dir: string;
+    card_name: string;
+    subdir_key: string;
+    command: string;
+    project_path: string;
+    last_started_at: number;
   }
 
   let { params } = $props();
@@ -49,6 +59,7 @@
     Object.values(runningServers).filter(s => s.status === 'running').map(s => `${s.card_name}:${s.subdir}`)
   ));
   let logsMap = $state<Record<string, { stream: string; line: string }[]>>({});
+  let history = $state<DevHistoryEntry[]>([]);
   let installing = $state<Record<string, boolean>>({});
   let cmdLogs = $state<Record<string, string[]>>({});
   let unlisteners: UnlistenFn[] = [];
@@ -83,6 +94,11 @@
     } else {
       await favoriteStore.set(projectPath, projectName);
     }
+  }
+
+  // 根据卡片类别返回启动命令
+  function devCommandForCard(card: DevCardInfo): string {
+    return card.category === 'main' ? 'pnpm run dev' : 'pnpm run dev:shell';
   }
 
   onMount(() => {
@@ -137,6 +153,24 @@
     });
     unlisteners.push(unst);
 
+    // 监听一键停止全部
+    const unall = await listen<{ count: number }>('dev-all-stopped', () => {
+      runningServers = {};
+      failedServers = {};
+      failedInfo = {};
+      logsMap = {};
+    });
+    unlisteners.push(unall);
+
+    // 监听端口事件
+    const unport = await listen<{ server_id: string; port: number }>('dev-server-port', (e) => {
+      const { server_id, port } = e.payload;
+      if (runningServers[server_id]) {
+        runningServers = { ...runningServers, [server_id]: { ...runningServers[server_id], port } };
+      }
+    });
+    unlisteners.push(unport);
+
     try {
       cards = await invoke<DevCardInfo[]>('scan_dev_dirs', { projectPath });
       const servers = await invoke<DevServerInfo[]>('list_dev_servers');
@@ -144,6 +178,7 @@
       for (const s of servers) sMap[s.id] = s;
       runningServers = sMap;
       if (cardList.length > 0) selectedFolder = cardList[0].folder_name;
+      await loadHistory();
     } catch (e) {
       error = `加载失败: ${e}`;
     } finally {
@@ -171,16 +206,19 @@
         delete logsMap[sid];
       }
     }
+    const command = devCommandForCard(card);
     logs.info('dev-server', `启动 ${card.display_name}/${subDir.label}`);
     try {
       const id = await invoke<string>('start_dev_server', {
         workDir: subDir.work_dir, cardName: card.folder_name, subdirKey: subDir.key,
+        command, projectPath,
       });
       const info: DevServerInfo = {
         id, card_name: card.folder_name, subdir: subDir.key, work_dir: subDir.work_dir,
-        command: 'pnpm dev', started_at: Math.floor(Date.now()/1000), status: 'running', pid: null,
+        command, started_at: Math.floor(Date.now()/1000), status: 'running', pid: null, port: null,
       };
       runningServers = { ...runningServers, [id]: info };
+      await loadHistory();
     } catch (e) { error = `启动失败: ${e}`; logs.error('dev-server', `启动失败: ${e}`); }
   }
 
@@ -219,7 +257,7 @@
 
   async function refresh() {
     refreshing = true;
-    try { cards = await invoke<DevCardInfo[]>('scan_dev_dirs', { projectPath }); }
+    try { cards = await invoke<DevCardInfo[]>('scan_dev_dirs', { projectPath }); await loadHistory(); }
     catch (e) { error = `刷新失败: ${e}`; }
     finally { refreshing = false; }
   }
@@ -237,12 +275,83 @@
   }
   function serverLogs(id: string) { return logsMap[id] || []; }
 
-  // 停止所有卡片服务
-  async function stopAllCards() {
-    for (const s of runningCards) {
-      await invoke<boolean>('stop_dev_server', { serverId: s.id });
-      const ns = { ...runningServers }; delete ns[s.id]; runningServers = ns;
+  // 一键停止所有运行中的服务
+  let stoppingAll = $state(false);
+  async function stopAllServers() {
+    stoppingAll = true;
+    try {
+      await invoke<number>('stop_all_dev_servers');
+      runningServers = {};
+      logs.info('dev-server', '已停止所有服务');
+    } catch (e) { error = `停止失败: ${e}`; logs.error('dev-server', `停止失败: ${e}`); }
+    finally { stoppingAll = false; }
+  }
+
+  // 旧函数已废弃，使用 stopAllServers 替代
+
+  // ===== 历史记录 =====
+  async function loadHistory() {
+    try {
+      history = await invoke<DevHistoryEntry[]>('list_dev_history', { projectPath });
+    } catch { /* ignore */ }
+  }
+
+  async function clearHistory() {
+    try {
+      await invoke('clear_dev_history', { projectPath });
+      history = [];
+    } catch (e) { error = `清除历史失败: ${e}`; }
+  }
+
+  // 从历史记录重启服务
+  async function restartFromHistory(entry: DevHistoryEntry) {
+    // 优先在已扫描的 cards 中匹配
+    const card = cards.find(c => c.sub_dirs.some(sd => sd.work_dir === entry.work_dir));
+    if (card) {
+      const subDir = card.sub_dirs.find(sd => sd.work_dir === entry.work_dir);
+      if (subDir) {
+        await startDev(card, subDir);
+        return;
+      }
     }
+    // 卡片可能已改名/删除，但目录仍存在，直接启动
+    try {
+      const id = await invoke<string>('start_dev_server', {
+        workDir: entry.work_dir, cardName: entry.card_name, subdirKey: entry.subdir_key,
+        command: entry.command, projectPath,
+      });
+      const info: DevServerInfo = {
+        id, card_name: entry.card_name, subdir: entry.subdir_key, work_dir: entry.work_dir,
+        command: entry.command, started_at: Math.floor(Date.now()/1000), status: 'running', pid: null, port: null,
+      };
+      runningServers = { ...runningServers, [id]: info };
+      await loadHistory();
+      logs.info('dev-server', `启动 ${entry.card_name}/${entry.subdir_key}`);
+    } catch (e) { error = `启动失败: ${e}`; logs.error('dev-server', `启动失败: ${e}`); }
+  }
+
+  // 判断历史条目是否正在运行
+  function historyIsRunning(entry: DevHistoryEntry): boolean {
+    return Object.values(runningServers).some(
+      s => s.work_dir === entry.work_dir && s.status === 'running'
+    );
+  }
+
+  // 历史条目对应的显示名
+  function historyDisplayName(entry: DevHistoryEntry): string {
+    const card = cards.find(c => c.folder_name === entry.card_name);
+    if (card) return card.display_name;
+    return entry.card_name;
+  }
+
+  // 历史条目对应的 子目录标签
+  function historySubDirLabel(entry: DevHistoryEntry): string {
+    const card = cards.find(c => c.folder_name === entry.card_name);
+    if (card) {
+      const sd = card.sub_dirs.find(s => s.key === entry.subdir_key);
+      if (sd) return sd.label;
+    }
+    return entry.subdir_key;
   }
 
   // 返回：优先返回到项目详情页（通过 ?from= 携带的项目路径）
@@ -348,6 +457,16 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>
       {/if}
     </button>
+    {#if runningList.length > 0}
+      <button class="stop-all-nav" onclick={stopAllServers} disabled={stoppingAll} title="一键停止所有服务">
+        {#if stoppingAll}
+          <div class="btn-spinner-sm"></div>
+        {:else}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+        {/if}
+        <span>停止全部 ({runningList.length})</span>
+      </button>
+    {/if}
     <button class="refresh-btn" onclick={refresh} disabled={refreshing} title="刷新目录">
       {#if refreshing}
         <div class="btn-spinner-sm"></div>
@@ -407,6 +526,9 @@
                   <div class="running-status-bar">
                     <span class="run-dot-sm"></span>
                     <span class="running-status-label">{subDir.label} 运行中</span>
+                    {#if runningServers[sid]?.port}
+                      <a class="port-badge" href={`http://localhost:${runningServers[sid].port}`} target="_blank" title="点击打开">:{runningServers[sid].port}</a>
+                    {/if}
                     <span class="running-status-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
                     <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
@@ -451,6 +573,9 @@
                   <div class="running-status-bar">
                     <span class="run-dot-sm"></span>
                     <span class="running-status-label">{subDir.label} 运行中</span>
+                    {#if runningServers[sid]?.port}
+                      <a class="port-badge" href={`http://localhost:${runningServers[sid].port}`} target="_blank" title="点击打开">:{runningServers[sid].port}</a>
+                    {/if}
                     <span class="running-status-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
                     <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
@@ -468,8 +593,8 @@
         <div class="col-header">
           <span class="col-title">卡片</span>
           <span class="col-hint">{cardList.length} 个</span>
-          {#if runningCards.length > 0}
-            <button class="btn-sm btn-stop-all" onclick={stopAllCards}>全部停止</button>
+          {#if runningList.length > 0}
+            <button class="btn-sm btn-stop-all" onclick={stopAllServers} disabled={stoppingAll}>停止全部</button>
           {/if}
         </div>
 
@@ -527,6 +652,9 @@
                   <span class="run-dot"></span>
                   <span class="run-name">{sc?.display_name ?? srv.card_name}</span>
                   <span class="run-sub">{serverSubDirLabel(srv)}</span>
+                  {#if srv.port}
+                    <a class="port-badge" href={`http://localhost:${srv.port}`} target="_blank" title="点击打开">:{srv.port}</a>
+                  {/if}
                   <span class="run-time">{formatTime(srv.started_at)}</span>
                   <button class="log-stop-btn" onclick={() => stopDev(srv.id)} title="停止">
                     <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
@@ -534,6 +662,33 @@
                 </div>
               </div>
             {/each}
+          </div>
+        {/if}
+
+        <!-- 最近启动历史 -->
+        {#if history.length > 0}
+          <div class="history-section">
+            <div class="history-header">
+              <span class="history-title">🕘 最近启动</span>
+              <span class="history-hint">{history.length} 条</span>
+              <button class="btn-history-clear" onclick={clearHistory} title="清除历史">清除</button>
+            </div>
+            <div class="history-list">
+              {#each history as entry (entry.work_dir)}
+                <div class="history-item" class:history-running={historyIsRunning(entry)}>
+                  <div class="history-item-info">
+                    <span class="history-item-name">{historyDisplayName(entry)}</span>
+                    <span class="history-item-sub">{historySubDirLabel(entry)}</span>
+                    <span class="history-item-time">{formatTime(entry.last_started_at)}</span>
+                  </div>
+                  {#if historyIsRunning(entry)}
+                    <span class="run-dot-sm"></span>
+                  {:else}
+                    <button class="btn-sm btn-start-sm" onclick={() => restartFromHistory(entry)} title="一键启动">启动</button>
+                  {/if}
+                </div>
+              {/each}
+            </div>
           </div>
         {/if}
       </div>
@@ -925,4 +1080,61 @@
   }
   .config-footer .btn-save:hover:not(:disabled) { background: var(--accent-hover); }
   .config-footer .btn-save:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ===== 导航栏：停止全部按钮 ===== */
+  .stop-all-nav {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 12px; border-radius: 7px;
+    background: var(--error-bg); color: var(--error-text);
+    border: 1px solid var(--error-border);
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s;
+    white-space: nowrap;
+  }
+  .stop-all-nav:hover:not(:disabled) { background: var(--error-hover-bg); }
+  .stop-all-nav:disabled { opacity: .6; cursor: wait; }
+
+  /* ===== 端口徽标 ===== */
+  .port-badge {
+    font-size: 10px; font-weight: 700; font-family: 'SF Mono','Cascadia Code',monospace;
+    padding: 1px 6px; border-radius: 4px; text-decoration: none;
+    background: var(--accent-bg); color: var(--accent);
+    border: 1px solid var(--accent-ring);
+    transition: all .15s;
+  }
+  .port-badge:hover { background: var(--accent); color: #fff; }
+
+  /* ===== 历史记录 ===== */
+  .history-section {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; flex-shrink: 0;
+    border-style: dashed;
+  }
+  .history-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .history-title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+  .history-hint { font-size: 11px; color: var(--text-muted); }
+  .btn-history-clear {
+    margin-left: auto; padding: 2px 8px; border-radius: 4px; border: none;
+    background: var(--bg-subtle); color: var(--text-muted);
+    font-size: 10px; cursor: pointer; transition: all .15s;
+  }
+  .btn-history-clear:hover { background: var(--error-bg); color: var(--error-text); }
+  .history-list { display: flex; flex-direction: column; gap: 5px; }
+  .history-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 7px;
+    background: var(--bg-subtle); border: 1px solid var(--border-light);
+    transition: all .15s;
+  }
+  .history-item:hover { background: var(--bg-card-hover); }
+  .history-item.history-running { opacity: .7; }
+  .history-item-info { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+  .history-item-name {
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .history-item-sub { font-size: 10px; color: var(--text-muted); }
+  .history-item-time {
+    font-size: 10px; color: var(--text-muted); margin-left: auto;
+    font-family: 'SF Mono','Cascadia Code',monospace;
+  }
 </style>

@@ -61,6 +61,8 @@ pub struct DevServerInfo {
     pub status: String,
     /// PID
     pub pid: Option<u32>,
+    /// 监听端口（从输出日志解析）
+    pub port: Option<u16>,
 }
 
 /// 内部管理的运行中进程
@@ -74,6 +76,8 @@ pub struct RunningDevProcess {
     pub child: Child,
     pub started_at: u64,
     pub pid: u32,
+    /// 从输出日志解析的端口
+    pub port: Option<u16>,
 }
 
 pub type DevServerState = Mutex<HashMap<String, RunningDevProcess>>;
@@ -87,6 +91,23 @@ pub struct DevConfig {
     pub proxy_target: String,
     /// master devServer 端口
     pub port: Option<u16>,
+}
+
+/// 开发服务器历史记录条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DevHistoryEntry {
+    /// 工作目录（唯一标识）
+    pub work_dir: String,
+    /// 卡片名称
+    pub card_name: String,
+    /// 子目录 key (web/mobile/component)
+    pub subdir_key: String,
+    /// 启动命令
+    pub command: String,
+    /// 所属项目路径
+    pub project_path: String,
+    /// 最后启动时间戳
+    pub last_started_at: u64,
 }
 
 // ===== vue.config.js 解析辅助 =====
@@ -155,6 +176,23 @@ fn extract_dev_server_port(content: &str) -> Option<u16> {
                     .take_while(|c| c.is_ascii_digit())
                     .collect();
                 if let Ok(port) = num_str.parse::<u16>() {
+                    return Some(port);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 从 dev server 输出行中解析监听端口
+/// 匹配 localhost:PORT / 127.0.0.1:PORT / 0.0.0.0:PORT 等常见格式
+fn extract_port_from_output(line: &str) -> Option<u16> {
+    for pattern in &["localhost:", "127.0.0.1:", "0.0.0.0:", "http://[::]:"] {
+        if let Some(idx) = line.find(pattern) {
+            let after = &line[idx + pattern.len()..];
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(port) = num_str.parse::<u16>() {
+                if port > 0 {
                     return Some(port);
                 }
             }
@@ -437,7 +475,9 @@ pub async fn run_card_command(
     let run_cmd = if command_name == "install" {
         "pnpm install".to_string()
     } else if command_name == "dev" {
-        "pnpm dev".to_string()
+        "pnpm run dev".to_string()
+    } else if command_name == "dev:shell" {
+        "pnpm run dev:shell".to_string()
     } else {
         return Err(format!("不支持的命令: {}", command_name));
     };
@@ -546,7 +586,9 @@ pub async fn run_card_command(
     }
 }
 
-/// 启动开发服务器（后台运行 pnpm dev）
+/// 启动开发服务器（后台运行）
+/// command: 完整启动命令，如 "pnpm run dev" 或 "pnpm run dev:shell"
+/// project_path: 所属项目路径，用于历史记录
 /// 返回服务器 ID
 #[tauri::command]
 pub fn start_dev_server(
@@ -554,11 +596,15 @@ pub fn start_dev_server(
     work_dir: String,
     card_name: String,
     subdir_key: String,
+    command: Option<String>,
+    project_path: Option<String>,
 ) -> Result<String, String> {
     let work_dir_path = Path::new(&work_dir);
     if !work_dir_path.is_dir() {
         return Err(format!("目录不存在: {}", work_dir));
     }
+
+    let run_command = command.unwrap_or_else(|| "pnpm dev".to_string());
 
     let shell = if cfg!(target_os = "windows") {
         "cmd"
@@ -573,7 +619,7 @@ pub fn start_dev_server(
 
     let mut child = Command::new(shell)
         .arg(shell_flag)
-        .arg("pnpm dev")
+        .arg(&run_command)
         .current_dir(&work_dir)
         .env("PATH", build_full_path())
         .stdout(Stdio::piped())
@@ -588,6 +634,23 @@ pub fn start_dev_server(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
+    // 记录历史
+    if let Some(ref proj_path) = project_path {
+        let mut history = read_dev_history(&app);
+        history.retain(|h| h.work_dir != work_dir);
+        history.push(DevHistoryEntry {
+            work_dir: work_dir.clone(),
+            card_name: card_name.clone(),
+            subdir_key: subdir_key.clone(),
+            command: run_command.clone(),
+            project_path: proj_path.clone(),
+            last_started_at: started_at,
+        });
+        history.sort_by(|a, b| b.last_started_at.cmp(&a.last_started_at));
+        history.truncate(50);
+        let _ = write_dev_history(&app, &history);
+    }
+
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
 
@@ -601,10 +664,11 @@ pub fn start_dev_server(
             card_name: card_name.clone(),
             subdir: subdir_key.clone(),
             work_dir: work_dir.clone(),
-            command: "pnpm dev".to_string(),
+            command: run_command.clone(),
             child,
             started_at,
             pid,
+            port: None,
         },
     );
     drop(servers); // 释放锁
@@ -618,6 +682,22 @@ pub fn start_dev_server(
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line) = line {
+                // 检测端口
+                if let Some(port) = extract_port_from_output(&line) {
+                    let state = app_bg.state::<DevServerState>();
+                    let mut servers = state.lock().unwrap();
+                    if let Some(proc) = servers.get_mut(&sid_bg) {
+                        proc.port = Some(port);
+                    }
+                    drop(servers);
+                    let _ = app_bg.emit(
+                        "dev-server-port",
+                        serde_json::json!({
+                            "server_id": sid_bg,
+                            "port": port,
+                        }),
+                    );
+                }
                 let _ = app_bg.emit(
                     "dev-server-log",
                     serde_json::json!({
@@ -661,6 +741,22 @@ pub fn start_dev_server(
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(line) = line {
+                // stderr 也可能输出了端口信息
+                if let Some(port) = extract_port_from_output(&line) {
+                    let state = app_err.state::<DevServerState>();
+                    let mut servers = state.lock().unwrap();
+                    if let Some(proc) = servers.get_mut(&sid_err) {
+                        proc.port = Some(port);
+                    }
+                    drop(servers);
+                    let _ = app_err.emit(
+                        "dev-server-port",
+                        serde_json::json!({
+                            "server_id": sid_err,
+                            "port": port,
+                        }),
+                    );
+                }
                 let _ = app_err.emit(
                     "dev-server-log",
                     serde_json::json!({
@@ -740,6 +836,7 @@ pub fn list_dev_servers(app: AppHandle) -> Result<Vec<DevServerInfo>, String> {
             started_at: server.started_at,
             status: status.to_string(),
             pid: Some(server.pid),
+            port: server.port,
         });
     }
 
@@ -749,6 +846,82 @@ pub fn list_dev_servers(app: AppHandle) -> Result<Vec<DevServerInfo>, String> {
     }
 
     Ok(result)
+}
+
+/// 一键停止所有运行中的开发服务器
+/// 返回停止的服务器数量
+#[tauri::command]
+pub fn stop_all_dev_servers(app: AppHandle) -> Result<usize, String> {
+    let state = app.state::<DevServerState>();
+    let mut servers = state.lock().unwrap();
+    let count = servers.len();
+    for (_, mut server) in servers.drain() {
+        match server.child.try_wait() {
+            Ok(None) => {
+                let _ = server.child.kill();
+            }
+            _ => {}
+        }
+    }
+    drop(servers);
+    // 发送单一事件，前端统一清理（不逐个发 dev-server-stopped 避免误标记为失败）
+    let _ = app.emit("dev-all-stopped", serde_json::json!({ "count": count }));
+    Ok(count)
+}
+
+// ===== 开发服务历史记录 =====
+
+/// 获取历史记录文件路径
+fn get_dev_history_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let config_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    std::fs::create_dir_all(&config_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
+    Ok(config_dir.join("dev_history.json"))
+}
+
+/// 读取历史记录
+fn read_dev_history(app: &AppHandle) -> Vec<DevHistoryEntry> {
+    let path = match get_dev_history_path(app) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// 写入历史记录
+fn write_dev_history(app: &AppHandle, history: &[DevHistoryEntry]) -> Result<(), String> {
+    let path = get_dev_history_path(app)?;
+    let json =
+        serde_json::to_string_pretty(history).map_err(|e| format!("序列化历史记录失败: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入历史记录失败: {}", e))?;
+    Ok(())
+}
+
+/// 查询指定项目的历史启动记录
+#[tauri::command]
+pub fn list_dev_history(
+    app: AppHandle,
+    project_path: String,
+) -> Result<Vec<DevHistoryEntry>, String> {
+    let history = read_dev_history(&app);
+    let filtered: Vec<DevHistoryEntry> = history
+        .into_iter()
+        .filter(|h| h.project_path == project_path)
+        .collect();
+    Ok(filtered)
+}
+
+/// 清除指定项目的历史启动记录
+#[tauri::command]
+pub fn clear_dev_history(app: AppHandle, project_path: String) -> Result<(), String> {
+    let mut history = read_dev_history(&app);
+    history.retain(|h| h.project_path != project_path);
+    write_dev_history(&app, &history)
 }
 
 // ===== 开发配置（Cookie / 代理地址） =====

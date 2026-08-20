@@ -29,6 +29,17 @@
     progress: number;
   }
 
+  // 最终下载事件（下载结束：完成/失败，含时间戳）
+  interface FinalEvent {
+    id: string;
+    status: string;
+    filename: string;
+    file_path: string;
+    finished_at: number | null;
+    total: number;
+    error: string | null;
+  }
+
   // ===== 格式工具 =====
   function formatSize(bytes: number): string {
     if (bytes === 0) return '—';
@@ -72,6 +83,17 @@
   // 事件监听器
   let unlistenProgress: UnlistenFn | null = null;
   let unlistenComplete: UnlistenFn | null = null;
+  let unlistenFinal: UnlistenFn | null = null;
+
+  // 最终下载事件提示（完成/失败，带时间）
+  let finalNotice = $state<{ type: 'success' | 'error'; message: string } | null>(null);
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function showFinalNotice(type: 'success' | 'error', message: string) {
+    finalNotice = { type, message };
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (finalNotice = null), 5000);
+  }
 
   onMount(async () => {
     await loadTasks();
@@ -85,11 +107,24 @@
     unlistenComplete = await listen<{ id: string }>('download-complete', () => {
       loadTasks();
     });
+
+    // 监听最终下载事件（完成/失败，含时间戳）
+    unlistenFinal = await listen<FinalEvent>('download-final', (event) => {
+      const p = event.payload;
+      const time = p.finished_at ? formatTime(p.finished_at) : '';
+      if (p.status === 'Completed') {
+        showFinalNotice('success', `下载完成「${p.filename}」${time}`);
+      } else if (p.status === 'Failed') {
+        showFinalNotice('error', `下载失败「${p.filename}」${time}${p.error ? `：${p.error}` : ''}`);
+      }
+      loadTasks();
+    });
   });
 
   onDestroy(() => {
     unlistenProgress?.();
     unlistenComplete?.();
+    unlistenFinal?.();
   });
 
   async function loadTasks() {
@@ -186,6 +221,24 @@
     }
   }
 
+  // 清空记录（二次确认，防止误操作）
+  let confirmClear = $state(false);
+
+  async function clearHistory() {
+    if (!confirmClear) {
+      confirmClear = true;
+      return;
+    }
+    confirmClear = false;
+    try {
+      await invoke('clear_download_history');
+      progressMap = {};
+      await loadTasks();
+    } catch (e) {
+      error = `清空失败: ${e}`;
+    }
+  }
+
   // ===== 状态显示 =====
   function getStatusInfo(status: string) {
     switch (status) {
@@ -225,9 +278,18 @@
         </svg>
         返回
       </button>
-      <h1>下载管理</h1>
+      <h1>下载记录</h1>
     </div>
     <div class="header-actions">
+      <button class="btn-clear" class:confirming={confirmClear} onclick={clearHistory}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <line x1="10" y1="11" x2="10" y2="17" />
+          <line x1="14" y1="11" x2="14" y2="17" />
+        </svg>
+        {confirmClear ? '确认清空？' : '清空记录'}
+      </button>
       <button class="btn-refresh" onclick={loadTasks} disabled={loading}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10" />
@@ -253,6 +315,15 @@
     </div>
   {/if}
 
+  <!-- 最终下载事件提示（完成/失败，带时间） -->
+  {#if finalNotice}
+    <div class="final-notice {finalNotice.type}">
+      <span>{finalNotice.type === 'success' ? '✅' : '⚠️'}</span>
+      <span>{finalNotice.message}</span>
+      <button class="error-dismiss" onclick={() => (finalNotice = null)}>✕</button>
+    </div>
+  {/if}
+
   <!-- 加载 -->
   {#if loading}
     <div class="loading">
@@ -265,8 +336,8 @@
   {#if !loading && tasks.length === 0 && !error}
     <div class="empty-state">
       <div class="empty-icon-big">📥</div>
-      <h3>没有下载任务</h3>
-      <p>点击「新建下载」按钮添加第一个下载任务</p>
+      <h3>暂无下载记录</h3>
+      <p>点击「新建下载」按钮开始第一个下载</p>
     </div>
   {/if}
 
@@ -509,6 +580,31 @@
     transition: all 0.2s;
   }
 
+  .btn-clear {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--bg-subtle);
+    border: 1px solid var(--error-border);
+    color: var(--error-text);
+  }
+
+  .btn-clear:hover {
+    background: var(--error-bg);
+  }
+
+  .btn-clear.confirming {
+    background: var(--error-text);
+    border-color: var(--error-text);
+    color: #fff;
+  }
+
   .btn-refresh {
     background: var(--bg-subtle);
     border: 1px solid var(--border);
@@ -556,6 +652,33 @@
     cursor: pointer;
     font-size: 16px;
     padding: 2px;
+  }
+
+  .final-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    border: 1px solid;
+  }
+
+  .final-notice.success {
+    background: var(--success-bg);
+    border-color: var(--success-text);
+    color: var(--success-text);
+  }
+
+  .final-notice.error {
+    background: var(--error-bg);
+    border-color: var(--error-border);
+    color: var(--error-text);
+  }
+
+  .final-notice .error-dismiss {
+    color: inherit;
   }
 
   .loading {

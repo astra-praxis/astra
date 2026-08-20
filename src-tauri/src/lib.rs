@@ -1326,11 +1326,15 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        // 清理所有运行中的开发服务器
+                        // 清理所有运行中的开发服务器（终止整个进程树 + 端口兜底，确保端口释放）
                         let state = app.state::<dev_mode::DevServerState>();
                         let mut servers = state.lock().unwrap();
                         for (_, mut server) in servers.drain() {
-                            let _ = server.child.kill();
+                            let port = server.port;
+                            dev_mode::terminate_process_tree(&mut server.child);
+                            if let Some(p) = port {
+                                dev_mode::kill_processes_on_port(p);
+                            }
                         }
                         app.exit(0);
                     }
@@ -1434,6 +1438,7 @@ pub fn run() {
             downloader::retry_download,
             downloader::open_download_folder,
             downloader::open_download_file,
+            downloader::clear_download_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -187,7 +187,14 @@ fn extract_dev_server_port(content: &str) -> Option<u16> {
 /// 从 dev server 输出行中解析监听端口
 /// 匹配 localhost:PORT / 127.0.0.1:PORT / 0.0.0.0:PORT 等常见格式
 fn extract_port_from_output(line: &str) -> Option<u16> {
-    for pattern in &["localhost:", "127.0.0.1:", "0.0.0.0:", "http://[::]:"] {
+    for pattern in &[
+        "localhost:",
+        "127.0.0.1:",
+        "0.0.0.0:",
+        "http://[::]:",
+        "http://[::1]:",
+        "[::1]:",
+    ] {
         if let Some(idx) = line.find(pattern) {
             let after = &line[idx + pattern.len()..];
             let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -292,6 +299,75 @@ fn build_full_path() -> String {
     extra.push(existing);
     extra.join(":")
 }
+
+/// 终止进程树（包括 pnpm/node 等子孙进程）
+///
+/// 启动时通过 process_group(0) 让每个服务自成进程组，
+/// 停止时对整个进程组发送 SIGTERM（优雅退出），等待短暂时间后
+/// 再发送 SIGKILL（强制），确保端口被释放。
+///
+/// 注意：不能以“直接子进程是否退出”作为是否强杀的判断依据，
+/// 因为 sh 退出后 node 等子孙进程可能仍存活并占用端口。
+#[cfg(unix)]
+pub fn terminate_process_tree(child: &mut Child) {
+    let pid = child.id() as i32;
+    if pid <= 1 {
+        let _ = child.kill();
+        return;
+    }
+    unsafe {
+        libc::kill(-pid, libc::SIGTERM);
+    }
+    // 短暂等待，让进程组优雅退出
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    // 强制结束整个进程组（若组已不存在，kill 返回 ESRCH，无副作用）
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+pub fn terminate_process_tree(child: &mut Child) {
+    let _ = child.kill();
+}
+
+/// 按端口强制结束占用进程（兜底措施）
+///
+/// 当进程组终止后端口仍被占用时（如脱离进程组的遗留 node 进程），
+/// 通过 lsof 找到监听该端口的进程并强杀，确保端口释放。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn kill_processes_on_port(port: u16) {
+    let port_spec = format!("TCP:{}", port);
+    let out = std::process::Command::new("lsof")
+        .args(["-t", "-i", &port_spec, "-sTCP:LISTEN"])
+        .output();
+    if let Ok(out) = out {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if let Ok(pid) = line.trim().parse::<i32>() {
+                if pid > 1 {
+                    unsafe {
+                        libc::kill(pid, libc::SIGKILL);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn kill_processes_on_port(_port: u16) {}
+
+/// 让子进程独立成进程组（Unix），便于后续整组终止
+#[cfg(unix)]
+fn setup_process_group(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn setup_process_group(_cmd: &mut Command) {}
 
 // ===== 命令 =====
 
@@ -494,15 +570,15 @@ pub async fn run_card_command(
         "-c"
     };
 
-    let mut child = Command::new(shell)
-        .arg(shell_flag)
+    let mut cmd = Command::new(shell);
+    cmd.arg(shell_flag)
         .arg(&run_cmd)
         .current_dir(&work_dir)
         .env("PATH", build_full_path())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("启动命令失败: {}", e))?;
+        .stderr(Stdio::piped());
+    setup_process_group(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| format!("启动命令失败: {}", e))?;
 
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
@@ -617,15 +693,15 @@ pub fn start_dev_server(
         "-c"
     };
 
-    let mut child = Command::new(shell)
-        .arg(shell_flag)
+    let mut cmd = Command::new(shell);
+    cmd.arg(shell_flag)
         .arg(&run_command)
         .current_dir(&work_dir)
         .env("PATH", build_full_path())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("启动服务器失败: {}", e))?;
+        .stderr(Stdio::piped());
+    setup_process_group(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| format!("启动服务器失败: {}", e))?;
 
     let pid = child.id();
     let server_id = Uuid::new_v4().to_string();
@@ -779,23 +855,28 @@ pub fn stop_dev_server(app: AppHandle, server_id: String) -> Result<bool, String
     let mut servers = state.lock().unwrap();
 
     if let Some(mut server) = servers.remove(&server_id) {
+        let port = server.port;
         match server.child.try_wait() {
             Ok(Some(_)) => {
-                // 已终止
+                // 已终止，但可能遗留占用端口的 node 进程，兜底清理
+                if let Some(p) = port {
+                    kill_processes_on_port(p);
+                }
                 Ok(true)
             }
             Ok(None) => {
-                // 仍在运行，强制终止
-                server
-                    .child
-                    .kill()
-                    .map_err(|e| format!("终止进程失败: {}", e))?;
+                // 仍在运行，终止整个进程树（含 pnpm/node 子孙进程）
+                terminate_process_tree(&mut server.child);
+                // 兜底：若端口仍被占用，按端口强杀，确保释放
+                if let Some(p) = port {
+                    kill_processes_on_port(p);
+                }
                 let _ = app.emit(
                     "dev-server-stopped",
                     serde_json::json!({
                         "server_id": server_id,
                         "exit_code": -1,
-                        "success": false,
+                        "success": true,
                     }),
                 );
                 Ok(true)
@@ -856,11 +937,16 @@ pub fn stop_all_dev_servers(app: AppHandle) -> Result<usize, String> {
     let mut servers = state.lock().unwrap();
     let count = servers.len();
     for (_, mut server) in servers.drain() {
+        let port = server.port;
         match server.child.try_wait() {
             Ok(None) => {
-                let _ = server.child.kill();
+                terminate_process_tree(&mut server.child);
             }
             _ => {}
+        }
+        // 兜底：按端口清理遗留进程，确保端口释放
+        if let Some(p) = port {
+            kill_processes_on_port(p);
         }
     }
     drop(servers);

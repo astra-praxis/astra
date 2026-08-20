@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body { margin: 0; }
+  .content { overflow-y: auto; background: #f8fafc; padding: 32px; height: 100vh; box-sizing: border-box; }
+  .dev-mode-page { padding: 16px 20px; height: 100%; display: flex; flex-direction: column; overflow-x: hidden; box-sizing: border-box; }
+  .dev-nav {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; padding-bottom: 12px;
+    border-bottom: 1px solid #e2e8f0; flex-shrink: 0;
+  }
+  .back-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 10px; background: #fff; border: 1px solid #e2e8f0;
+    border-radius: 7px; font-size: 12px; color: #64748b;
+    cursor: pointer; white-space: nowrap; font-family: sans-serif;
+  }
+  .dev-nav-info { display: flex; align-items: center; gap: 6px; color: #818cf8; }
+  .dev-nav-title { font-size: 15px; font-weight: 700; color: #0f172a; font-family: sans-serif; }
+  .dev-nav-badge {
+    font-size: 10px; padding: 2px 7px; border-radius: 10px;
+    background: #eef2ff; color: #818cf8;
+    border: 1px solid #c7d2fe; font-weight: 600; font-family: sans-serif; white-space: nowrap;
+  }
+  .fav-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 7px;
+    background: #fff; border: 1px solid #e2e8f0;
+    color: #94a3b8; cursor: pointer;
+    margin-left: 8px; font-size: 14px;
+  }
+  .refresh-btn {
+    margin-left: auto; display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 7px;
+    background: #fff; border: 1px solid #e2e8f0;
+    color: #64748b; cursor: pointer; font-size: 16px;
+  }
+  .btn-spinner-sm {
+    width: 14px; height: 14px;
+    border: 2px solid #cbd5e1; border-top-color: #818cf8;
+    border-radius: 50%; animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .stop-all-nav {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 12px; border-radius: 7px;
+    background: #fef2f2; color: #dc2626;
+    border: 1px solid #fecaca;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    white-space: nowrap; font-family: sans-serif;
+  }
+  .stop-all-nav:disabled { opacity: .6; cursor: wait; }
+</style>
+</head>
+<body>
+<div class="content">
+  <div class="dev-mode-page">
+    <div class="dev-nav">
+      <button class="back-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+        返回
+      </button>
+      <div class="dev-nav-info">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span class="dev-nav-title" id="pname">casp-portal-V3.8.3</span>
+        <span class="dev-nav-badge">开发模式</span>
+      </div>
+      <button class="fav-btn">★</button>
+      <button class="stop-all-nav" id="stopAll">
+        <div class="btn-spinner-sm" id="spinner" style="display:none"></div>
+        <svg id="stopIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+        <span id="stopText">停止全部 (3)</span>
+      </button>
+      <button class="refresh-btn" id="refresh">⟳</button>
+    </div>
+    <div style="color:#94a3b8;font-family:monospace;font-size:12px;white-space:pre" id="info"></div>
+  </div>
+</div>
+<script>
+  function rect(el) {
+    const b = el.getBoundingClientRect();
+    return Math.round(b.left) + '-' + Math.round(b.right) + ' (' + Math.round(b.width) + 'px)';
+  }
+  function report() {
+    const nav = document.querySelector('.dev-nav');
+    const page = document.querySelector('.dev-mode-page');
+    const info = document.getElementById('info');
+    const title = document.getElementById('pname');
+    const titleLines = Math.round(title.getBoundingClientRect().height / 18);
+    const navH = Math.round(nav.getBoundingClientRect().height);
+    info.textContent =
+      'PW=' + page.clientWidth +
+      '|navSW=' + nav.scrollWidth + '|navCW=' + nav.clientWidth + '|navH=' + navH +
+      '|titleLines=' + titleLines +
+      '|stopAll=' + rect(document.getElementById('stopAll')) +
+      '|refresh=' + rect(document.getElementById('refresh')) +
+      '|navRight=' + Math.round(nav.getBoundingClientRect().right) +
+      '|pageRight=' + Math.round(page.getBoundingClientRect().right);
+  }
+  function clickStop() {
+    document.getElementById('spinner').style.display = '';
+    document.getElementById('stopIcon').style.display = 'none';
+    document.getElementById('stopAll').disabled = true;
+    report();
+  }
+  window.clickStop = clickStop;
+  window.setProjectName = (n) => { document.getElementById('pname').textContent = n; report(); };
+  if (location.search.includes('click=1')) { clickStop(); } else { report(); }
+</script>
+</body>
+</html>

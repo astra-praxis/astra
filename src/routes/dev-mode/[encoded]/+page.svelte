@@ -5,6 +5,7 @@
   import { onMount } from 'svelte';
   import { logs } from '$lib/logs-store.svelte';
   import { favoriteStore } from '$lib/favorite-store.svelte';
+  import { formatClockSec } from '$lib/format';
 
   interface DevSubDir {
     label: string;
@@ -269,10 +270,6 @@
     const c = serverCard(server);
     return c?.sub_dirs.find(s => s.key === server.subdir)?.label ?? server.subdir;
   }
-  function formatTime(ts: number): string {
-    const d = new Date(ts * 1000);
-    return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
-  }
   function serverLogs(id: string) { return logsMap[id] || []; }
 
   // 一键停止所有运行中的服务
@@ -529,7 +526,7 @@
                     {#if runningServers[sid]?.port}
                       <a class="port-badge" href={`http://localhost:${runningServers[sid].port}`} target="_blank" title="点击打开">:{runningServers[sid].port}</a>
                     {/if}
-                    <span class="running-status-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
+                    <span class="running-status-time">{formatClockSec(runningServers[sid]?.started_at ?? 0)}</span>
                     <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
                     </button>
@@ -576,7 +573,7 @@
                     {#if runningServers[sid]?.port}
                       <a class="port-badge" href={`http://localhost:${runningServers[sid].port}`} target="_blank" title="点击打开">:{runningServers[sid].port}</a>
                     {/if}
-                    <span class="running-status-time">{formatTime(runningServers[sid]?.started_at ?? 0)}</span>
+                    <span class="running-status-time">{formatClockSec(runningServers[sid]?.started_at ?? 0)}</span>
                     <button class="log-stop-btn" onclick={() => stopDev(sid)} title="停止">
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
                     </button>
@@ -655,7 +652,7 @@
                   {#if srv.port}
                     <a class="port-badge" href={`http://localhost:${srv.port}`} target="_blank" title="点击打开">:{srv.port}</a>
                   {/if}
-                  <span class="run-time">{formatTime(srv.started_at)}</span>
+                  <span class="run-time">{formatClockSec(srv.started_at)}</span>
                   <button class="log-stop-btn" onclick={() => stopDev(srv.id)} title="停止">
                     <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
                   </button>
@@ -679,7 +676,7 @@
                   <div class="history-item-info">
                     <span class="history-item-name">{historyDisplayName(entry)}</span>
                     <span class="history-item-sub">{historySubDirLabel(entry)}</span>
-                    <span class="history-item-time">{formatTime(entry.last_started_at)}</span>
+                    <span class="history-item-time">{formatClockSec(entry.last_started_at)}</span>
                   </div>
                   {#if historyIsRunning(entry)}
                     <span class="run-dot-sm"></span>

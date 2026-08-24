@@ -1,11 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { logs, type LogEntry } from '$lib/logs-store.svelte';
-
-  function formatTime(ts: number): string {
-    const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
-  }
+  import { formatClockMs } from '$lib/format';
 
   function formatDate(ts: number): string {
     const d = new Date(ts);
@@ -95,7 +91,7 @@
           <div class="log-meta">
             <span class="log-level" style="color: {levelColor(entry.level)}">[{levelLabel(entry.level)}]</span>
             <span class="log-source">{entry.source}</span>
-            <span class="log-time">{formatDate(entry.timestamp)} {formatTime(entry.timestamp)}</span>
+            <span class="log-time">{formatDate(entry.timestamp)} {formatClockMs(entry.timestamp)}</span>
           </div>
           <div class="log-message">{entry.message}</div>
         </div>

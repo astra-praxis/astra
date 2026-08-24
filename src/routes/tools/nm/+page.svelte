@@ -3,6 +3,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { formatBytes } from '$lib/format';
 
   // ===== 类型 =====
   interface WorkspaceConfig {
@@ -67,14 +68,6 @@
       return s + (item?.size_bytes || 0);
     }, 0)
   );
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + units[i];
-  }
 
   // ===== 初始化：加载工作空间 =====
   onMount(async () => {

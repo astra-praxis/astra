@@ -3,6 +3,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { formatSize, formatSpeed, formatRelativeSec } from '$lib/format';
+  import Modal from '$lib/ui/Modal.svelte';
 
   // ===== 类型 =====
   interface DownloadTask {
@@ -38,30 +40,6 @@
     finished_at: number | null;
     total: number;
     error: string | null;
-  }
-
-  // ===== 格式工具 =====
-  function formatSize(bytes: number): string {
-    if (bytes === 0) return '—';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-    return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
-  }
-
-  function formatSpeed(bytesPerSec: number): string {
-    if (bytesPerSec === 0) return '';
-    return `${formatSize(bytesPerSec)}/s`;
-  }
-
-  function formatTime(ts: number | null): string {
-    if (!ts) return '—';
-    const d = new Date(ts * 1000);
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    if (diff < 60000) return '刚刚';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
-    return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   }
 
   // ===== 状态 =====
@@ -111,7 +89,7 @@
     // 监听最终下载事件（完成/失败，含时间戳）
     unlistenFinal = await listen<FinalEvent>('download-final', (event) => {
       const p = event.payload;
-      const time = p.finished_at ? formatTime(p.finished_at) : '';
+      const time = p.finished_at ? formatRelativeSec(p.finished_at) : '';
       if (p.status === 'Completed') {
         showFinalNotice('success', `下载完成「${p.filename}」${time}`);
       } else if (p.status === 'Failed') {
@@ -368,10 +346,10 @@
                   <span class="meta-size">{formatSize(task.downloaded_size)}</span>
                 {/if}
                 <span class="meta-divider">·</span>
-                <span class="meta-time">{formatTime(task.created_at)}</span>
+                <span class="meta-time">{formatRelativeSec(task.created_at)}</span>
                 {#if task.status === 'Completed' && task.completed_at}
                   <span class="meta-divider">·</span>
-                  <span class="meta-time">完成于 {formatTime(task.completed_at)}</span>
+                  <span class="meta-time">完成于 {formatRelativeSec(task.completed_at)}</span>
                 {/if}
               </div>
             </div>
@@ -460,58 +438,46 @@
 
 <!-- 新建下载弹窗 -->
 {#if showAddModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-  <div class="modal-overlay" role="presentation">
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-    <div class="modal" role="dialog" aria-label="新建下载" tabindex="-1">
-      <div class="modal-header">
-        <h2>新建下载</h2>
-        <button class="modal-close" onclick={() => (showAddModal = false)} aria-label="关闭">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+  <Modal title="新建下载" onClose={() => (showAddModal = false)} closeOnOverlay={false}>
+    <div class="modal-body">
+      {#if formError}
+        <div class="form-error">{formError}</div>
+      {/if}
+      <div class="form-group">
+        <!-- svelte-ignore a11y_label_has_associated_control -->
+        <label>下载链接 <span class="required">*</span></label>
+        <input
+          type="text"
+          bind:value={newUrl}
+          placeholder="https://example.com/file.zip"
+        />
       </div>
-      <div class="modal-body">
-        {#if formError}
-          <div class="form-error">{formError}</div>
-        {/if}
-        <div class="form-group">
-          <!-- svelte-ignore a11y_label_has_associated_control -->
-          <label>下载链接 <span class="required">*</span></label>
-          <input
-            type="text"
-            bind:value={newUrl}
-            placeholder="https://example.com/file.zip"
-          />
-        </div>
-        <div class="form-group">
-          <!-- svelte-ignore a11y_label_has_associated_control -->
-          <label>文件名 <span class="optional-tag">(可选)</span></label>
-          <input
-            type="text"
-            bind:value={newFilename}
-            placeholder="留空自动从 URL 提取"
-          />
-        </div>
-        <div class="form-group">
-          <!-- svelte-ignore a11y_label_has_associated_control -->
-          <label>保存路径 <span class="optional-tag">(可选)</span></label>
-          <input
-            type="text"
-            bind:value={newPath}
-            placeholder="留空使用系统下载目录"
-          />
-        </div>
+      <div class="form-group">
+        <!-- svelte-ignore a11y_label_has_associated_control -->
+        <label>文件名 <span class="optional-tag">(可选)</span></label>
+        <input
+          type="text"
+          bind:value={newFilename}
+          placeholder="留空自动从 URL 提取"
+        />
       </div>
-      <div class="modal-footer">
-        <button class="btn-cancel" onclick={() => (showAddModal = false)}>取消</button>
-        <button class="btn-save" onclick={addDownload} disabled={formSaving}>
-          {formSaving ? '添加中...' : '开始下载'}
-        </button>
+      <div class="form-group">
+        <!-- svelte-ignore a11y_label_has_associated_control -->
+        <label>保存路径 <span class="optional-tag">(可选)</span></label>
+        <input
+          type="text"
+          bind:value={newPath}
+          placeholder="留空使用系统下载目录"
+        />
       </div>
     </div>
-  </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick={() => (showAddModal = false)}>取消</button>
+      <button class="btn-save" onclick={addDownload} disabled={formSaving}>
+        {formSaving ? '添加中...' : '开始下载'}
+      </button>
+    </div>
+  </Modal>
 {/if}
 
 <style>
@@ -899,173 +865,4 @@
   .btn-folder:hover { color: var(--accent); border-color: var(--accent); }
   .btn-delete-sm:hover { color: var(--error-text); border-color: var(--error-border); }
 
-  /* 新建下载弹窗 */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 24px;
-  }
-
-  .modal {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    width: 100%;
-    max-width: 480px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-  }
-
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 24px 0;
-  }
-
-  .modal-header h2 {
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .modal-close {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .modal-close:hover {
-    background: var(--bg-subtle);
-    color: var(--text-primary);
-  }
-
-  .modal-body {
-    padding: 20px 24px;
-  }
-
-  .form-group {
-    margin-bottom: 16px;
-  }
-
-  .form-group label {
-    display: block;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-bottom: 6px;
-  }
-
-  .required {
-    color: var(--error-text);
-  }
-
-  .optional-tag {
-    font-weight: 400;
-    color: var(--text-muted);
-  }
-
-  .form-group input {
-    width: 100%;
-    padding: 10px 12px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 14px;
-    color: var(--text-primary);
-    outline: none;
-    transition: all 0.2s;
-    box-sizing: border-box;
-  }
-
-  .form-group input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-ring);
-  }
-
-  .form-error {
-    padding: 8px 12px;
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: 8px;
-    color: var(--error-text);
-    font-size: 13px;
-    margin-bottom: 16px;
-  }
-
-  .modal-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    padding: 0 24px 20px;
-  }
-
-  .btn-cancel {
-    padding: 8px 16px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .btn-cancel:hover {
-    background: var(--bg-card-hover);
-    color: var(--text-primary);
-  }
-
-  .btn-save {
-    padding: 8px 16px;
-    background: var(--accent);
-    border: 1px solid transparent;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    color: white;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .btn-save:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  .btn-save:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  @media (max-width: 640px) {
-    .downloader-page {
-      padding: 16px;
-    }
-
-    .page-header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
-    .header-actions {
-      width: 100%;
-    }
-
-    .task-actions {
-      justify-content: flex-start;
-    }
-  }
 </style>

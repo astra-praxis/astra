@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
+  import Modal from '$lib/ui/Modal.svelte';
 
   // ===== 类型 =====
   interface SkillCard {
@@ -154,33 +155,23 @@
 
   <!-- 删除确认弹窗 -->
   {#if deleteTarget}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-    <div class="modal-overlay" onclick={cancelDelete} role="presentation">
-      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-      <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="确认删除" tabindex="-1">
-        <div class="modal-header">
-          <h2>确认删除</h2>
-          <button class="modal-close" onclick={cancelDelete} aria-label="取消">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="confirm-icon">⚠️</div>
-          <p class="confirm-text">
-            确定要删除 Skill <strong>{deleteTarget.name}</strong> 吗？
-          </p>
-          <p class="confirm-hint">此操作将永久删除该技能的文件夹，不可恢复。</p>
-          <div class="confirm-path">{deleteTarget.path}</div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-cancel" onclick={cancelDelete}>取消</button>
-          <button class="btn-danger" onclick={doDelete}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            确认删除
-          </button>
-        </div>
+    <Modal title="确认删除" onClose={cancelDelete} variant="confirm">
+      <div class="modal-body">
+        <div class="confirm-icon">⚠️</div>
+        <p class="confirm-text">
+          确定要删除 Skill <strong>{deleteTarget.name}</strong> 吗？
+        </p>
+        <p class="confirm-hint">此操作将永久删除该技能的文件夹，不可恢复。</p>
+        <div class="confirm-path">{deleteTarget.path}</div>
       </div>
-    </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick={cancelDelete}>取消</button>
+        <button class="btn-danger" onclick={doDelete}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          确认删除
+        </button>
+      </div>
+    </Modal>
   {/if}
 </div>
 
@@ -497,145 +488,4 @@
     border-color: var(--error-border);
   }
 
-  /* 弹窗 */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    animation: fadeInOverlay 0.2s ease;
-  }
-
-  @keyframes fadeInOverlay {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
-  .modal {
-    background: var(--bg-card);
-    border-radius: 20px;
-    width: 420px;
-    max-width: 90vw;
-    box-shadow: 0 24px 48px rgba(0,0,0,0.3);
-    border: 1px solid var(--border);
-    animation: slideUp 0.25s ease;
-  }
-
-  @keyframes slideUp {
-    from { opacity: 0; transform: translateY(16px) scale(0.97); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-  }
-
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 24px 0;
-  }
-
-  .modal-header h2 {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text-primary);
-  }
-
-  .modal-close {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 6px;
-    transition: all 0.2s;
-  }
-
-  .modal-close:hover {
-    background: var(--bg-subtle);
-    color: var(--text-secondary);
-  }
-
-  .modal-body {
-    padding: 20px 24px;
-    text-align: center;
-  }
-
-  .confirm-icon {
-    font-size: 40px;
-    margin-bottom: 12px;
-  }
-
-  .confirm-text {
-    font-size: 15px;
-    color: var(--text-secondary);
-    margin-bottom: 8px;
-  }
-
-  .confirm-hint {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin-bottom: 12px;
-  }
-
-  .confirm-path {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-family: ui-monospace, monospace;
-    padding: 8px 12px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border-light);
-    border-radius: 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .modal-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 16px 24px 20px;
-  }
-
-  .btn-cancel {
-    padding: 10px 20px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .btn-cancel:hover {
-    background: var(--bg-card-hover);
-  }
-
-  .btn-danger {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 20px;
-    background: var(--error-text);
-    border: none;
-    border-radius: 10px;
-    font-size: 14px;
-    font-weight: 600;
-    color: white;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .btn-danger:hover {
-    background: #b91c1c;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
-  }
 </style>

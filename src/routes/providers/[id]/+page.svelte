@@ -4,6 +4,8 @@
     import { goto } from "$app/navigation";
     import { page } from "$app/stores";
     import { toolbarState, handleFetchModels, loadProviders } from "$lib/chat-state.svelte";
+    import { formatTimestampSec } from "$lib/format";
+    import Modal from "$lib/ui/Modal.svelte";
 
     // ===== 类型 =====
     interface ProviderConfig {
@@ -263,12 +265,6 @@
     }
 
     // ===== 辅助 =====
-    function formatTime(ts: number): string {
-        if (!ts) return "";
-        const d = new Date(ts * 1000);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    }
-
     function maskKey(key: string): string {
         if (!key) return "未设置";
         if (key.length <= 8) return "••••";
@@ -379,13 +375,13 @@
                 <div class="info-item">
                     <span class="info-label">创建时间</span>
                     <span class="info-value"
-                        >{formatTime(provider.created_at)}</span
+                        >{formatTimestampSec(provider.created_at)}</span
                     >
                 </div>
                 <div class="info-item">
                     <span class="info-label">更新时间</span>
                     <span class="info-value"
-                        >{formatTime(provider.updated_at)}</span
+                        >{formatTimestampSec(provider.updated_at)}</span
                     >
                 </div>
                 <div class="info-item">
@@ -695,138 +691,54 @@
 
 <!-- 编辑弹窗 -->
 {#if showEditModal}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-    <div
-        class="modal-overlay"
-        onclick={() => (showEditModal = false)}
-        role="presentation"
-    >
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-        <div
-            class="modal"
-            onclick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="编辑接口"
-            tabindex="-1"
-        >
-            <div class="modal-header">
-                <h2>编辑接口</h2>
-                <button
-                    class="modal-close"
-                    onclick={() => (showEditModal = false)}
-                    aria-label="关闭"
-                >
-                    <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><line x1="18" y1="6" x2="6" y2="18" /><line
-                            x1="6"
-                            y1="6"
-                            x2="18"
-                            y2="18"
-                        /></svg
-                    >
-                </button>
+    <Modal title="编辑接口" onClose={() => (showEditModal = false)} closeOnOverlay={false}>
+        <div class="modal-body">
+            {#if editError}
+                <div class="form-error">{editError}</div>
+            {/if}
+            <div class="form-group">
+                <!-- svelte-ignore a11y_label_has_associated_control -->
+                <label>名称</label>
+                <input type="text" bind:value={editName} />
             </div>
-            <div class="modal-body">
-                {#if editError}
-                    <div class="form-error">{editError}</div>
-                {/if}
-                <div class="form-group">
-                    <!-- svelte-ignore a11y_label_has_associated_control -->
-                    <label>名称</label>
-                    <input type="text" bind:value={editName} />
-                </div>
-                <div class="form-group">
-                    <!-- svelte-ignore a11y_label_has_associated_control -->
-                    <label>API 地址</label>
-                    <input type="text" bind:value={editBaseUrl} />
-                </div>
-                <div class="form-group">
-                    <!-- svelte-ignore a11y_label_has_associated_control -->
-                    <label>API Key</label>
-                    <input type="password" bind:value={editApiKey} />
-                </div>
+            <div class="form-group">
+                <!-- svelte-ignore a11y_label_has_associated_control -->
+                <label>API 地址</label>
+                <input type="text" bind:value={editBaseUrl} />
             </div>
-            <div class="modal-footer">
-                <button
-                    class="btn-cancel"
-                    onclick={() => (showEditModal = false)}>取消</button
-                >
-                <button
-                    class="btn-save"
-                    onclick={saveEdit}
-                    disabled={editSaving}
-                >
-                    {editSaving ? "保存中..." : "保存"}
-                </button>
+            <div class="form-group">
+                <!-- svelte-ignore a11y_label_has_associated_control -->
+                <label>API Key</label>
+                <input type="password" bind:value={editApiKey} />
             </div>
         </div>
-    </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" onclick={() => (showEditModal = false)}>取消</button>
+            <button
+                class="btn-save"
+                onclick={saveEdit}
+                disabled={editSaving}
+            >
+                {editSaving ? "保存中..." : "保存"}
+            </button>
+        </div>
+    </Modal>
 {/if}
 
 <!-- 删除确认 -->
 {#if showDeleteConfirm}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-    <div
-        class="modal-overlay"
-        onclick={() => (showDeleteConfirm = false)}
-        role="presentation"
-    >
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_roles -->
-        <div
-            class="modal modal-sm"
-            onclick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="确认删除"
-            tabindex="-1"
-        >
-            <div class="modal-header">
-                <h2>确认删除</h2>
-                <button
-                    class="modal-close"
-                    onclick={() => (showDeleteConfirm = false)}
-                    aria-label="取消"
-                >
-                    <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><line x1="18" y1="6" x2="6" y2="18" /><line
-                            x1="6"
-                            y1="6"
-                            x2="18"
-                            y2="18"
-                        /></svg
-                    >
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="confirm-icon">⚠️</div>
-                <p class="confirm-text">
-                    确定要删除接口 <strong>{provider?.name}</strong> 吗？此操作不可撤销。
-                </p>
-            </div>
-            <div class="modal-footer">
-                <button
-                    class="btn-cancel"
-                    onclick={() => (showDeleteConfirm = false)}>取消</button
-                >
-                <button class="btn-danger" onclick={doDelete}>确认删除</button>
-            </div>
+    <Modal title="确认删除" onClose={() => (showDeleteConfirm = false)} variant="confirm">
+        <div class="modal-body">
+            <div class="confirm-icon">⚠️</div>
+            <p class="confirm-text">
+                确定要删除接口 <strong>{provider?.name}</strong> 吗？此操作不可撤销。
+            </p>
         </div>
-    </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" onclick={() => (showDeleteConfirm = false)}>取消</button>
+            <button class="btn-danger" onclick={doDelete}>确认删除</button>
+        </div>
+    </Modal>
 {/if}
 
 <style>
@@ -1313,202 +1225,5 @@
         overflow-y: auto;
         font-size: 12px;
         line-height: 1.5;
-    }
-
-    /* 弹窗 */
-    .modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.45);
-        z-index: 1000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        animation: fadeIn 0.2s ease;
-    }
-
-    .modal {
-        background: var(--bg-card);
-        border-radius: 16px;
-        width: 480px;
-        max-width: 90vw;
-        max-height: 90vh;
-        overflow-y: auto;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        animation: modalIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-
-    .modal-sm {
-        width: 400px;
-    }
-
-    @keyframes modalIn {
-        from {
-            opacity: 0;
-            transform: scale(0.92) translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: scale(1) translateY(0);
-        }
-    }
-
-    .modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 20px 24px;
-        border-bottom: 1px solid var(--border-light);
-    }
-
-    .modal-header h2 {
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--text-primary);
-    }
-
-    .modal-close {
-        background: var(--bg-subtle);
-        border: none;
-        border-radius: 8px;
-        width: 30px;
-        height: 30px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        color: var(--text-muted);
-        transition: all 0.2s;
-    }
-
-    .modal-close:hover {
-        background: var(--error-bg);
-        color: var(--error-text);
-    }
-
-    .modal-body {
-        padding: 24px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-    }
-
-    .modal-footer {
-        display: flex;
-        justify-content: flex-end;
-        gap: 10px;
-        padding: 20px 24px;
-        border-top: 1px solid var(--border-light);
-    }
-
-    .form-error {
-        background: var(--error-bg);
-        border: 1px solid var(--error-border);
-        color: var(--error-text);
-        padding: 10px 14px;
-        border-radius: 8px;
-        font-size: 13px;
-    }
-
-    .form-group {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    }
-
-    .form-group label {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text-secondary);
-    }
-
-    .form-group input {
-        padding: 10px 12px;
-        background: var(--bg-input);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        font-size: 14px;
-        color: var(--text-primary);
-        outline: none;
-        transition: border-color 0.2s;
-        font-family: inherit;
-    }
-
-    .form-group input:focus {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px var(--accent-ring);
-    }
-
-    .btn-cancel {
-        padding: 8px 18px;
-        background: var(--bg-subtle);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--text-secondary);
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-
-    .btn-cancel:hover {
-        background: var(--bg-card-hover);
-    }
-
-    .btn-save {
-        padding: 8px 18px;
-        background: var(--accent);
-        border: none;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 600;
-        color: white;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-
-    .btn-save:hover:not(:disabled) {
-        background: var(--accent-hover);
-    }
-
-    .btn-save:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    .btn-danger {
-        padding: 8px 18px;
-        background: var(--error-text);
-        border: none;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 600;
-        color: white;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-
-    .btn-danger:hover {
-        opacity: 0.9;
-    }
-
-    .confirm-icon {
-        text-align: center;
-        font-size: 48px;
-        margin-bottom: 12px;
-    }
-
-    .confirm-text {
-        text-align: center;
-        color: var(--text-secondary);
-        font-size: 15px;
-        line-height: 1.6;
-    }
-
-    .confirm-text strong {
-        color: var(--text-primary);
     }
 </style>

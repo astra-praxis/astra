@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import '../styles/global.css';
+  import '../styles/ui.css';
   import { initTheme } from '$lib/theme.svelte';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';

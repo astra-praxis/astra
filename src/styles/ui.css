@@ -1,0 +1,389 @@
+/* ============================================================
+   共享 UI 样式（弹窗 / 表单 / 按钮 / spinner / 确认框）
+   从各页面重复的 scoped 样式统一而来。
+   注意：这里的类名是全局的，勿在组件 scoped style 中重复定义同名类。
+   颜色一律使用 global.css 中的 CSS 变量。
+   ============================================================ */
+
+/* ===== 弹窗外壳 ===== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: fadeInOverlay 0.2s ease;
+}
+
+.modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 480px;
+    max-width: 90vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.3);
+    animation: modalIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 确认类弹窗（删除等）：更紧凑 */
+.modal.compact {
+    width: 420px;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 0;
+}
+
+.modal-header h2 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 8px;
+    transition: all 0.2s;
+    display: inline-flex;
+}
+
+.modal-close:hover:not(:disabled) {
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+}
+
+.modal-body {
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 24px 20px;
+}
+
+@keyframes fadeInOverlay {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes modalIn {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ===== 表单 ===== */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-group label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 14px;
+    color: var(--text-primary);
+    outline: none;
+    transition: all 0.2s;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.form-row {
+    display: flex;
+    gap: 12px;
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+.optional-tag {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.required {
+    color: var(--error-text);
+    font-size: 12px;
+}
+
+.input-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.input-hint code {
+    background: var(--bg-subtle);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--accent);
+}
+
+.form-error {
+    padding: 10px 14px;
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    border-radius: 8px;
+    color: var(--error-text);
+    font-size: 13px;
+}
+
+/* ===== 弹窗按钮 ===== */
+.btn-cancel {
+    padding: 10px 20px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-cancel:hover {
+    background: var(--bg-card-hover);
+}
+
+.btn-save {
+    padding: 10px 24px;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-save:hover:not(:disabled) {
+    background: var(--accent-hover);
+}
+
+.btn-save:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    background: var(--error-text);
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #b91c1c;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+/* 页头主操作按钮（添加/新建） */
+.btn-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-add:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--accent-shadow);
+}
+
+/* ===== 确认弹窗内容 ===== */
+.confirm-icon {
+    font-size: 40px;
+    text-align: center;
+}
+
+.confirm-text {
+    font-size: 15px;
+    color: var(--text-secondary);
+    text-align: center;
+    margin: 0;
+}
+
+.confirm-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    margin: 0;
+}
+
+.confirm-path {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: ui-monospace, monospace;
+    padding: 8px 12px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    word-break: break-all;
+    text-align: center;
+}
+
+/* ===== spinner ===== */
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.mini-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+}
+
+.btn-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+/* ===== 路径校验（表单内） ===== */
+.path-check-section {
+    margin-top: 4px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-light);
+}
+
+.btn-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-check:hover:not(:disabled) {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn-check:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.path-result {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.path-result-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.path-ok {
+    background: rgba(34, 197, 94, 0.1);
+    color: #16a34a;
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.path-fail {
+    background: var(--error-bg);
+    color: var(--error-text);
+    border: 1px solid var(--error-border);
+}

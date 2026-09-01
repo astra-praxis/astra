@@ -3,7 +3,10 @@ mod chat_sessions;
 mod command_runner;
 mod dev_mode;
 mod downloader;
+mod embedding;
+mod indexer;
 mod providers;
+mod vector_store;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1282,6 +1285,9 @@ pub fn run() {
         .manage(chat::ChatStopFlag(std::sync::atomic::AtomicBool::new(
             false,
         )))
+        .manage(indexer::IndexCancelFlag(
+            std::sync::atomic::AtomicBool::new(false),
+        ))
         .manage(downloader::DownloadManager::new())
         .manage(Mutex::new(
             HashMap::<String, dev_mode::RunningDevProcess>::new(),
@@ -1439,6 +1445,17 @@ pub fn run() {
             downloader::open_download_folder,
             downloader::open_download_file,
             downloader::clear_download_history,
+            // Embedding
+            embedding::embed_text,
+            embedding::test_embedding_source,
+            // Vector Store
+            vector_store::store_chunks,
+            vector_store::delete_project_index,
+            vector_store::search_similar,
+            vector_store::get_index_stats,
+            // Indexer
+            indexer::index_project,
+            indexer::cancel_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

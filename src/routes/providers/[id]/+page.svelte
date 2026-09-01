@@ -691,7 +691,7 @@
 
 <!-- 编辑弹窗 -->
 {#if showEditModal}
-    <Modal title="编辑接口" onClose={() => (showEditModal = false)} closeOnOverlay={false}>
+    <Modal title="编辑接口" onClose={() => (showEditModal = false)}>
         <div class="modal-body">
             {#if editError}
                 <div class="form-error">{editError}</div>
@@ -713,7 +713,7 @@
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn-cancel" onclick={() => (showEditModal = false)}>取消</button>
+
             <button
                 class="btn-save"
                 onclick={saveEdit}
@@ -735,7 +735,7 @@
             </p>
         </div>
         <div class="modal-footer">
-            <button class="btn-cancel" onclick={() => (showDeleteConfirm = false)}>取消</button>
+
             <button class="btn-danger" onclick={doDelete}>确认删除</button>
         </div>
     </Modal>

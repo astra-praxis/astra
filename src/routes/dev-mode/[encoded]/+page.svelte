@@ -6,6 +6,7 @@
   import { logs } from '$lib/logs-store.svelte';
   import { favoriteStore } from '$lib/favorite-store.svelte';
   import { formatClockSec } from '$lib/format';
+  import Modal from '$lib/ui/Modal.svelte';
 
   interface DevSubDir {
     label: string;
@@ -702,71 +703,63 @@
 
   <!-- 开发配置弹窗 -->
   {#if showConfig}
-    <div class="config-overlay" onclick={() => showConfig = false} role="presentation">
-      <div class="config-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="开发配置" tabindex="-1">
-        <div class="config-header">
-          <h2>🔑 开发配置</h2>
-          <button class="config-close" onclick={() => showConfig = false} aria-label="关闭">✕</button>
+    <Modal title="开发配置" onClose={() => (showConfig = false)} closeDisabled={configSaving}>
+      {#if configLoading}
+        <div class="config-body"><div class="spinner"></div><span>正在读取配置...</span></div>
+      {:else if configData}
+        <div class="config-body">
+          {#if configError}
+            <div class="config-error">{configError} <button class="error-dismiss" onclick={() => configError = ''}>✕</button></div>
+          {/if}
+
+          <!-- 后端代理地址 + 打开登录 -->
+          <div class="config-section">
+            <label class="config-label" for="proxy-target">
+              🌐 后端代理地址
+              {#if configData.port}<span class="config-port">: {configData.port}</span>{/if}
+            </label>
+            <div class="proxy-row">
+              <input id="proxy-target" class="config-proxy-input" value={configData.proxy_target} readonly />
+              <button class="btn-open-login" onclick={openLogin} disabled={!configData.proxy_target} title="在浏览器中打开登录">
+                打开登录
+              </button>
+            </div>
+          </div>
+
+          <!-- Cookie 配置 -->
+          <div class="config-section">
+            <label class="config-label" for="cookie-input">🍪 登录 Cookie</label>
+            <p class="config-hint">点「打开登录」→ 登录后端 → F12 复制 Cookie → 粘贴到下方</p>
+            <textarea
+              id="cookie-input"
+              class="config-textarea"
+              bind:value={cookieInput}
+              oninput={onCookieInput}
+              placeholder="粘贴完整 Cookie（会自动提取 WISCPSID）..."
+              rows="3"
+            ></textarea>
+
+            {#if cookiePreview && cookiePreview !== cookieInput.trim()}
+              <div class="cookie-preview">
+                <span class="cookie-preview-label">✅ 提取结果：</span>
+                <code>{cookiePreview}</code>
+              </div>
+            {:else if cookiePreview}
+              <div class="cookie-preview">
+                <span class="cookie-preview-label">当前 Cookie：</span>
+                <code>{cookiePreview}</code>
+              </div>
+            {/if}
+          </div>
         </div>
 
-        {#if configLoading}
-          <div class="config-body"><div class="spinner"></div><span>正在读取配置...</span></div>
-        {:else if configData}
-          <div class="config-body">
-            {#if configError}
-              <div class="config-error">{configError} <button class="error-dismiss" onclick={() => configError = ''}>✕</button></div>
-            {/if}
-
-            <!-- 后端代理地址 + 打开登录 -->
-            <div class="config-section">
-              <label class="config-label">
-                🌐 后端代理地址
-                {#if configData.port}<span class="config-port">: {configData.port}</span>{/if}
-              </label>
-              <div class="proxy-row">
-                <input class="config-proxy-input" value={configData.proxy_target} readonly />
-                <button class="btn-open-login" onclick={openLogin} disabled={!configData.proxy_target} title="在浏览器中打开登录">
-                  打开登录
-                </button>
-              </div>
-            </div>
-
-            <!-- Cookie 配置 -->
-            <div class="config-section">
-              <label class="config-label" for="cookie-input">🍪 登录 Cookie</label>
-              <p class="config-hint">点「打开登录」→ 登录后端 → F12 复制 Cookie → 粘贴到下方</p>
-              <textarea
-                id="cookie-input"
-                class="config-textarea"
-                bind:value={cookieInput}
-                oninput={onCookieInput}
-                placeholder="粘贴完整 Cookie（会自动提取 WISCPSID）..."
-                rows="3"
-              ></textarea>
-
-              {#if cookiePreview && cookiePreview !== cookieInput.trim()}
-                <div class="cookie-preview">
-                  <span class="cookie-preview-label">✅ 提取结果：</span>
-                  <code>{cookiePreview}</code>
-                </div>
-              {:else if cookiePreview}
-                <div class="cookie-preview">
-                  <span class="cookie-preview-label">当前 Cookie：</span>
-                  <code>{cookiePreview}</code>
-                </div>
-              {/if}
-            </div>
-          </div>
-
-          <div class="config-footer">
-            <button class="btn-cancel" onclick={() => showConfig = false}>取消</button>
-            <button class="btn-save" onclick={saveConfig} disabled={configSaving || !cookiePreview}>
-              {configSaving ? '保存中...' : '保存 Cookie'}
-            </button>
-          </div>
-        {/if}
-      </div>
-    </div>
+        <div class="config-footer">
+          <button class="btn-save" onclick={saveConfig} disabled={configSaving || !cookiePreview}>
+            {configSaving ? '保存中...' : '保存 Cookie'}
+          </button>
+        </div>
+      {/if}
+    </Modal>
   {/if}
 </div>
 
@@ -992,27 +985,7 @@
   }
   .btn-config:hover { background: var(--accent-bg); color: var(--accent); }
 
-  /* ===== 配置弹窗 ===== */
-  .config-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.45);
-    display: flex; align-items: center; justify-content: center; z-index: 1000;
-  }
-  .config-modal {
-    width: 480px; max-width: 90vw; max-height: 85vh; overflow-y: auto; overflow-x: hidden;
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.2);
-  }
-  .config-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 20px; border-bottom: 1px solid var(--border);
-  }
-  .config-header h2 { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0; }
-  .config-close {
-    width: 28px; height: 28px; border-radius: 6px; border: none;
-    background: none; color: var(--text-muted); cursor: pointer; font-size: 15px;
-  }
-  .config-close:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-
+  /* ===== 配置内容 ===== */
   .config-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 18px; }
   .config-error {
     padding: 8px 12px; background: var(--error-bg); border: 1px solid var(--error-border);
@@ -1064,12 +1037,7 @@
     display: flex; justify-content: flex-end; gap: 10px;
     padding: 12px 20px; border-top: 1px solid var(--border);
   }
-  .config-footer .btn-cancel {
-    padding: 8px 16px; font-size: 13px; font-weight: 500;
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 7px; color: var(--text-secondary); cursor: pointer; transition: all .15s;
-  }
-  .config-footer .btn-cancel:hover { background: var(--bg-card-hover); }
+
   .config-footer .btn-save {
     padding: 8px 16px; font-size: 13px; font-weight: 600; white-space: nowrap;
     background: var(--accent); color: #fff; border: none; border-radius: 7px;

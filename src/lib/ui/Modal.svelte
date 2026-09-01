@@ -4,10 +4,8 @@
     interface Props {
         title: string;
         onClose: () => void;
-        /** 提交中时禁用关闭（遮罩/Esc/关闭按钮） */
+        /** 提交中时禁用关闭按钮 */
         closeDisabled?: boolean;
-        /** 点击遮罩是否关闭（表单弹窗建议 false 防误触丢输入） */
-        closeOnOverlay?: boolean;
         /** confirm 变体：更紧凑的确认类弹窗 */
         variant?: "default" | "confirm";
         /** 弹窗内容（modal-body + modal-footer 由调用方通过 children 提供） */
@@ -18,7 +16,6 @@
         title,
         onClose,
         closeDisabled = false,
-        closeOnOverlay = true,
         variant = "default",
         children,
     }: Props = $props();
@@ -26,20 +23,10 @@
     function requestClose() {
         if (!closeDisabled) onClose();
     }
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e.key === "Escape") requestClose();
-    }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<div
-    class="modal-overlay"
-    onclick={closeOnOverlay ? requestClose : undefined}
-    role="presentation"
->
+<!-- 遮罩层：不响应点击，仅用于视觉遮罩 -->
+<div class="modal-overlay" role="presentation">
     <div
         class="modal"
         class:compact={variant === "confirm"}

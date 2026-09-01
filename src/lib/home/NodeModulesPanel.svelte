@@ -267,11 +267,7 @@
             >
         </div>
         <div class="modal-footer">
-            <button
-                class="btn-cancel"
-                onclick={cancelDeleteNodeModule}
-                disabled={nm.cleaning}>取消</button
-            >
+
             <button
                 class="nm-confirm-delete-btn"
                 onclick={doDeleteNodeModule}
@@ -580,26 +576,6 @@
         padding: 16px 24px 20px;
     }
 
-    .btn-cancel {
-        padding: 10px 20px;
-        background: var(--bg-subtle);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--text-secondary);
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-
-    .btn-cancel:hover:not(:disabled) {
-        background: var(--border-light);
-    }
-
-    .btn-cancel:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 
     .nm-confirm-delete-btn {
         display: inline-flex;

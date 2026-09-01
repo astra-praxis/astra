@@ -119,16 +119,6 @@
       const searchInput = document.querySelector('.hero-search-input');
       if (searchInput) (searchInput as HTMLInputElement).focus();
     }
-    // Escape → 返回工作空间 / 关闭弹窗
-    if (e.key === 'Escape') {
-      if (selectedProject) {
-        e.preventDefault();
-        backToWorkspace();
-      } else if (showCreateModal) {
-        e.preventDefault();
-        closeCreateModal();
-      }
-    }
   }
 
   // ===== 新建项目弹窗 =====

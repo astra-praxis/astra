@@ -438,7 +438,7 @@
 
 <!-- 新建下载弹窗 -->
 {#if showAddModal}
-  <Modal title="新建下载" onClose={() => (showAddModal = false)} closeOnOverlay={false}>
+  <Modal title="新建下载" onClose={() => (showAddModal = false)}>
     <div class="modal-body">
       {#if formError}
         <div class="form-error">{formError}</div>
@@ -472,7 +472,7 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn-cancel" onclick={() => (showAddModal = false)}>取消</button>
+
       <button class="btn-save" onclick={addDownload} disabled={formSaving}>
         {formSaving ? '添加中...' : '开始下载'}
       </button>

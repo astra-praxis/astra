@@ -244,9 +244,7 @@
             <div class="confirm-path">{deleteTarget.name}</div>
         </div>
         <div class="modal-footer">
-            <button class="btn-cancel" onclick={() => (deleteTarget = null)}
-                >取消</button
-            >
+
             <button class="btn-danger" onclick={doDelete}> 确认删除 </button>
         </div>
     </Modal>

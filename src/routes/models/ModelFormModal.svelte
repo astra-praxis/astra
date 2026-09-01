@@ -98,7 +98,7 @@
     }
 </script>
 
-<Modal title={isEdit ? "编辑模型" : "添加模型"} onClose={onClose} closeOnOverlay={false}>
+<Modal title={isEdit ? "编辑模型" : "添加模型"} onClose={onClose}>
     <div class="modal-body">
         {#if formError}
             <div class="form-error">{formError}</div>
@@ -179,7 +179,7 @@
         </div>
     </div>
     <div class="modal-footer">
-        <button class="btn-cancel" onclick={onClose}>取消</button>
+
         <button class="btn-save" onclick={save} disabled={formSaving}>
             {formSaving ? "保存中..." : "保存"}
         </button>

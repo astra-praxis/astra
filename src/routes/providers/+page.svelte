@@ -408,7 +408,7 @@
 
 <!-- 添加弹窗 -->
 {#if showAddModal}
-    <Modal title="添加 API 接口" onClose={() => (showAddModal = false)} closeOnOverlay={false}>
+    <Modal title="添加 API 接口" onClose={() => (showAddModal = false)}>
         <div class="modal-body">
             {#if formError}
                 <div class="form-error">{formError}</div>
@@ -446,7 +446,7 @@
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn-cancel" onclick={() => (showAddModal = false)}>取消</button>
+
             <button
                 class="btn-save"
                 onclick={saveNewProvider}
@@ -460,7 +460,7 @@
 
 <!-- 编辑接口弹窗 -->
 {#if showEditModal}
-    <Modal title="编辑接口" onClose={() => (showEditModal = false)} closeOnOverlay={false}>
+    <Modal title="编辑接口" onClose={() => (showEditModal = false)}>
         <div class="modal-body">
             {#if editError}
                 <div class="form-error">{editError}</div>
@@ -498,7 +498,7 @@
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn-cancel" onclick={() => (showEditModal = false)}>取消</button>
+
             <button
                 class="btn-save"
                 onclick={saveEditProvider}
@@ -519,7 +519,7 @@
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn-cancel" onclick={() => (deleteTarget = null)}>取消</button>
+
             <button class="btn-danger" onclick={doDelete}>确认删除</button>
         </div>
     </Modal>

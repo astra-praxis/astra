@@ -65,7 +65,6 @@
 {#if open}
     <div
         class="drawer-veil"
-        onclick={onClose}
         role="presentation"
     ></div>
 {/if}

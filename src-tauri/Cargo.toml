@@ -30,3 +30,4 @@ tokio = { version = "1", features = ["time", "process", "io-util", "rt-multi-thr
 which = "7"
 uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
+rusqlite = { version = "0.32", features = ["bundled"] }

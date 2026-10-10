@@ -154,6 +154,86 @@
   }
 }
 
+// Agent 权限卡（项目内 Shell 自动允许开关）
+.agent-perm-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.agent-perm-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-perm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agent-perm-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.agent-perm-switch {
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
+  padding: 2px;
+  background: var(--border);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s;
+
+  &.is-on {
+    background: var(--accent, var(--brand-500));
+  }
+}
+
+.agent-perm-knob {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--bg-surface, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s;
+}
+
+.agent-perm-switch.is-on .agent-perm-knob {
+  transform: translateX(18px);
+}
+
+.agent-perm-input {
+  flex-shrink: 0;
+  width: 88px;
+  padding: 7px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+
+  &:focus {
+    border-color: var(--accent, var(--brand-500));
+  }
+}
+
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

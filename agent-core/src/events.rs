@@ -32,10 +32,13 @@ pub enum RunEvent {
     PlanUpdated { plan: Plan },
 
     /// 工具调用开始（参数已校验；Confirm 时发出后等待用户）
+    /// args 为完整参数（超长字符串截断），供前端渲染写文件内容/完整命令预览
     ToolCallStarted {
         tool_call_id: String,
         tool_name: String,
         args_summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<serde_json::Value>,
     },
 
     /// 工具执行成功（含结构化产物）
@@ -241,6 +244,7 @@ mod tests {
                     tool_call_id: "t".into(),
                     tool_name: "read_file".into(),
                     args_summary: "".into(),
+                    args: None,
                 },
                 "tool_call_started",
             ),

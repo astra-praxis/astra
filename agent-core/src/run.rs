@@ -26,8 +26,8 @@ use crate::tool::{ToolCall, ToolContext, ToolRegistry};
 
 /// 每轮流式增量间的空闲超时（非整轮预算；防模型端挂死）
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
-/// 最大续轮数（防止无限工具循环的预算上限之一）
-const MAX_TURNS: u32 = 20;
+/// 最大续轮数默认值（防止无限工具循环的预算上限之一，可在 ThreadConfig 覆盖）
+pub const DEFAULT_MAX_TURNS: u32 = 50;
 
 pub struct RunConfig {
     pub session_id: String,
@@ -35,6 +35,7 @@ pub struct RunConfig {
     pub system_prompt: String,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub max_turns: u32,
     pub policy: ToolPolicy,
 }
 
@@ -46,6 +47,7 @@ impl RunConfig {
             system_prompt: system_prompt.into(),
             temperature: None,
             max_tokens: None,
+            max_turns: DEFAULT_MAX_TURNS,
             policy: ToolPolicy::default(),
         }
     }
@@ -155,7 +157,7 @@ async fn run_loop(
         status: RunStatus::Analyzing
     });
 
-    for turn in 0..MAX_TURNS {
+    for turn in 0..config.max_turns {
         if cancel.is_cancelled() {
             emit!(RunEvent::RunCancelled);
             return Err(Error::Cancelled);
@@ -297,6 +299,7 @@ async fn run_loop(
                 tool_call_id: call.id.clone(),
                 tool_name: call.name.clone(),
                 args_summary: summarize_args(&call.arguments),
+                args: Some(cap_args(&call.arguments)),
             });
 
             // 5.1 静态权限判定（纯函数）
@@ -319,6 +322,7 @@ async fn run_loop(
                         tool_call_id: call.id.clone(),
                         tool_name: call.name.clone(),
                         summary: summarize_args(&call.arguments),
+                        arguments: call.arguments.clone(),
                     };
                     let d = tokio::select! {
                         _ = cancel.cancelled() => {
@@ -417,7 +421,7 @@ async fn run_loop(
     }
 
     let e = Error::MaxTurnsExceeded {
-        max_turns: MAX_TURNS,
+        max_turns: config.max_turns,
     };
     emit!(RunEvent::RunFailed {
         error: e.to_string()
@@ -439,6 +443,30 @@ fn push_tool_result(
             is_error,
         }],
     });
+}
+
+/// 单个参数字符串值上限（超出截断并标注，防止大文件内容撑爆事件流/前端）
+const ARGS_VALUE_CAP: usize = 20_000;
+
+/// 完整参数快照：字符串值超长时截断。供前端渲染写文件内容 / 完整命令预览。
+fn cap_args(args: &serde_json::Value) -> serde_json::Value {
+    match args {
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map {
+                let capped = match v {
+                    serde_json::Value::String(s) if s.chars().count() > ARGS_VALUE_CAP => {
+                        let t: String = s.chars().take(ARGS_VALUE_CAP).collect();
+                        serde_json::Value::String(format!("{t}\n…（内容过长已截断）"))
+                    }
+                    other => other.clone(),
+                };
+                out.insert(k.clone(), capped);
+            }
+            serde_json::Value::Object(out)
+        }
+        other => other.clone(),
+    }
 }
 
 fn summarize_args(args: &serde_json::Value) -> String {
@@ -869,16 +897,19 @@ mod tests {
 
         #[tokio::test]
         async fn budget_exceeded_after_max_turns() {
-            // 每轮都返回工具调用 → MAX_TURNS 后报 MaxTurnsExceeded
+            // 每轮都返回工具调用 → max_turns 后报 MaxTurnsExceeded（显式配置，不依赖默认值）
             let log = Arc::new(Mutex::new(Vec::new()));
             let tool = EchoTool::ok("read_file", "ok", log.clone());
             let turn = vec![tool_call_delta("t", "read_file")];
             let backend = Arc::new(MockBackend::new(vec![turn; 30]));
 
+            let mut cfg = text_config("s1", "", ToolPolicy::default());
+            cfg.max_turns = 20;
+
             let (result, events) = run_execute(
                 backend,
                 R::new().register(tool),
-                text_config("s1", "", ToolPolicy::default()),
+                cfg,
                 None,
                 deny_bridge(),
                 vec![user_msg("循环")],
@@ -891,7 +922,7 @@ mod tests {
                 }
                 other => panic!("预期 MaxTurnsExceeded，实际: {other:?}"),
             }
-            assert_eq!(log.lock().unwrap().len(), 20, "应恰好跑满 MAX_TURNS 轮");
+            assert_eq!(log.lock().unwrap().len(), 20, "应恰好跑满 max_turns 轮");
             assert!(events
                 .iter()
                 .any(|e| matches!(&e.event, RunEvent::RunFailed { .. })));

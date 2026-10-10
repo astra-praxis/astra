@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use agent_core::{
     ArtifactKind, ChatMessage, Decision, Envelope, MessageContent, ModelBackend, PermissionBridge,
     PermissionRequest, RigBackend, Role, RunHandle, Thread, ThreadConfig, ToolContext, ToolOutput,
-    ToolPolicy, ToolRegistry,
+    ToolPolicy, ToolRegistry, DEFAULT_MAX_TURNS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -73,9 +73,44 @@ pub fn agent_recent_events(app: AppHandle, limit: Option<u32>) -> Result<Vec<Val
 #[derive(Default)]
 pub struct PermissionHub {
     pending: Mutex<HashMap<String, oneshot::Sender<Decision>>>,
+    /// 「一键允许项目内 shell」开关：开启后工作目录在项目内的 shell_execute 自动 Allow
+    auto_shell: std::sync::atomic::AtomicBool,
+    /// 自动允许的项目根（agent_start_run 时与当前项目同步）
+    auto_shell_root: Mutex<Option<PathBuf>>,
 }
 
 impl PermissionHub {
+    pub fn set_auto_shell(&self, enabled: bool, root: Option<PathBuf>) {
+        use std::sync::atomic::Ordering;
+        self.auto_shell.store(enabled, Ordering::Relaxed);
+        *self.auto_shell_root.lock().unwrap() = root;
+    }
+
+    /// 开关开启时同步项目根（切换项目 / 新 Run 保持一致）
+    pub fn sync_auto_shell_root(&self, root: Option<PathBuf>) {
+        use std::sync::atomic::Ordering;
+        if self.auto_shell.load(Ordering::Relaxed) {
+            *self.auto_shell_root.lock().unwrap() = root;
+        }
+    }
+
+    /// 命中自动放行策略：shell_execute + 开关开 + 项目已绑定 + 命令 confined 在项目内。
+    /// 提权/系统级命令由工具执行时的内置规则拦截，与是否自动放行无关。
+    fn auto_allow_shell(&self, tool_name: &str, arguments: &serde_json::Value) -> bool {
+        use std::sync::atomic::Ordering;
+        if tool_name != "shell_execute" || !self.auto_shell.load(Ordering::Relaxed) {
+            return false;
+        }
+        let root = self.auto_shell_root.lock().unwrap().clone();
+        let Some(root) = root else {
+            return false;
+        };
+        let Some(command) = arguments.get("command").and_then(|v| v.as_str()) else {
+            return false;
+        };
+        shell_command_project_confined(&root, command)
+    }
+
     fn register(&self, tool_call_id: String) -> oneshot::Receiver<Decision> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(tool_call_id, tx);
@@ -101,13 +136,17 @@ impl PermissionHub {
 
 /// PermissionBridge 宿主实现：注册 oneshot 并等待前端决定。
 /// 发送端被清理（重置会话）时返回 Deny，保证不会挂死运行循环。
+/// 开启「项目内 shell 自动允许」时，confined 命令直接 Allow 跳过弹窗。
 struct HubBridge(Arc<PermissionHub>);
 
 #[async_trait::async_trait]
 impl PermissionBridge for HubBridge {
-    async fn request(&self, _req: PermissionRequest) -> Decision {
+    async fn request(&self, req: PermissionRequest) -> Decision {
+        if self.0.auto_allow_shell(&req.tool_name, &req.arguments) {
+            return Decision::Allow;
+        }
         // tool_call_id 由 run_loop 生成并已通过 PermissionRequested 事件告知前端
-        let id = _req.tool_call_id;
+        let id = req.tool_call_id;
         let rx = self.0.register(id);
         match rx.await {
             Ok(d) => d,
@@ -731,6 +770,51 @@ fn hardcoded_deny_reason(cmd: &str) -> Option<&'static str> {
     None
 }
 
+/// 判断一条 shell 命令是否「confined 在项目内」：
+/// - 不含 ~ / $HOME 引用（家目录逃逸）
+/// - 不含 .. 路径分量（相对路径向上逃逸）
+/// - 不出现指向项目外/根指向的绝对路径 token（含重定向目标，如 2>/dev/null）
+///
+/// 这是启发式判定（工作目录固定为项目根），不是沙箱保证：
+/// 环境变量插值（如 FOO=/abs cmd）、进程替换等复杂语法不在识别范围内；
+/// 提权/系统级命令仍由 hardcoded_deny_reason 在执行时拦截。
+/// 未命中 confined → 走正常确认弹窗，不会自动放行。
+fn shell_command_project_confined(root: &Path, cmd: &str) -> bool {
+    if cmd.contains('~') || cmd.contains("$HOME") || cmd.contains("${HOME}") {
+        return false;
+    }
+    let root_s = root.to_string_lossy().into_owned();
+    for token in cmd.split_whitespace() {
+        // .gitignore 风格的排除语义不用；只关心路径形态的 token
+        let t = token.trim_matches(|c| c == '"' || c == '\'');
+        // 剩余路径分量含 .. → 逃逸（./..txt 这类文件名不含独立 .. 分量，不误伤）
+        if t.split('/').any(|seg| seg == "..") {
+            return false;
+        }
+        // 剥掉重定向前缀（2>/dev/null → /dev/null；>>x → x）
+        let mut p = t;
+        loop {
+            let stripped = p
+                .strip_prefix("2>")
+                .or_else(|| p.strip_prefix("1>"))
+                .or_else(|| p.strip_prefix(">>"))
+                .or_else(|| p.strip_prefix('>'))
+                .or_else(|| p.strip_prefix('<'));
+            match stripped {
+                Some(rest) if !rest.is_empty() => p = rest,
+                _ => break,
+            }
+        }
+        if p.starts_with('/') {
+            let confined = p == root_s || p.starts_with(&format!("{root_s}/"));
+            if !confined {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// 把输出截到上限内（按字符边界，避免切断 UTF-8）。
 fn cap_output(s: String) -> String {
     if s.chars().count() <= SHELL_OUTPUT_CAP {
@@ -916,6 +1000,50 @@ mod shell_tests {
         assert!(capped.chars().count() < SHELL_OUTPUT_CAP + 100);
         assert!(capped.contains("已截断"));
     }
+
+    fn confined(root: &str, cmd: &str) -> bool {
+        shell_command_project_confined(Path::new(root), cmd)
+    }
+
+    #[test]
+    fn project_confined_shell_commands() {
+        let root = "/Users/u/work/astra";
+        // 纯相对路径 / 无路径 → confined（工作目录固定为项目根）
+        assert!(confined(root, "ls -la"));
+        assert!(confined(root, "pandoc 招标.docx -o out/x.md"));
+        assert!(confined(root, "python3 build.py"));
+        assert!(confined(root, "git status"));
+        assert!(confined(root, "rg TODO src"));
+        // 项目内绝对路径 → confined
+        assert!(confined(root, "ls /Users/u/work/astra/src"));
+        assert!(confined(root, "cat /Users/u/work/astra/README.md"));
+        // 重定向到项目内相对路径 → confined；到项目内绝对路径也 confined
+        assert!(confined(root, "python3 gen.py > out/report.txt"));
+        assert!(confined(root, "make 2> build/err.log"));
+        assert!(confined(root, "cmd >> /Users/u/work/astra/log.txt"));
+    }
+
+    #[test]
+    fn escaping_shell_commands_not_confined() {
+        let root = "/Users/u/work/astra";
+        // 家目录引用
+        assert!(!confined(root, "cat ~/.zshrc"));
+        assert!(!confined(root, "rm -rf $HOME/x"));
+        assert!(!confined(root, "ls ${HOME}"));
+        // 相对路径向上逃逸
+        assert!(!confined(root, "cat ../secret.txt"));
+        assert!(!confined(root, "cp a.txt ../../outside"));
+        // 项目外绝对路径
+        assert!(!confined(root, "cat /etc/passwd"));
+        assert!(!confined(root, "rm -rf /Users/u/work/other"));
+        // 重定向到项目外
+        assert!(!confined(root, "echo hi > /tmp/x.txt"));
+        assert!(!confined(root, "make 2>/dev/null"));
+        // cd 到根/外层
+        assert!(!confined(root, "cd / && ls"));
+        // 前缀相似但不同的兄弟目录
+        assert!(!confined(root, "ls /Users/u/work/astra-evil/x"));
+    }
 }
 
 // ===== 命令 =====
@@ -930,6 +1058,8 @@ pub struct AgentStartReq {
     /// 项目根目录（None = 纯聊天，不注册文件工具）
     pub project_root: Option<String>,
     pub system_prompt: Option<String>,
+    /// 最大续轮数（不传用 agent-core 默认 20）
+    pub max_turns: Option<u32>,
     /// 用户通过 /技能名 指定的技能（内容注入本次用户消息）
     pub skill: Option<String>,
     /// 前端生成的会话 id（同会话复用 Thread 与历史）
@@ -978,6 +1108,9 @@ pub async fn agent_start_run(
     let session_id = req.session_id;
     let user_text = req.user_text;
 
+    // 「项目内 shell 自动允许」的项目根与当前 Run 的项目保持一致（未绑项目时清除）
+    state.hub.sync_auto_shell_root(project_root.clone());
+
     // 2.5 技能库：注册发现/读取工具 + system prompt 注入摘要（跨会话复用，建 Thread 时生效）
     let skills_dir = crate::user_skills::app_skills_dir(&app).ok();
     let skills_summary = skills_dir
@@ -1013,6 +1146,7 @@ pub async fn agent_start_run(
                 project_root: project_root.clone(),
                 temperature: None,
                 max_tokens: None,
+                max_turns: req.max_turns.unwrap_or(DEFAULT_MAX_TURNS),
                 policy,
             };
             let backend: Arc<dyn ModelBackend> =
@@ -1082,6 +1216,18 @@ pub fn agent_permission_decide(
     decision: Decision,
 ) -> Result<(), String> {
     state.hub.decide(&tool_call_id, decision)
+}
+
+/// 一键允许项目内 shell：开启后工作目录为项目根、且命令 confined 在项目内的
+/// shell_execute 自动 Allow（跳过确认弹窗）；其他工具与逃逸命令行为不变。
+#[tauri::command]
+pub fn agent_set_auto_shell(
+    state: State<'_, AgentState>,
+    enabled: bool,
+    project_root: Option<String>,
+) {
+    let root = project_root.map(PathBuf::from);
+    state.hub.set_auto_shell(enabled, root);
 }
 
 /// 丢弃会话上下文（新对话 / 切换项目时调用）：取消运行、清挂起权限、删 Thread

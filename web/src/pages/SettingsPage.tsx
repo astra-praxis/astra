@@ -6,8 +6,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Check, Play, Save, Folder, X } from 'lucide-react';
+import { Check, Play, Save, Folder, X, Zap } from 'lucide-react';
 import { useThemeStore, type ThemeMode } from '@/lib/theme';
+import { useAgentStore } from '@/stores/agent';
 import './SettingsPage.scss';
 
 interface EditorSetting {
@@ -54,6 +55,12 @@ export default function SettingsPage() {
 
   // 扫描深度状态
   const [scanDepth, setScanDepth] = useState(3);
+
+  // Agent 权限：项目内 Shell 自动允许（全局偏好，进 Agent 页后同步到后端）
+  const autoShell = useAgentStore((s) => s.autoShell);
+  const setAutoShell = useAgentStore((s) => s.setAutoShell);
+  const maxTurns = useAgentStore((s) => s.maxTurns);
+  const setMaxTurns = useAgentStore((s) => s.setMaxTurns);
 
   // ===== 加载设置 =====
   useEffect(() => {
@@ -390,6 +397,59 @@ export default function SettingsPage() {
             onChange={(e) => setScanDepth(Number(e.target.value))}
           />
           <p className="input-hint">范围 1–5，数值越大遍历越深（默认 3）</p>
+        </div>
+      </div>
+
+      {/* Agent 权限设置卡片 */}
+      <div className="settings-card agent-perm-card">
+        <div className="card-section-header">
+          <div className="section-icon">
+            <Zap size={20} strokeWidth={1.8} />
+          </div>
+          <div className="section-text">
+            <h3>Agent 权限</h3>
+            <p>控制 Agent 执行工具时的确认策略</p>
+          </div>
+        </div>
+
+        <div className="agent-perm-row">
+          <div className="agent-perm-text">
+            <span className="agent-perm-title">项目内 Shell 自动允许</span>
+            <span className="agent-perm-desc">
+              开启后，Agent 执行限定在项目目录内的 Shell 命令时跳过确认直接运行；项目外的命令仍会弹窗请求批准。
+              在 Agent 页选择项目后生效。
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoShell}
+            className={`agent-perm-switch${autoShell ? ' is-on' : ''}`}
+            title={autoShell ? '已开启：项目内命令跳过确认，点击关闭' : '已关闭：点击开启'}
+            onClick={() => setAutoShell(!autoShell)}
+          >
+            <span className="agent-perm-knob" />
+          </button>
+        </div>
+
+        <div className="agent-perm-row">
+          <div className="agent-perm-text">
+            <span className="agent-perm-title">最大执行轮数</span>
+            <span className="agent-perm-desc">
+              Agent 单次任务内「模型请求 → 工具执行」的最大循环次数，防止无限工具循环。超出后任务报错结束，修改后新会话生效。
+            </span>
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={maxTurns}
+            className="agent-perm-input"
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n) && n >= 1) setMaxTurns(n);
+            }}
+          />
         </div>
       </div>
 

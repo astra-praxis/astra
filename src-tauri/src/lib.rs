@@ -1511,6 +1511,7 @@ pub fn run() {
             agent::agent_start_run,
             agent::agent_cancel,
             agent::agent_permission_decide,
+            agent::agent_set_auto_shell,
             agent::agent_reset_session,
             agent::agent_status,
             agent::agent_recent_events,

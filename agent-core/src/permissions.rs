@@ -28,6 +28,8 @@ pub struct PermissionRequest {
     pub tool_name: String,
     /// 展示用参数摘要（如目标路径）
     pub summary: String,
+    /// 完整参数（宿主桥实现智能放行策略时使用，如项目内 shell 自动允许）
+    pub arguments: serde_json::Value,
 }
 
 /// 运行时批准桥：核心库不依赖 Tauri/UI，宿主层实现此 trait。

@@ -92,6 +92,7 @@ impl ToolContext {
             tool_call_id: String::new(),
             tool_name: tool_name.to_string(),
             summary,
+            arguments: serde_json::Value::Null,
         };
         tokio::select! {
             _ = self.cancelled.cancelled() => Decision::Deny,

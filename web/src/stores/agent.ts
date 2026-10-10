@@ -29,6 +29,8 @@ export interface AgentEnvelope {
   tool_call_id?: string;
   tool_name?: string;
   args_summary?: string;
+  /** 完整参数快照（超长字符串已截断）：写文件内容 / 完整命令预览用 */
+  args?: Record<string, unknown>;
   result_summary?: string;
   error?: string;
   summary?: string;
@@ -49,6 +51,8 @@ export type Entry =
       callId: string;
       toolName: string;
       argsSummary: string;
+      /** 完整参数快照（超长已截断）：内容预览用 */
+      args?: Record<string, unknown>;
       status: ToolStatus;
       result?: string;
       artifacts?: Array<{ path: string; kind: string }>;
@@ -90,6 +94,7 @@ export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
           callId: env.tool_call_id!,
           toolName: env.tool_name!,
           argsSummary: env.args_summary ?? '',
+          args: env.args,
           status: 'running',
         },
       ];
@@ -186,10 +191,18 @@ interface AgentState {
   projectPath: string;
   /** 历史会话列表（save/list/delete 后经 refreshSessions 刷新） */
   sessions: AgentSessionMeta[];
+  /** 一键允许项目内 shell（ confined 在项目根的 shell_execute 跳过确认） */
+  autoShell: boolean;
+  /** Agent 最大续轮数（防无限工具循环预算，默认 50） */
+  maxTurns: number;
 
   setInput: (v: string) => void;
   setError: (v: string) => void;
   setProjectPath: (v: string) => void;
+  /** 切换项目内 shell 自动允许（同步到后端 + localStorage 持久化） */
+  setAutoShell: (v: boolean) => void;
+  /** 设置最大续轮数（localStorage 持久化，新会话生效） */
+  setMaxTurns: (v: number) => void;
   setRunState: (running: boolean, status: string | null) => void;
   pushUser: (text: string) => void;
   pushTerminal: (outcome: 'completed' | 'failed' | 'cancelled', text?: string) => void;
@@ -211,10 +224,28 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   error: '',
   projectPath: '',
   sessions: [],
+  autoShell: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-autoshell') === '1',
+  maxTurns: Number(localStorage?.getItem('astra-agent-maxturns')) || 50,
 
   setInput: (v) => set({ input: v }),
+  setMaxTurns: (v) => {
+    const n = Number.isFinite(v) && v >= 1 ? Math.floor(v) : 50;
+    set({ maxTurns: n });
+    localStorage.setItem('astra-agent-maxturns', String(n));
+  },
   setError: (v) => set({ error: v }),
   setProjectPath: (v) => set({ projectPath: v }),
+  setAutoShell: (v) => {
+    set({ autoShell: v });
+    localStorage.setItem('astra-agent-autoshell', v ? '1' : '0');
+    const { projectPath } = get();
+    invoke('agent_set_auto_shell', {
+      enabled: v,
+      projectRoot: v && projectPath ? projectPath : null,
+    }).catch(() => {
+      // Tauri 不可用（纯 web 调试）时仅保留前端状态
+    });
+  },
   setRunState: (running, status) => set({ running, status }),
   pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }] })),
   pushTerminal: (outcome, text) =>

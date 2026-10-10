@@ -49,10 +49,8 @@ export default function ChatPage() {
   const [isSending, setIsSendingState] = useState(false);
   const [error, setError] = useState('');
 
-  // ===== 参数 =====
+  // ===== 参数（温度/最大 Token 已移除，后端 ChatRequest 两字段均为 Option，不传用默认） =====
   const [systemPrompt, setSystemPrompt] = useState('你是一个有用的助手，请简洁准确地回答用户问题。');
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState(4000);
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
 
@@ -361,8 +359,6 @@ export default function ChatPage() {
         req: {
           source,
           messages: context,
-          max_tokens: maxTokens,
-          temperature,
         },
       });
     } catch (e) {
@@ -381,7 +377,7 @@ export default function ChatPage() {
         setError(String(e));
       }
     }
-  }, [input, systemPrompt, temperature, maxTokens, scrollToBottom, setSending]);
+  }, [input, systemPrompt, scrollToBottom, setSending]);
 
   const handleStop = useCallback(async () => {
     try {
@@ -524,12 +520,8 @@ export default function ChatPage() {
         {showSettings && (
           <SettingsSheet
             systemPrompt={systemPrompt}
-            temperature={temperature}
-            maxTokens={maxTokens}
             disabled={isSending}
             onSystemPromptChange={setSystemPrompt}
-            onTemperatureChange={setTemperature}
-            onMaxTokensChange={setMaxTokens}
           />
         )}
 

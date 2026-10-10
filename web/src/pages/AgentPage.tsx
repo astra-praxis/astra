@@ -92,6 +92,16 @@ export default function AgentPage() {
     ensureAgentListeners();
   }, []);
 
+  // 项目切换/应用重启后同步「项目内 shell 自动允许」的项目根到后端
+  useEffect(() => {
+    if (useAgentStore.getState().autoShell) {
+      invoke('agent_set_auto_shell', {
+        enabled: true,
+        projectRoot: projectPath || null,
+      }).catch(() => {});
+    }
+  }, [projectPath]);
+
   // ===== 项目选择（绑定在 store；顶部工具栏选择文件夹，@ 只负责引用文件） =====
   const projects = useWorkspaceStore((s) => s.projects);
   const editor = useWorkspaceStore((s) => s.editor);
@@ -153,10 +163,8 @@ export default function AgentPage() {
   const runningModels = useChatToolbarStore((s) => s.runningModels);
   const showSettings = useChatToolbarStore((s) => s.showSettings);
 
-  // ===== 参数（SettingsSheet；system_prompt 传给 agent_start_run，温度/token 后端暂不支持） =====
+  // ===== 参数（SettingsSheet；system_prompt 传给 agent_start_run，温度/token 后端暂不支持已移除） =====
   const [systemPrompt, setSystemPrompt] = useState('你是一个有用的助手，请简洁准确地回答用户问题。');
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState(4000);
 
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
   const selectedModel = runningModels.find((m) => m.port === selectedModelPort) ?? null;
@@ -246,6 +254,7 @@ export default function AgentPage() {
               : null,
           project_root: projectPath || null,
           system_prompt: systemPrompt.trim() || null,
+          max_turns: useAgentStore.getState().maxTurns,
         },
       });
     } catch (e) {
@@ -488,12 +497,8 @@ export default function AgentPage() {
           {showSettings && (
             <SettingsSheet
               systemPrompt={systemPrompt}
-              temperature={temperature}
-              maxTokens={maxTokens}
               disabled={running}
               onSystemPromptChange={setSystemPrompt}
-              onTemperatureChange={setTemperature}
-              onMaxTokensChange={setMaxTokens}
             />
           )}
 
@@ -739,8 +744,17 @@ function ToolEntry({
   onDecide: (callId: string, allow: boolean) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const hasBody = !!(entry.result || (entry.artifacts && entry.artifacts.length > 0));
   const perm = entry.perm;
+  // 写文件类工具展示完整内容，shell 展示完整命令（args 由 tool_call_started 事件携带，旧会话无此字段）
+  const contentPreview =
+    entry.args && typeof entry.args.content === 'string'
+      ? entry.args.content
+      : entry.toolName === 'shell_execute' && entry.args && typeof entry.args.command === 'string'
+        ? entry.args.command
+        : undefined;
+  const previewLines = contentPreview ? contentPreview.split('\n').length : 0;
   return (
     <div className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}>
       <button
@@ -776,6 +790,24 @@ function ToolEntry({
           <ChevronDown size={12} strokeWidth={2} className={`aentry__tool-chev${open ? ' rotated' : ''}`} />
         )}
       </button>
+      {contentPreview && (
+        <div className="aentry__tool-body is-preview">
+          <pre className={`aentry__tool-content${previewLines > 12 && !expanded ? ' is-clamped' : ''}`}>{contentPreview}</pre>
+          {previewLines > 12 && (
+            <button
+              type="button"
+              className="aentry__tool-content-toggle"
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded((v) => !v);
+              }}
+            >
+              <ChevronDown size={12} strokeWidth={2} className={expanded ? 'rotated' : ''} />
+              {expanded ? '收起内容' : `查看全部内容（${previewLines} 行）`}
+            </button>
+            )}
+        </div>
+      )}
       {/* Confirm 工具的批准/拒绝直接内嵌在卡片里 */}
       {perm?.state === 'pending' && (
         <div className="aentry__perm-inline">

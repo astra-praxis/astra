@@ -35,7 +35,7 @@ pub use permissions::{
     decide, ensure_within_root, validate_args, AutoBridge, Decision, PermissionBridge,
     PermissionRequest, ToolPolicy,
 };
-pub use run::{execute, RunConfig, RunHandle};
+pub use run::{execute, RunConfig, RunHandle, DEFAULT_MAX_TURNS};
 pub use thread::{Thread, ThreadConfig};
 pub use tool::{
     AgentTool, Artifact, ArtifactKind, ToolCall, ToolContext, ToolDefinition, ToolOutput,

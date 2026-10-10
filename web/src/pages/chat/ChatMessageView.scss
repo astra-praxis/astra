@@ -45,7 +45,8 @@
 }
 
 .msg.user .msg-text {
-  color: var(--text-primary);
+  // 深绿底上必须用侧边栏体系的浅色，--text-primary 在浅色主题下是深色，看不清（对齐 Agent 页修复）
+  color: var(--sidebar-text-hover);
 }
 
 /* 助手：纯文本 */

@@ -51,8 +51,53 @@
 .composer-side {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+}
+
+// 底栏左侧（模型切换）与右侧（提示 + 扩展按钮 + 发送）之间的弹性空间
+.composer-spacer {
+  flex: 1;
+}
+
+// 复用 ChatToolbar（来源切换 + 模型选择）：取消其 flex:1 避免撑开
+.composer-side .tb-left {
+  flex: 0 1 auto;
+
+  .picker {
+    max-width: 160px;
+  }
+}
+
+// 底栏扩展按钮（设置/清空），与 Agent 页 agent-dock__iconbtn 同款
+.composer-iconbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.12s;
+
+  &:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--bg-subtle);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.is-active {
+    color: var(--accent);
+    background: var(--bg-subtle);
+  }
 }
 
 .composer-hint {

@@ -54,6 +54,20 @@
   min-width: 0;
 }
 
+/* Agent 页标题栏挂载点（内容由 AgentPage portal 渲染）
+   左侧留出 macOS 红绿灯三个按钮的区域 */
+.agent-titlebar-left {
+  padding-left: 84px;
+}
+
+.agent-titlebar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
 /* 收藏的开发模式快捷入口 */
 .titlebar-dev-entry {
   display: inline-flex;

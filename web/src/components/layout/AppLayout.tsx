@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { invoke } from '@tauri-apps/api/core';
 import {
+  Bot,
   FolderOpen,
   MessageSquare,
   Wrench,
@@ -19,12 +20,12 @@ import { useNmStore } from '@/stores/nm';
 import { useFavoriteStore } from '@/stores/favorite';
 import { useChatToolbarStore } from '@/stores/chatToolbar';
 import { useWorkspaceStore } from '@/stores/workspace';
-import ChatToolbar from '@/components/chat/ChatToolbar';
 import './layout.scss';
 
 const menuItems = [
   { id: 'workspace', label: '工作空间', path: '/', icon: FolderOpen },
   { id: 'chat', label: '对话', path: '/chat', icon: MessageSquare },
+  { id: 'agent', label: 'Agent', path: '/agent', icon: Bot },
   { id: 'tools', label: '工具箱', path: '/tools', icon: Wrench },
   { id: 'logs', label: '日志', path: '/logs', icon: ScrollText },
 ];
@@ -87,20 +88,33 @@ export default function AppLayout() {
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + '/');
 
+  // Agent / Chat 页：模型切换收进输入框、顶部功能移入标题栏（页面通过 portal 渲染到挂载点）
+  const isAgent = location.pathname.startsWith('/agent');
+  const pageTitlebarId = isAgent ? 'agent' : location.pathname.startsWith('/chat') ? 'chat' : null;
+
   return (
     <div className={`app-layout${sidebarCollapsed ? ' collapsed' : ''}`}>
       {/* 顶部标题栏（可拖拽）：左 chat 工具 ｜ 中 标题 ｜ 右 状态+快捷入口 */}
       <header className="title-bar" onMouseDown={onTitlebarMouseDown}>
-        <div className="titlebar-left">
-          <ChatToolbar side="left" />
-        </div>
+        {pageTitlebarId ? (
+          // 左侧 padding 留出 macOS 红绿灯区域
+          <div
+            className="titlebar-left agent-titlebar-left"
+            id={`${pageTitlebarId}-titlebar-left`}
+          />
+        ) : (
+          // 其他页面：模型切换等已收进 chat/agent 页输入框，标题栏左侧留空
+          <div className="titlebar-left" />
+        )}
 
         <div className="titlebar-center">
           <span className="title-bar-title">星野</span>
         </div>
 
         <div className="titlebar-right">
-          <ChatToolbar side="right" />
+          {pageTitlebarId && (
+            <div className="agent-titlebar-right" id={`${pageTitlebarId}-titlebar-right`} />
+          )}
           {favorite && (
             <button
               className="titlebar-dev-entry"

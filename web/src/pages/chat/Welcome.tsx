@@ -2,6 +2,7 @@
  * 空状态欢迎页
  * 移植自 src/routes/chat/Welcome.svelte
  */
+import OrbArt from '@/components/illustrations/OrbArt';
 import './Welcome.scss';
 
 interface Props {
@@ -13,7 +14,9 @@ interface Props {
 export default function Welcome({ sourceLabel, modelName, onPick }: Props) {
   return (
     <div className="welcome">
-      <div className="welcome-orb" />
+      <div className="welcome-art">
+        <OrbArt size={132} />
+      </div>
       <h1 className="welcome-greet">有什么可以帮你？</h1>
       <p className="welcome-sub">
         连接到 <strong>{sourceLabel}</strong>

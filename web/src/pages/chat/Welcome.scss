@@ -10,26 +10,11 @@
   max-width: 600px;
 }
 
-.welcome-orb {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  margin: 0 auto 24px;
-  background: var(--accent-gradient);
-  position: relative;
-  box-shadow: 0 12px 40px var(--accent-shadow);
-  animation: orb-float 4s ease-in-out infinite;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: -8px;
-    border-radius: 50%;
-    background: var(--accent-gradient);
-    opacity: 0.25;
-    filter: blur(16px);
-    animation: orb-pulse 4s ease-in-out infinite;
-  }
+.welcome-art {
+  width: 132px;
+  margin: 0 auto 16px;
+  filter: drop-shadow(0 12px 32px var(--accent-shadow));
+  animation: orb-float 5s ease-in-out infinite;
 }
 
 @keyframes orb-float {
@@ -41,20 +26,6 @@
 
   50% {
     transform: translateY(-8px);
-  }
-}
-
-@keyframes orb-pulse {
-
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.25;
-  }
-
-  50% {
-    transform: scale(1.15);
-    opacity: 0.4;
   }
 }
 

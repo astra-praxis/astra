@@ -1,3 +1,5 @@
+mod agent;
+mod agent_sessions;
 mod chat;
 mod chat_sessions;
 mod command_runner;
@@ -6,6 +8,8 @@ mod downloader;
 mod embedding;
 mod indexer;
 mod providers;
+mod session_store;
+mod user_skills;
 mod vector_store;
 
 use serde::{Deserialize, Serialize};
@@ -213,6 +217,88 @@ async fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, String> {
     })
     .await
     .map_err(|e| format!("扫描工作空间失败: {}", e))?
+}
+
+// ===== 命令：列出项目内文件（@ 文件引用候选） =====
+
+/// 递归列出项目内文件的相对路径（`/` 分隔），供输入框 @ 引用弹层搜索。
+#[tauri::command]
+async fn list_project_files(path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = Path::new(&path);
+        if !root.is_dir() {
+            return Err(format!("路径不是有效的目录: {}", path));
+        }
+        Ok(collect_project_files(root))
+    })
+    .await
+    .map_err(|e| format!("扫描项目文件失败: {}", e))?
+}
+
+/// 递归收集项目内文件的相对路径，独立成函数便于单测。
+/// 跳过隐藏目录与常见构建产物目录，限制深度与数量，避免超大项目拖慢弹层。
+fn collect_project_files(root: &Path) -> Vec<String> {
+    const MAX_DEPTH: u32 = 8;
+    const MAX_FILES: usize = 2000;
+    // 这些目录几乎不会是 @ 引用的目标，跳过既省时间也避免候选被噪音塞满
+    const SKIP_DIRS: &[&str] = &[
+        "node_modules",
+        ".git",
+        "dist",
+        "build",
+        "target",
+        ".next",
+        ".nuxt",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "vendor",
+        "coverage",
+        ".idea",
+        ".vscode",
+        ".cache",
+        "out",
+        ".output",
+        "bin",
+        "obj",
+    ];
+
+    fn walk(dir: &Path, rel: &str, depth: u32, out: &mut Vec<String>) {
+        if depth >= MAX_DEPTH || out.len() >= MAX_FILES {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut items: Vec<_> = entries.flatten().collect();
+        items.sort_by_key(|e| e.file_name());
+        for entry in items {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let name = entry.file_name().to_string_lossy().to_string();
+            let child_rel = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
+            if file_type.is_dir() {
+                if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
+                walk(&entry.path(), &child_rel, depth + 1, out);
+            } else if file_type.is_file() && !name.starts_with('.') {
+                if out.len() >= MAX_FILES {
+                    return;
+                }
+                out.push(child_rel);
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    walk(root, "", 0, &mut files);
+    files
 }
 
 // ===== 扫描项目子目录 =====
@@ -1289,6 +1375,7 @@ pub fn run() {
             std::sync::atomic::AtomicBool::new(false),
         ))
         .manage(downloader::DownloadManager::new())
+        .manage(agent::AgentState::default())
         .manage(Mutex::new(
             HashMap::<String, dev_mode::RunningDevProcess>::new(),
         ))
@@ -1378,6 +1465,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             scan_workspace,
+            list_project_files,
             create_project,
             get_settings,
             save_settings,
@@ -1419,12 +1507,32 @@ pub fn run() {
             // Chat
             chat::send_chat,
             chat::stop_chat,
+            // Agent
+            agent::agent_start_run,
+            agent::agent_cancel,
+            agent::agent_permission_decide,
+            agent::agent_reset_session,
+            agent::agent_status,
+            agent::agent_recent_events,
+            // Agent Sessions
+            agent_sessions::list_agent_sessions,
+            agent_sessions::save_agent_session,
+            agent_sessions::delete_agent_session,
             // Chat Sessions
             chat_sessions::list_chat_sessions,
             chat_sessions::save_chat_session,
             chat_sessions::update_chat_session_title,
             chat_sessions::delete_chat_session,
             chat_sessions::get_chat_session,
+            // User Skills
+            user_skills::list_user_skills,
+            user_skills::create_user_skill,
+            user_skills::import_user_skill,
+            user_skills::list_user_skill_files,
+            user_skills::read_user_skill_file,
+            user_skills::write_user_skill_file,
+            user_skills::delete_user_skill_file,
+            user_skills::delete_user_skill,
             // Dev Mode
             dev_mode::scan_dev_dirs,
             dev_mode::run_card_command,
@@ -1752,4 +1860,58 @@ fn read_skill_doc(path: String) -> Result<String, String> {
     }
 
     Err("未找到文档文件（SKILL.md / README.md）".to_string())
+}
+
+// ===== 测试 =====
+
+#[cfg(test)]
+mod lib_tests {
+    use super::*;
+
+    /// 在临时目录里搭一棵小项目树，验证 collect_project_files 的收集/过滤规则
+    #[test]
+    fn collect_project_files_skips_hidden_and_junk_dirs() {
+        let root = std::env::temp_dir().join("astra-lib-collect-files");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src/components")).unwrap();
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::create_dir_all(root.join("dist")).unwrap();
+
+        fs::write(root.join("README.md"), "# demo").unwrap();
+        fs::write(root.join(".env"), "K=V").unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("src/components/Button.tsx"), "x").unwrap();
+        fs::write(root.join("node_modules/pkg/index.js"), "x").unwrap();
+        fs::write(root.join(".git/config"), "x").unwrap();
+        fs::write(root.join("dist/index.html"), "x").unwrap();
+
+        let files = collect_project_files(&root);
+
+        // 只收普通文件，跳过隐藏文件与 node_modules/.git/dist
+        assert_eq!(
+            files,
+            vec![
+                "README.md".to_string(),
+                "src/components/Button.tsx".to_string(),
+                "src/main.rs".to_string(),
+            ]
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 非目录路径报错（命令层校验）
+    #[test]
+    fn collect_project_files_nested_dirs_use_slash() {
+        let root = std::env::temp_dir().join("astra-lib-collect-nested");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("a/b/c")).unwrap();
+        fs::write(root.join("a/b/c/deep.txt"), "x").unwrap();
+
+        let files = collect_project_files(&root);
+        assert_eq!(files, vec!["a/b/c/deep.txt".to_string()]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }

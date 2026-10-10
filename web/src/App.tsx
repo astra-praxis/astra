@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router';
 import AppLayout from './components/layout/AppLayout';
 import WorkspacePage from './pages/WorkspacePage';
 import ChatPage from './pages/chat/ChatPage';
+import AgentPage from './pages/AgentPage';
 import ToolsPage from './pages/ToolsPage';
 import DownloaderPage from './pages/DownloaderPage';
 import NmPage from './pages/NmPage';
@@ -12,6 +13,7 @@ import ProvidersPage from './pages/ProvidersPage';
 import ProviderDetailPage from './pages/ProviderDetailPage';
 import SkillsPage from './pages/SkillsPage';
 import SkillDetailPage from './pages/SkillDetailPage';
+import UserSkillsPage from './pages/UserSkillsPage';
 import SettingsPage from './pages/SettingsPage';
 import DevModePage from './pages/DevModePage';
 
@@ -22,6 +24,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<WorkspacePage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/agent" element={<AgentPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tools/downloader" element={<DownloaderPage />} />
           <Route path="/tools/nm" element={<NmPage />} />
@@ -32,6 +35,7 @@ export default function App() {
           <Route path="/providers/:id" element={<ProviderDetailPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/skills/:name" element={<SkillDetailPage />} />
+          <Route path="/my-skills" element={<UserSkillsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/dev-mode/:encoded" element={<DevModePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

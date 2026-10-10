@@ -1,0 +1,139 @@
+/* ============================================================
+   星球轨道插画样式（配合 OrbArt.tsx 内联 SVG）
+   - 颜色只引用 var(--...)，亮暗主题自动适配
+   - 动画只用 transform/opacity（合成器友好）
+   ============================================================ */
+
+.orbart {
+  display: block;
+
+  /* 呼吸光晕 */
+  .orbart-glow {
+    transform-origin: 80px 80px;
+    animation: orbart-breathe 4.5s ease-in-out infinite;
+  }
+
+  /* 轨道线 */
+  .orbart-ring {
+    fill: none;
+    stroke: var(--border-strong);
+    stroke-width: 1;
+    stroke-dasharray: 3 5;
+    stroke-linecap: round;
+    opacity: 0.9;
+
+    &--tilt {
+      stroke: var(--brand-300);
+      stroke-dasharray: none;
+      opacity: 0.45;
+    }
+  }
+
+  /* 星球缓慢自转般的浮动 */
+  .orbart-core {
+    transform-origin: 80px 80px;
+    animation: orbart-float 6s ease-in-out infinite;
+  }
+
+  .orbart-highlight {
+    fill: #ffffff;
+    opacity: 0.35;
+    animation: orbart-float 6s ease-in-out infinite;
+  }
+
+  .orbart-detail {
+    stroke: var(--brand-200);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    opacity: 0.55;
+  }
+
+  /* 卫星：绕中心公转 */
+  .orbart-orbit {
+    transform-origin: 80px 80px;
+    animation: orbart-revolve 9s linear infinite;
+  }
+
+  .orbart-sat {
+    fill: var(--accent);
+  }
+
+  .orbart-sat-glow {
+    fill: var(--accent-ring);
+    opacity: 0.5;
+  }
+
+  /* 星点闪烁（错峰） */
+  .orbart-spark {
+    fill: var(--brand-400);
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: orbart-twinkle 2.8s ease-in-out infinite;
+
+    &--1 {
+      animation-delay: 0s;
+    }
+
+    &--2 {
+      fill: var(--brand-300);
+      animation-delay: 0.9s;
+    }
+
+    &--3 {
+      animation-delay: 1.7s;
+    }
+  }
+}
+
+@keyframes orbart-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+
+  50% {
+    transform: scale(1.07);
+    opacity: 1;
+  }
+}
+
+@keyframes orbart-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes orbart-revolve {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes orbart-twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.75);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbart * {
+    animation: none !important;
+  }
+}

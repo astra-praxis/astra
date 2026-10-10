@@ -333,6 +333,14 @@ export default function SettingsPage() {
             </span>
             <span className="nav-entry-arrow">›</span>
           </Link>
+          <Link to="/my-skills" className="nav-entry">
+            <span className="nav-entry-icon">⚡</span>
+            <span className="nav-entry-body">
+              <span className="nav-entry-title">我的 Skills</span>
+              <span className="nav-entry-desc">新建或导入技能，Agent 中 / 调用</span>
+            </span>
+            <span className="nav-entry-arrow">›</span>
+          </Link>
         </div>
       </div>
 

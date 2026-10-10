@@ -1,0 +1,492 @@
+// 我的 Skills 页面样式（BEM；颜色全部走主题变量）
+
+.uskills-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px 32px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+// ===== 顶部 =====
+
+.uskills-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.uskills-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    background: var(--bg-surface-soft);
+    color: var(--text-primary);
+  }
+}
+
+.uskills-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.uskills-subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  flex-basis: 100%;
+
+  kbd {
+    padding: 1px 5px;
+    border: 1px solid var(--border-color);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--bg-surface-soft);
+    font-size: 11px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+}
+
+.uskills-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// ===== 按钮 =====
+
+.uskills-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-surface-soft);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &--primary {
+    color: var(--text-inverse);
+    background: var(--brand-600);
+    border-color: var(--brand-600);
+
+    &:hover:not(:disabled) {
+      background: var(--brand-700);
+      border-color: var(--brand-700);
+      color: var(--text-inverse);
+    }
+  }
+
+  &--danger {
+    color: var(--text-inverse);
+    background: var(--danger-600);
+    border-color: var(--danger-600);
+
+    &:hover:not(:disabled) {
+      background: var(--danger-700);
+      border-color: var(--danger-700);
+      color: var(--text-inverse);
+    }
+  }
+
+  &--icon {
+    padding: 6px 8px;
+  }
+
+  &--small {
+    padding: 4px 10px;
+    font-size: 12.5px;
+  }
+}
+
+// ===== 提示条 =====
+
+.uskills-tip {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  background: var(--success-50);
+  color: var(--success-700);
+  border: 1px solid var(--success-500);
+
+  &--error {
+    background: var(--danger-50);
+    color: var(--danger-700);
+    border-color: var(--danger-500);
+  }
+}
+
+// ===== 主体双栏 =====
+
+.uskills-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex: 1;
+  min-height: 0;
+}
+
+// ===== 左侧技能列表 =====
+
+.uskills-list {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.uskills-empty {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+
+  p {
+    margin: 0 0 4px;
+  }
+}
+
+.uskills-empty-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.uskills-card {
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+
+  &:hover {
+    background: var(--bg-surface-soft);
+  }
+
+  &.is-active {
+    border-color: var(--brand-500);
+    background: var(--bg-surface-soft);
+  }
+}
+
+.uskills-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.uskills-card-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--brand-700);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.uskills-card-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.uskills-card-desc {
+  margin: 6px 0 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.uskills-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.uskills-card-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.uskills-card-del,
+.uskills-file-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+
+  &:hover {
+    color: var(--danger-600);
+    background: var(--danger-50);
+  }
+}
+
+.uskills-card:hover .uskills-card-del,
+.uskills-file-row:hover .uskills-file-del {
+  opacity: 1;
+}
+
+// ===== 右侧编辑器 =====
+
+.uskills-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  min-height: 420px;
+}
+
+.uskills-editor-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+
+  p {
+    margin: 0;
+  }
+
+  &--small {
+    min-height: 260px;
+  }
+}
+
+.uskills-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.uskills-editor-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.uskills-editor-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brand-700);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.uskills-editor-body {
+  display: flex;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+// 文件列表列
+
+.uskills-files {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  max-height: 460px;
+}
+
+.uskills-files-empty {
+  padding: 16px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.uskills-file-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.uskills-file {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    background: var(--bg-surface-soft);
+    color: var(--text-primary);
+  }
+
+  &.is-active {
+    background: var(--brand-50);
+    color: var(--brand-700);
+  }
+}
+
+.uskills-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.uskills-file-size {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+// 代码编辑区
+
+.uskills-code {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.uskills-textarea {
+  flex: 1;
+  min-height: 320px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  &:focus {
+    outline: none;
+    border-color: var(--brand-500);
+  }
+}
+
+.uskills-code-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.uskills-code-path {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ===== 弹窗表单 =====
+
+.uskills-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.uskills-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.uskills-input {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-surface-soft);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  &:focus {
+    outline: none;
+    border-color: var(--brand-500);
+  }
+}
+
+.uskills-confirm-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--danger-700);
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+}

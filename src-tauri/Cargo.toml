@@ -15,6 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+agent-core = { path = "../agent-core" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
@@ -26,7 +27,8 @@ dirs = "5"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["time", "process", "io-util", "rt-multi-thread"] }
+tokio = { version = "1", features = ["time", "process", "io-util", "rt-multi-thread", "sync"] }
+async-trait = "0.1"
 which = "7"
 uuid = { version = "1", features = ["v4"] }
 libc = "0.2"

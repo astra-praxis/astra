@@ -8,14 +8,18 @@
  *   通过 rxjs Subject 组织（本项目指定的 rxjs 使用位置）
  * - toolbarState（chat-state.svelte.ts）→ useChatToolbarStore
  * - workspaceStore → useWorkspaceStore
- * - onClear / onToggleSidebar 回调挂载时注册进 toolbar store，卸载时恢复空函数
+ * - 标题栏功能（模型显示/新对话/历史）通过 portal 渲染到 AppLayout 挂载点；
+ *   模型切换与设置/清空在输入框底栏（与 Agent 页同布局）
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Subject } from 'rxjs';
+import { History, Plus } from 'lucide-react';
 import { useChatToolbarStore } from '@/stores/chatToolbar';
 import { useWorkspaceStore } from '@/stores/workspace';
+import ChatToolbar from '@/components/chat/ChatToolbar';
 import type { ChatMessage, ChatSession, ChatSource } from './types';
 import { buildWorkspaceContext, parseMentions } from './workspace-context';
 import HistoryDrawer from './HistoryDrawer';
@@ -253,23 +257,10 @@ export default function ChatPage() {
     };
   }, [scrollToBottom, setSending]);
 
-  // ===== 工具栏回调注册（卸载时恢复空函数） =====
+  // ===== 标题栏挂载点（AppLayout 在 /chat 路由下渲染的 portal 容器） =====
+  const [tbRight, setTbRight] = useState<HTMLElement | null>(null);
   useEffect(() => {
-    const st = useChatToolbarStore.getState();
-    st.setOnClear(() => {
-      if (isSendingRef.current) return;
-      setMessages([]);
-      messagesRef.current = [];
-      setError('');
-      currentSessionIdRef.current = null;
-      setCurrentSessionId(null);
-    });
-    st.setOnToggleSidebar(() => setSidebarOpen((o) => !o));
-    return () => {
-      const cur = useChatToolbarStore.getState();
-      cur.setOnClear(() => {});
-      cur.setOnToggleSidebar(() => {});
-    };
+    setTbRight(document.getElementById('chat-titlebar-right'));
   }, []);
 
   // ===== 状态同步到工具栏 store =====
@@ -487,6 +478,35 @@ export default function ChatPage() {
   // ===== 渲染 =====
   return (
     <div className={`chat-root${sidebarOpen ? ' with-sidebar' : ''}`}>
+      {/* 标题栏右侧：模型显示 + 新对话 + 历史（Zed 式，portal 到 AppLayout 挂载点） */}
+      {tbRight &&
+        createPortal(
+          <>
+            <span className="agent-tb__model" title="当前模型（在输入框下方切换）">
+              {currentSourceLabel}
+              {currentModelName ? ` · ${currentModelName}` : ''}
+            </span>
+            <button
+              type="button"
+              className="agent-tb__iconbtn"
+              onClick={newChat}
+              disabled={isSending}
+              title="新对话"
+            >
+              <Plus size={15} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              className={`agent-tb__iconbtn${sidebarOpen ? ' is-active' : ''}`}
+              onClick={() => setSidebarOpen((o) => !o)}
+              title={sidebarOpen ? '隐藏历史面板' : '历史会话'}
+            >
+              <History size={15} strokeWidth={1.8} />
+            </button>
+          </>,
+          tbRight,
+        )}
+
       <HistoryDrawer
         open={sidebarOpen}
         sessions={sessions}
@@ -542,7 +562,7 @@ export default function ChatPage() {
           ))}
         </div>
 
-        {/* 输入区（含 @ 提及弹窗） */}
+        {/* 输入区（含 @ 提及弹窗；底栏左侧模型切换、右侧设置/清空） */}
         <div className="dock">
           <Composer
             value={input}
@@ -551,6 +571,7 @@ export default function ChatPage() {
             canSend={canSend}
             onSend={handleSend}
             onStop={handleStop}
+            toolbarSlot={<ChatToolbar side="left" />}
           />
         </div>
       </section>

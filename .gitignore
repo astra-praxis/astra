@@ -12,3 +12,4 @@ src-tauri/target/
 web/dist/
 icon.png
 MyIcon.iconset/
+target/

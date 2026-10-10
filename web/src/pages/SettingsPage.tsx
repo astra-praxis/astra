@@ -61,6 +61,8 @@ export default function SettingsPage() {
   const setAutoShell = useAgentStore((s) => s.setAutoShell);
   const maxTurns = useAgentStore((s) => s.maxTurns);
   const setMaxTurns = useAgentStore((s) => s.setMaxTurns);
+  const autoCompactTokens = useAgentStore((s) => s.autoCompactTokens);
+  const setAutoCompactTokens = useAgentStore((s) => s.setAutoCompactTokens);
 
   // ===== 加载设置 =====
   useEffect(() => {
@@ -448,6 +450,28 @@ export default function SettingsPage() {
             onChange={(e) => {
               const n = Number(e.target.value);
               if (Number.isFinite(n) && n >= 1) setMaxTurns(n);
+            }}
+          />
+        </div>
+
+        <div className="agent-perm-row">
+          <div className="agent-perm-text">
+            <span className="agent-perm-title">上下文自动压缩</span>
+            <span className="agent-perm-desc">
+              长对话超过该估算 token 阈值时，Agent 自动把历史压缩成结构化摘要后继续任务（对齐 Zed 的 /compact），
+              避免超出模型上下文上限。设为 0 关闭；修改后新会话生效。
+            </span>
+          </div>
+          <input
+            type="number"
+            min={0}
+            max={1000000}
+            step={1000}
+            value={autoCompactTokens}
+            className="agent-perm-input"
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n) && n >= 0) setAutoCompactTokens(n);
             }}
           />
         </div>

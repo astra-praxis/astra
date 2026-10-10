@@ -56,6 +56,7 @@ const STATUS_LABEL: Record<string, string> = {
   executing_tool: '执行工具',
   awaiting_permission: '等待确认',
   finalizing: '收尾中',
+  compacting: '压缩上下文',
 };
 
 // 权限确认卡文案按工具区分（未收录的工具用兜底文案）
@@ -255,6 +256,10 @@ export default function AgentPage() {
           project_root: projectPath || null,
           system_prompt: systemPrompt.trim() || null,
           max_turns: useAgentStore.getState().maxTurns,
+          auto_compact_tokens:
+            useAgentStore.getState().autoCompactTokens > 0
+              ? useAgentStore.getState().autoCompactTokens
+              : null,
         },
       });
     } catch (e) {

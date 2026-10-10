@@ -166,6 +166,9 @@ fn print_event(seq: u64, ev: &RunEvent) {
         RunEvent::PlanUpdated { plan } => {
             println!("[seq {seq}] 计划更新: {} 步", plan.steps.len())
         }
+        RunEvent::CompactionCompleted => {
+            println!("[seq {seq}] 上下文已压缩")
+        }
     }
 }
 

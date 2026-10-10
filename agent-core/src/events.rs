@@ -73,6 +73,9 @@ pub enum RunEvent {
     /// 当前任务完成
     RunCompleted { final_text: String },
 
+    /// 上下文自动压缩完成（历史已插入摘要消息，后续请求自动裁剪）
+    CompactionCompleted,
+
     /// 当前任务失败
     RunFailed { error: String },
 
@@ -111,6 +114,8 @@ pub enum RunStatus {
     ExecutingTool,
     /// 等待用户确认
     AwaitingPermission,
+    /// 正在压缩上下文（历史摘要生成中）
+    Compacting,
     /// 收尾中
     Finalizing,
 }
@@ -288,6 +293,7 @@ mod tests {
             ),
             (RunEvent::RunFailed { error: "e".into() }, "run_failed"),
             (RunEvent::RunCancelled, "run_cancelled"),
+            (RunEvent::CompactionCompleted, "compaction_completed"),
             (
                 RunEvent::PlanUpdated {
                     plan: Plan::empty(),
@@ -318,6 +324,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(RunStatus::Finalizing).unwrap(),
             "finalizing"
+        );
+        assert_eq!(
+            serde_json::to_value(RunStatus::Compacting).unwrap(),
+            "compacting"
         );
     }
 

@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use crate::events::Envelope;
 use crate::model::{ChatMessage, MessageContent, ModelBackend, Role};
 use crate::permissions::{PermissionBridge, ToolPolicy};
-use crate::run::{execute, RunConfig, RunHandle, DEFAULT_MAX_TURNS};
+use crate::run::{execute, RunConfig, RunHandle, DEFAULT_AUTO_COMPACT_TOKENS, DEFAULT_MAX_TURNS};
 use crate::tool::ToolRegistry;
 
 pub struct ThreadConfig {
@@ -28,6 +28,8 @@ pub struct ThreadConfig {
     pub max_tokens: Option<u32>,
     /// 最大续轮数（防无限工具循环预算），默认 DEFAULT_MAX_TURNS
     pub max_turns: u32,
+    /// 上下文自动压缩阈值（估算 token 数）；None = 关闭
+    pub auto_compact_tokens: Option<u64>,
     pub policy: ToolPolicy,
 }
 
@@ -40,6 +42,7 @@ impl ThreadConfig {
             temperature: None,
             max_tokens: None,
             max_turns: DEFAULT_MAX_TURNS,
+            auto_compact_tokens: Some(DEFAULT_AUTO_COMPACT_TOKENS),
             policy: ToolPolicy::default(),
         }
     }
@@ -102,6 +105,7 @@ impl Thread {
         config.temperature = self.config.temperature;
         config.max_tokens = self.config.max_tokens;
         config.max_turns = self.config.max_turns;
+        config.auto_compact_tokens = self.config.auto_compact_tokens;
         config.policy = self.config.policy.clone();
 
         let backend = Arc::clone(&self.backend);

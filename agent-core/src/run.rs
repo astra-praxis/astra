@@ -28,6 +28,10 @@ use crate::tool::{ToolCall, ToolContext, ToolRegistry};
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// 最大续轮数默认值（防止无限工具循环的预算上限之一，可在 ThreadConfig 覆盖）
 pub const DEFAULT_MAX_TURNS: u32 = 50;
+/// 上下文自动压缩默认阈值（估算 token 数；参考 Zed：服务端 usage 不可靠时用估算触发）
+pub const DEFAULT_AUTO_COMPACT_TOKENS: u64 = 60_000;
+/// 压缩点之前保留的用户消息原文预算（字节，≈2万 token；对齐 Zed 的 80KB 启发式）
+const RETAINED_USER_BYTE_BUDGET: usize = 80_000;
 
 pub struct RunConfig {
     pub session_id: String,
@@ -36,6 +40,8 @@ pub struct RunConfig {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub max_turns: u32,
+    /// 上下文自动压缩阈值（估算 token 数）；None = 关闭
+    pub auto_compact_tokens: Option<u64>,
     pub policy: ToolPolicy,
 }
 
@@ -48,6 +54,7 @@ impl RunConfig {
             temperature: None,
             max_tokens: None,
             max_turns: DEFAULT_MAX_TURNS,
+            auto_compact_tokens: Some(DEFAULT_AUTO_COMPACT_TOKENS),
             policy: ToolPolicy::default(),
         }
     }
@@ -157,16 +164,55 @@ async fn run_loop(
         status: RunStatus::Analyzing
     });
 
+    // 压缩失败后本 Run 不再重试（下轮继续会再次触发判定，避免每轮重复请求摘要）
+    let mut compaction_disabled = false;
+
     for turn in 0..config.max_turns {
         if cancel.is_cancelled() {
             emit!(RunEvent::RunCancelled);
             return Err(Error::Cancelled);
         }
 
-        // ===== 1. 模型流式请求 =====
+        // ===== 0. 上下文自动压缩（对齐 Zed：每轮循环顶部检查，工具轮次间也可触发） =====
+        if let Some(threshold) = config.auto_compact_tokens {
+            if !compaction_disabled && should_compact(messages, threshold) {
+                emit!(RunEvent::StatusChanged {
+                    status: RunStatus::Compacting
+                });
+                match compact_context(backend, config, messages, cancel).await {
+                    Ok(summary_len) => {
+                        tracing::info!(
+                            session_id = %config.session_id,
+                            run_id = %config.run_id,
+                            summary_len,
+                            "上下文压缩完成"
+                        );
+                        emit!(RunEvent::CompactionCompleted);
+                    }
+                    Err(Error::Cancelled) => {
+                        emit!(RunEvent::RunCancelled);
+                        return Err(Error::Cancelled);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            session_id = %config.session_id,
+                            run_id = %config.run_id,
+                            error = %e,
+                            "上下文压缩失败（本 Run 不再重试，继续原上下文）"
+                        );
+                        compaction_disabled = true;
+                    }
+                }
+                emit!(RunEvent::StatusChanged {
+                    status: RunStatus::Analyzing
+                });
+            }
+        }
+
+        // ===== 1. 模型流式请求（按压缩点裁剪后的视图发请求） =====
         let request = ModelRequest {
             system: config.system_prompt.clone(),
-            messages: messages.clone(),
+            messages: request_view(messages),
             tools: registry.definitions(),
             temperature: config.temperature,
             max_tokens: config.max_tokens,
@@ -443,6 +489,198 @@ fn push_tool_result(
             is_error,
         }],
     });
+}
+
+// ===== 上下文自动压缩（参考 Zed agent thread.rs 的 compact 系列） =====
+
+/// 压缩提示词：让模型产出可直接交接的结构化摘要（Goal/State/Context/Next/Pitfalls）
+const COMPACTION_PROMPT: &str =
+    "你正在把这段对话压缩成一份交接文档，后续由你基于这份摘要继续任务。\
+     请包含：\n\
+     - 目标：用户最终想达成什么\n\
+     - 进展：已完成的部分、当前阻塞、已确定的决策\n\
+     - 关键上下文：约束、偏好、必需的数据/路径/示例\n\
+     - 下一步：剩余的具体步骤\n\
+     - 踩坑：尝试过但无效的做法\n\
+     要求：直接输出摘要正文，简洁、结构化，不寒暄。";
+
+/// 估算消息序列的 token 数：CJK 字符≈1 token/字，其他内容≈1 token/4 字节。
+/// 模型端 usage 不可靠（本地 llama.cpp 常缺失），故全链路用同一估算器，宁可可预测。
+fn estimate_tokens(messages: &[ChatMessage]) -> u64 {
+    fn is_cjk(c: char) -> bool {
+        matches!(c as u32,
+            0x3000..=0x303F // CJK 标点
+            | 0x3400..=0x4DBF // CJK 扩展 A
+            | 0x4E00..=0x9FFF // CJK 基本区
+            | 0xF900..=0xFAFF // 兼容表意
+            | 0xFF00..=0xFFEF) // 全角
+    }
+
+    let text_of = |c: &MessageContent| -> String {
+        match c {
+            MessageContent::Text { text } => text.clone(),
+            MessageContent::ToolResult { content, .. } => content.clone(),
+            MessageContent::ToolUse { call } => call.arguments.to_string(),
+        }
+    };
+
+    let mut cjk: u64 = 0;
+    let mut other_bytes: u64 = 0;
+    for m in messages {
+        for c in &m.content {
+            for ch in text_of(c).chars() {
+                if is_cjk(ch) {
+                    cjk += 1;
+                } else {
+                    other_bytes += ch.len_utf8() as u64;
+                }
+            }
+        }
+    }
+    cjk + other_bytes.div_ceil(4)
+}
+
+/// 最后一条压缩摘要消息的下标
+fn last_compaction_ix(messages: &[ChatMessage]) -> Option<usize> {
+    messages.iter().rposition(|m| m.role == Role::Compaction)
+}
+
+/// 发模型用的裁剪视图：无压缩点 → 全量；有 → 保留预算内的近期用户消息原文 +
+/// 压缩摘要 + 压缩点之后的全部消息（对齐 Zed 的 extend_request_history_until）
+fn request_view(messages: &[ChatMessage]) -> Vec<ChatMessage> {
+    let Some(ix) = last_compaction_ix(messages) else {
+        return messages.to_vec();
+    };
+    let mut view = retained_user_messages_before(messages, ix);
+    view.extend_from_slice(&messages[ix..]);
+    view
+}
+
+/// 压缩点之前、按字节预算从新到旧保留的含文本用户消息
+fn retained_user_messages_before(
+    messages: &[ChatMessage],
+    compaction_ix: usize,
+) -> Vec<ChatMessage> {
+    fn text_bytes(m: &ChatMessage) -> usize {
+        m.content
+            .iter()
+            .map(|c| match c {
+                MessageContent::Text { text } => text.len(),
+                _ => 0,
+            })
+            .sum()
+    }
+    let mut remaining = RETAINED_USER_BYTE_BUDGET;
+    let mut retained = Vec::new();
+    for m in messages[..compaction_ix].iter().rev() {
+        if m.role != Role::User {
+            continue;
+        }
+        // 只保留含文本的用户输入；纯 tool_result 消息属于已完成轮次，进摘要即可
+        let bytes = text_bytes(m);
+        if bytes == 0 {
+            continue;
+        }
+        if bytes <= remaining {
+            remaining -= bytes;
+            retained.push(m.clone());
+        } else {
+            if remaining > 0 {
+                let mut truncated = truncate_messages_text(m, remaining);
+                truncated.content.truncate(1); // 截断只保留首个文本块
+                if text_bytes(&truncated) > 0 {
+                    retained.push(truncated);
+                }
+            }
+            break;
+        }
+    }
+    retained.reverse();
+    retained
+}
+
+/// 把消息内文本块截断到 max_bytes（超预算时保留近期原文的兜底）
+fn truncate_messages_text(m: &ChatMessage, max_bytes: usize) -> ChatMessage {
+    let mut out = m.clone();
+    for c in &mut out.content {
+        if let MessageContent::Text { text } = c {
+            if text.len() > max_bytes {
+                let mut end = max_bytes;
+                while end > 0 && !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                *text = text[..end].to_string();
+            }
+        }
+    }
+    out
+}
+
+/// 是否需要压缩：超阈值、内容足够、且不是刚压缩过（防连压循环）
+fn should_compact(messages: &[ChatMessage], threshold: u64) -> bool {
+    if messages.len() < 3 {
+        return false;
+    }
+    if matches!(messages.last().map(|m| m.role), Some(Role::Compaction)) {
+        return false;
+    }
+    estimate_tokens(&request_view(messages)) >= threshold
+}
+
+/// 生成摘要并把 Compaction 消息追加到历史末尾（不删除原消息，裁剪发生在组装请求时）。
+/// 返回摘要字节数；取消透传 Cancelled；空摘要视为失败。
+async fn compact_context(
+    backend: &dyn ModelBackend,
+    config: &RunConfig,
+    messages: &mut Vec<ChatMessage>,
+    cancel: &CancellationToken,
+) -> Result<usize> {
+    let mut req_messages = request_view(messages);
+    req_messages.push(ChatMessage {
+        role: Role::User,
+        content: vec![MessageContent::text(COMPACTION_PROMPT)],
+    });
+    let request = ModelRequest {
+        system: config.system_prompt.clone(),
+        messages: req_messages,
+        tools: vec![],
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
+    };
+
+    let mut stream = tokio::select! {
+        _ = cancel.cancelled() => return Err(Error::Cancelled),
+        s = backend.stream_completion(request) => s?,
+    };
+
+    let mut summary = String::new();
+    loop {
+        let item = tokio::select! {
+            _ = cancel.cancelled() => return Err(Error::Cancelled),
+            item = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()) => match item {
+                Err(_) => {
+                    return Err(Error::BudgetExceeded {
+                        budget_secs: STREAM_IDLE_TIMEOUT.as_secs(),
+                    });
+                }
+                Ok(None) => break,
+                Ok(Some(v)) => v?,
+            },
+        };
+        if let crate::model::Delta::Text { text } = item {
+            summary.push_str(&text);
+        }
+    }
+
+    if summary.trim().is_empty() {
+        return Err(Error::CompactionFailed("摘要为空".into()));
+    }
+    let len = summary.len();
+    messages.push(ChatMessage {
+        role: Role::Compaction,
+        content: vec![MessageContent::Text { text: summary }],
+    });
+    Ok(len)
 }
 
 /// 单个参数字符串值上限（超出截断并标注，防止大文件内容撑爆事件流/前端）
@@ -1110,6 +1348,278 @@ mod tests {
             assert!(events
                 .iter()
                 .any(|e| matches!(&e.event, RunEvent::RunFailed { .. })));
+        }
+    }
+
+    // ===== 上下文自动压缩 =====
+    mod compaction_tests {
+        use super::super::*;
+        use crate::test_support::*;
+        use crate::tool::ToolRegistry as R;
+
+        fn msg(role: Role, text: &str) -> ChatMessage {
+            ChatMessage {
+                role,
+                content: vec![MessageContent::text(text)],
+            }
+        }
+
+        // ----- estimate_tokens -----
+
+        #[test]
+        fn estimate_tokens_cjk_counts_one_per_char() {
+            // 5 个汉字 + 1 个全角标点 ≈ 6 token
+            let msgs = vec![msg(Role::User, "你好世界呀！")];
+            assert_eq!(estimate_tokens(&msgs), 6);
+        }
+
+        #[test]
+        fn estimate_tokens_ascii_counts_one_per_four_bytes() {
+            let msgs = vec![msg(Role::User, "abcdefgh")]; // 8 字节 → 2 token
+            assert_eq!(estimate_tokens(&msgs), 2);
+        }
+
+        #[test]
+        fn estimate_tokens_counts_tool_result_and_tool_use() {
+            let call_id = "c1";
+            let mut messages = vec![
+                msg(Role::User, "读取文件"),
+                ChatMessage {
+                    role: Role::Assistant,
+                    content: vec![MessageContent::ToolUse {
+                        call: ToolCall {
+                            id: call_id.into(),
+                            call_id: None,
+                            name: "read_file".into(),
+                            arguments: serde_json::json!({"path": "abcdefgh"}), // 18 字节 JSON
+                        },
+                    }],
+                },
+                ChatMessage {
+                    role: Role::User,
+                    content: vec![MessageContent::ToolResult {
+                        call_id: call_id.into(),
+                        content: "12345678".into(), // 8 字节 → 2
+                        is_error: false,
+                    }],
+                },
+            ];
+            let _ = &mut messages;
+            // user "读取文件"=4；tool_use 参数 JSON ≈ {"path":"abcdefgh"} 18 字节；
+            // JSON 序列化键名/引号也算字节 → 至少 4（ceil(18/4)=5）
+            let est = estimate_tokens(&messages);
+            assert!(est >= 4 + 5, "估算应覆盖工具参数与结果，实际 {est}");
+        }
+
+        // ----- request_view -----
+
+        #[test]
+        fn request_view_without_compaction_point_is_full_copy() {
+            let msgs = vec![msg(Role::User, "一"), msg(Role::Assistant, "二")];
+            let view = request_view(&msgs);
+            assert_eq!(view.len(), 2);
+        }
+
+        #[test]
+        fn request_view_trims_history_before_compaction_point() {
+            let mut msgs = vec![
+                msg(Role::User, &"旧".repeat(40_000)), // 120KB，超预算，被丢弃
+                msg(Role::Assistant, "旧回复"),
+                msg(Role::User, "近期问题"), // 预算内，保留
+                msg(Role::Assistant, "近期回复"),
+                msg(Role::Compaction, "【摘要】 everything"), // 压缩点
+                msg(Role::User, "压缩后的问题"),
+            ];
+            msgs[1].content.clear(); // assistant 文本不影响保留逻辑
+            let view = request_view(&msgs);
+            // 保留：旧消息截断到剩余预算 79_988 字节 + 近期用户原文 + 摘要 + 压缩点之后全部
+            assert_eq!(view.len(), 4);
+            match &view[0].content[0] {
+                MessageContent::Text { text } => {
+                    // 截到剩余预算 79_988 字节内的字符边界（"旧"=3字节 → 79_986）
+                    assert_eq!(text.len(), 79_986);
+                }
+                other => panic!("应为文本块，实际 {other:?}"),
+            }
+            assert!(matches!(view[1].role, Role::User));
+            assert!(matches!(view[2].role, Role::Compaction));
+            assert!(matches!(view[3].role, Role::User));
+            match &view[2].content[0] {
+                MessageContent::Text { text } => assert!(text.contains("【摘要】")),
+                other => panic!("摘要应为文本块，实际 {other:?}"),
+            }
+        }
+
+        #[test]
+        fn request_view_retains_budget_and_truncates_overflow() {
+            // 近期用户消息超过 80KB 预算：前一条被丢弃，后一条被截断保留
+            let big1 = "a".repeat(60_000);
+            let big2 = "b".repeat(60_000);
+            let msgs = vec![
+                msg(Role::User, &big1),
+                msg(Role::Assistant, "x"),
+                msg(Role::User, &big2),
+                msg(Role::Compaction, "摘要"),
+            ];
+            let view = request_view(&msgs);
+            // 预算 80_000：big2(60_000) 放入后剩 20_000，big1 超出 → 截断到 20_000 保留
+            assert_eq!(view.len(), 3); // big1截断 + big2 + 摘要
+            match &view[0].content[0] {
+                MessageContent::Text { text } => assert_eq!(text.len(), 20_000),
+                other => panic!("应为文本块，实际 {other:?}"),
+            }
+            match &view[1].content[0] {
+                MessageContent::Text { text } => assert_eq!(text.len(), 60_000),
+                other => panic!("应为文本块，实际 {other:?}"),
+            }
+        }
+
+        // ----- should_compact -----
+
+        #[test]
+        fn should_compact_below_threshold_is_false() {
+            let msgs = vec![
+                msg(Role::User, "短"),
+                msg(Role::Assistant, "答"),
+                msg(Role::User, "再问"),
+            ];
+            assert!(!should_compact(&msgs, 1_000_000));
+        }
+
+        #[test]
+        fn should_compact_above_threshold_is_true() {
+            let msgs = vec![
+                msg(Role::User, "长".repeat(100).as_str()),
+                msg(Role::Assistant, "答"),
+                msg(Role::User, "再问"),
+            ];
+            assert!(should_compact(&msgs, 10));
+        }
+
+        #[test]
+        fn should_compact_skips_when_last_is_compaction() {
+            let msgs = vec![
+                msg(Role::User, "长".repeat(100).as_str()),
+                msg(Role::Assistant, "答"),
+                msg(Role::Compaction, "摘要"),
+            ];
+            assert!(!should_compact(&msgs, 10));
+        }
+
+        #[test]
+        fn should_compact_needs_at_least_three_messages() {
+            let msgs = vec![msg(Role::User, "长".repeat(100).as_str())];
+            assert!(!should_compact(&msgs, 10));
+        }
+
+        // ----- 集成：run_loop 中触发压缩 -----
+
+        #[tokio::test]
+        async fn run_loop_compacts_when_threshold_exceeded() {
+            // 队列：工具调用 → 压缩摘要 → 最终回答
+            let backend = Arc::new(MockBackend::new(vec![
+                vec![tool_call_delta("t1", "read_file")],
+                text_turn("【压缩摘要】用户在读文件"),
+                text_turn("最终回答"),
+            ]));
+            let registry = R::new().register(EchoTool::ok(
+                "read_file",
+                "文件内容",
+                Arc::new(std::sync::Mutex::new(Vec::new())),
+            ));
+
+            let mut cfg = text_config("s1", "", ToolPolicy::default());
+            cfg.auto_compact_tokens = Some(1); // 强制触发
+
+            let (result, events) = run_execute(
+                backend.clone(),
+                registry,
+                cfg,
+                None,
+                deny_bridge(),
+                vec![user_msg("读取 a.txt")],
+            )
+            .await;
+
+            let messages = result.expect("应成功");
+            // user → assistant(tool_use) → user(tool_result) → compaction → assistant(final)
+            assert_eq!(messages.len(), 5, "实际: {messages:?}");
+            assert!(matches!(&messages[3].role, Role::Compaction));
+            match &messages[3].content[0] {
+                MessageContent::Text { text } => assert!(text.contains("压缩摘要")),
+                other => panic!("压缩消息应为文本块，实际 {other:?}"),
+            }
+            assert!(matches!(&messages[4].role, Role::Assistant));
+
+            // 3 次模型请求：正常轮 + 压缩轮 + 最终轮
+            assert_eq!(
+                backend.call_count.load(std::sync::atomic::Ordering::SeqCst),
+                3
+            );
+
+            assert!(events.iter().any(|e| matches!(
+                &e.event,
+                RunEvent::StatusChanged {
+                    status: RunStatus::Compacting
+                }
+            )));
+            assert!(events
+                .iter()
+                .any(|e| matches!(&e.event, RunEvent::CompactionCompleted)));
+            assert!(events
+                .iter()
+                .any(|e| matches!(&e.event, RunEvent::RunCompleted { final_text } if final_text == "最终回答")));
+            assert_sequence_contiguous(&events);
+        }
+
+        #[tokio::test]
+        async fn run_loop_disables_compaction_after_failure_but_run_continues() {
+            // 压缩轮返回空文本 → CompactionFailed → 本 Run 禁用压缩，继续正常执行
+            let backend = Arc::new(MockBackend::new(vec![
+                vec![tool_call_delta("t1", "read_file")],
+                text_turn("   "), // 空摘要 → 失败
+                text_turn("最终回答"),
+            ]));
+            let registry = R::new().register(EchoTool::ok(
+                "read_file",
+                "文件内容",
+                Arc::new(std::sync::Mutex::new(Vec::new())),
+            ));
+
+            let mut cfg = text_config("s1", "", ToolPolicy::default());
+            cfg.auto_compact_tokens = Some(1);
+
+            let (result, events) = run_execute(
+                backend.clone(),
+                registry,
+                cfg,
+                None,
+                deny_bridge(),
+                vec![user_msg("读取 a.txt")],
+            )
+            .await;
+
+            let messages = result.expect("压缩失败不应中断 Run");
+            // 无压缩消息，照常完成
+            assert!(
+                !messages.iter().any(|m| matches!(m.role, Role::Compaction)),
+                "不应有压缩消息"
+            );
+            assert!(matches!(&messages.last().unwrap().role, Role::Assistant));
+            assert_eq!(
+                backend.call_count.load(std::sync::atomic::Ordering::SeqCst),
+                3
+            );
+            // 有 Compacting 状态但无 CompactionCompleted
+            assert!(events.iter().any(|e| matches!(
+                &e.event,
+                RunEvent::StatusChanged {
+                    status: RunStatus::Compacting
+                }
+            )));
+            assert!(!events
+                .iter()
+                .any(|e| matches!(&e.event, RunEvent::CompactionCompleted)));
         }
     }
 }

@@ -49,6 +49,15 @@ pub enum Role {
     System,
     User,
     Assistant,
+    /// 上下文压缩摘要（不发给前端展示；转 rig 请求时映射为 User + 前缀说明）
+    Compaction,
+}
+
+impl Role {
+    /// 压缩摘要消息发模型时附加的前缀（对齐 Zed 的注入方式）
+    pub fn compaction_prefixed(summary: &str) -> String {
+        format!("之前的对话已被压缩。请以下面的摘要作为上下文继续：\n\n{summary}")
+    }
 }
 
 /// 一次模型请求
@@ -195,6 +204,17 @@ fn to_rig_messages(
             Role::System => rig::message::Message::User {
                 content: empty_text(),
             },
+            Role::Compaction => {
+                let summary = match m.content.first() {
+                    Some(MessageContent::Text { text }) => text.clone(),
+                    _ => String::new(),
+                };
+                rig::message::Message::User {
+                    content: rig::OneOrMany::one(rig::message::UserContent::text(
+                        Role::compaction_prefixed(&summary),
+                    )),
+                }
+            }
         }
     };
 

@@ -25,6 +25,9 @@ pub enum Error {
     #[error("已达最大续轮数（{max_turns} 轮），任务未完成；请拆小任务重试")]
     MaxTurnsExceeded { max_turns: u32 },
 
+    #[error("上下文压缩失败: {0}")]
+    CompactionFailed(String),
+
     #[error("{0}")]
     Other(String),
 }

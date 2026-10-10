@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use agent_core::{
     ArtifactKind, ChatMessage, Decision, Envelope, MessageContent, ModelBackend, PermissionBridge,
     PermissionRequest, RigBackend, Role, RunHandle, Thread, ThreadConfig, ToolContext, ToolOutput,
-    ToolPolicy, ToolRegistry, DEFAULT_MAX_TURNS,
+    ToolPolicy, ToolRegistry, DEFAULT_AUTO_COMPACT_TOKENS, DEFAULT_MAX_TURNS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1058,8 +1058,10 @@ pub struct AgentStartReq {
     /// 项目根目录（None = 纯聊天，不注册文件工具）
     pub project_root: Option<String>,
     pub system_prompt: Option<String>,
-    /// 最大续轮数（不传用 agent-core 默认 20）
+    /// 最大续轮数（不传用 agent-core 默认）
     pub max_turns: Option<u32>,
+    /// 上下文自动压缩阈值（估算 token 数；0 或 None = 关闭）
+    pub auto_compact_tokens: Option<u64>,
     /// 用户通过 /技能名 指定的技能（内容注入本次用户消息）
     pub skill: Option<String>,
     /// 前端生成的会话 id（同会话复用 Thread 与历史）
@@ -1147,6 +1149,10 @@ pub async fn agent_start_run(
                 temperature: None,
                 max_tokens: None,
                 max_turns: req.max_turns.unwrap_or(DEFAULT_MAX_TURNS),
+                auto_compact_tokens: req
+                    .auto_compact_tokens
+                    .or(Some(DEFAULT_AUTO_COMPACT_TOKENS))
+                    .filter(|&t| t > 0),
                 policy,
             };
             let backend: Arc<dyn ModelBackend> =

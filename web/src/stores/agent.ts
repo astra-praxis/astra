@@ -72,6 +72,13 @@ export function newSessionId(): string {
   return `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 解析自动压缩阈值：null/非法 → 默认 60000；'0' 合法（= 关闭） */
+function parseAutoCompact(raw: string | null | undefined): number {
+  if (raw === null || raw === undefined || raw === '') return 60000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 60000;
+}
+
 /** Envelope → Entry 归并（纯函数，返回新数组） */
 export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
   switch (env.type) {
@@ -173,6 +180,8 @@ export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
       }
       return [...closed, { kind: 'terminal', outcome: 'cancelled' }];
     }
+    case 'compaction_completed':
+      return [...prev, { kind: 'terminal', outcome: 'completed', text: '上下文已压缩' }];
     default:
       return prev;
   }
@@ -195,6 +204,8 @@ interface AgentState {
   autoShell: boolean;
   /** Agent 最大续轮数（防无限工具循环预算，默认 50） */
   maxTurns: number;
+  /** 上下文自动压缩阈值（估算 token 数，默认 60000，0 = 关闭） */
+  autoCompactTokens: number;
 
   setInput: (v: string) => void;
   setError: (v: string) => void;
@@ -203,6 +214,8 @@ interface AgentState {
   setAutoShell: (v: boolean) => void;
   /** 设置最大续轮数（localStorage 持久化，新会话生效） */
   setMaxTurns: (v: number) => void;
+  /** 设置自动压缩阈值（localStorage 持久化，0 = 关闭） */
+  setAutoCompactTokens: (v: number) => void;
   setRunState: (running: boolean, status: string | null) => void;
   pushUser: (text: string) => void;
   pushTerminal: (outcome: 'completed' | 'failed' | 'cancelled', text?: string) => void;
@@ -226,12 +239,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sessions: [],
   autoShell: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-autoshell') === '1',
   maxTurns: Number(localStorage?.getItem('astra-agent-maxturns')) || 50,
+  autoCompactTokens: parseAutoCompact(localStorage?.getItem('astra-agent-autocompact')),
 
   setInput: (v) => set({ input: v }),
   setMaxTurns: (v) => {
     const n = Number.isFinite(v) && v >= 1 ? Math.floor(v) : 50;
     set({ maxTurns: n });
     localStorage.setItem('astra-agent-maxturns', String(n));
+  },
+  setAutoCompactTokens: (v) => {
+    const n = Number.isFinite(v) && v >= 0 ? Math.floor(v) : 60000;
+    set({ autoCompactTokens: n });
+    localStorage.setItem('astra-agent-autocompact', String(n));
   },
   setError: (v) => set({ error: v }),
   setProjectPath: (v) => set({ projectPath: v }),

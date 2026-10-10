@@ -9,6 +9,7 @@
     description: string;
     path: string;
     version: string;
+    is_git: boolean;
   }
 
   // ===== 状态 =====
@@ -16,6 +17,9 @@
   let loading = $state(true);
   let error = $state('');
   let deleteTarget = $state<SkillCard | null>(null);
+  let updatingSkills = $state<Set<string>>(new Set()); // 正在更新的 skill 集合
+  let updatingAll = $state(false); // 是否正在更新所有
+  let updateResults = $state<Map<string, string>>(new Map()); // 更新结果
 
   // ===== 加载 =====
   onMount(loadSkills);
@@ -54,6 +58,63 @@
     }
   }
 
+  // ===== 更新 =====
+  async function updateSingleSkill(skill: SkillCard) {
+    if (!skill.is_git) return;
+    
+    const skillPath = skill.path;
+    updatingSkills = new Set([...updatingSkills, skillPath]);
+    updateResults = new Map(updateResults);
+    updateResults.delete(skillPath);
+    updateResults = new Map(updateResults);
+    
+    try {
+      const result = await invoke<string>('update_skill', { path: skillPath });
+      const newResults = new Map(updateResults);
+      newResults.set(skillPath, `✅ 更新成功\n${result}`);
+      updateResults = newResults;
+    } catch (e) {
+      const newResults = new Map(updateResults);
+      newResults.set(skillPath, `❌ 更新失败: ${e}`);
+      updateResults = newResults;
+    } finally {
+      const newSet = new Set(updatingSkills);
+      newSet.delete(skillPath);
+      updatingSkills = newSet;
+    }
+  }
+
+  async function updateAllSkills() {
+    updatingAll = true;
+    error = '';
+    
+    try {
+      const results = await invoke<Array<[string, {Ok: string} | {Err: string}]>>('update_all_skills');
+      
+      // 处理结果
+      const newResults = new Map(updateResults);
+      for (const [name, result] of results) {
+        const skill = skills.find(s => s.name === name);
+        if (skill) {
+          const skillPath = skill.path;
+          if ('Ok' in result) {
+            newResults.set(skillPath, `✅ 更新成功\n${result.Ok}`);
+          } else {
+            newResults.set(skillPath, `❌ 更新失败: ${result.Err}`);
+          }
+        }
+      }
+      updateResults = newResults;
+      
+      // 刷新列表
+      await loadSkills();
+    } catch (e) {
+      error = `批量更新失败: ${e}`;
+    } finally {
+      updatingAll = false;
+    }
+  }
+
   // ===== 版本标签颜色 =====
   function versionLabel(v: string): string {
     return v ? `v${v}` : '';
@@ -84,10 +145,25 @@
       <h1>Skills 管理</h1>
       <p class="subtitle">管理和配置本地的 AI 技能</p>
     </div>
-    <button class="btn-refresh" onclick={loadSkills} disabled={loading}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-      刷新
-    </button>
+    <div class="header-actions">
+      <button 
+        class="btn-update-all" 
+        onclick={updateAllSkills} 
+        disabled={updatingAll || loading}
+      >
+        {#if updatingAll}
+          <div class="spinner-small"></div>
+          <span>更新中...</span>
+        {:else}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>一键更新所有</span>
+        {/if}
+      </button>
+      <button class="btn-refresh" onclick={loadSkills} disabled={loading}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        刷新
+      </button>
+    </div>
   </div>
 
   <!-- 错误提示 -->
@@ -139,6 +215,23 @@
             <span>{skill.path}</span>
           </div>
           <div class="skill-footer">
+            {#if skill.is_git}
+              <button 
+                class="btn-update" 
+                onclick={() => updateSingleSkill(skill)}
+                disabled={updatingSkills.has(skill.path)}
+              >
+                {#if updatingSkills.has(skill.path)}
+                  <div class="spinner-small"></div>
+                  <span>更新中...</span>
+                {:else}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  <span>更新</span>
+                {/if}
+              </button>
+            {:else}
+              <span class="skill-local-hint">本地生成</span>
+            {/if}
             <button class="btn-delete" onclick={() => confirmDelete(skill)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
               删除
@@ -148,6 +241,11 @@
               详情
             </a>
           </div>
+          {#if updateResults.has(skill.path)}
+            <div class="update-result">
+              <pre>{updateResults.get(skill.path)}</pre>
+            </div>
+          {/if}
         </div>
       {/each}
     </div>
@@ -486,6 +584,97 @@
     color: var(--error-text);
     background: var(--error-bg);
     border-color: var(--error-border);
+  }
+
+  .btn-update {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    background: none;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-update:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .btn-update:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .skill-local-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 6px 14px;
+    background: var(--bg-subtle);
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+  }
+
+  .update-result {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+
+  .update-result pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, monospace;
+    color: var(--text-secondary);
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .btn-update-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-update-all:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  .btn-update-all:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .spinner-small {
+    width: 14px;
+    height: 14px;
+    border: 2px solid white;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
   }
 
 </style>

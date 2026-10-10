@@ -1387,6 +1387,8 @@ pub fn run() {
             list_skills,
             delete_skill,
             read_skill_doc,
+            update_skill,
+            update_all_skills,
             get_project_detail,
             find_casp_portal_dir,
             add_workspace,
@@ -1476,6 +1478,7 @@ struct SkillCard {
     description: String,
     path: String,
     version: String,
+    is_git: bool,
 }
 
 /// 解析 SKILL.md 的 YAML frontmatter
@@ -1582,11 +1585,15 @@ fn list_skills() -> Result<Vec<SkillCard>, String> {
             (folder_name.clone(), String::new(), String::new())
         };
 
+        // 检查是否是 git 仓库
+        let is_git = entry_path.join(".git").exists();
+
         skills.push(SkillCard {
             name: if name.is_empty() { folder_name } else { name },
             description,
             path: entry_path.to_string_lossy().to_string(),
             version,
+            is_git,
         });
     }
 
@@ -1602,6 +1609,115 @@ fn delete_skill(path: String) -> Result<(), String> {
     }
     fs::remove_dir_all(dir).map_err(|e| format!("删除失败: {}", e))?;
     Ok(())
+}
+
+/// 更新单个 Skill（通过 npx skills add）
+#[tauri::command]
+fn update_skill(path: String) -> Result<String, String> {
+    let dir = Path::new(&path);
+    if !dir.exists() || !dir.is_dir() {
+        return Err("技能目录不存在".to_string());
+    }
+
+    // 从路径中提取 skill 名称
+    let skill_name = dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    if skill_name.is_empty() {
+        return Err("无法提取技能名称".to_string());
+    }
+
+    // 执行 npx skills add <skill-name> -g -y 来更新
+    let output = Command::new("npx")
+        .args(["skills", "add", &skill_name, "-g", "-y"])
+        .output()
+        .map_err(|e| format!("执行 npx skills add 失败: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if output.status.success() {
+        Ok(format!("{}\n{}", stdout, stderr))
+    } else {
+        Err(format!("更新失败: {}\n{}", stdout, stderr))
+    }
+}
+
+/// 更新所有 Skills（通过 npx skills update -g）
+#[tauri::command]
+fn update_all_skills() -> Result<Vec<(String, Result<String, String>)>, String> {
+    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
+    let skills_dir = home.join(".agents").join("skills");
+
+    if !skills_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    // 执行 npx skills update -g 命令
+    let output = Command::new("npx")
+        .args(["skills", "update", "-g"])
+        .output()
+        .map_err(|e| format!("执行 npx skills update 失败: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        return Err(format!("更新失败: {}\n{}", stdout, stderr));
+    }
+
+    // 解析输出，提取更新的 skills
+    let mut results = Vec::new();
+    let mut current_skill = String::new();
+    let mut current_status = String::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+
+        // 匹配 "Updating <skill-name>…" 格式
+        if line.starts_with("Updating ") && line.ends_with("…") {
+            // 保存上一个 skill 的结果
+            if !current_skill.is_empty() {
+                let result = if current_status.contains("✓") {
+                    Ok(current_status.clone())
+                } else {
+                    Err(current_status.clone())
+                };
+                results.push((current_skill.clone(), result));
+            }
+
+            // 提取新的 skill 名称
+            current_skill = line
+                .strip_prefix("Updating ")
+                .unwrap_or("")
+                .strip_suffix("…")
+                .unwrap_or("")
+                .to_string();
+            current_status = String::new();
+        } else if line.contains("✓ Updated") || line.contains("✗ Failed") {
+            current_status = line.to_string();
+        }
+    }
+
+    // 添加最后一个 skill 的结果
+    if !current_skill.is_empty() {
+        let result = if current_status.contains("✓") {
+            Ok(current_status)
+        } else {
+            Err(current_status)
+        };
+        results.push((current_skill, result));
+    }
+
+    // 如果没有解析到任何结果，返回整体输出
+    if results.is_empty() {
+        results.push(("all".to_string(), Ok(format!("{}\n{}", stdout, stderr))));
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]

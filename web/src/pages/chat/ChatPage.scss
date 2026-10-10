@@ -1,0 +1,138 @@
+/* ============================================================
+   对话页面（编排层）样式
+   移植自 src/routes/chat/+page.svelte <style>
+   ============================================================ */
+
+/* 仅在 chat 页面让 content 全屏，不影响其他页面 */
+body .content:has(.chat-root) {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.chat-root {
+  --chat-gap: 16px;
+  --dock-max: 760px;
+  --msg-max: 760px;
+
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  background:
+    radial-gradient(
+      ellipse 80% 60% at 50% -10%,
+      var(--accent-light),
+      transparent 70%
+    ),
+    var(--bg-app);
+}
+
+/* ===== 主区 ===== */
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 警告条 */
+.floating-warn {
+  margin: 10px 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 10px;
+  color: var(--error-text);
+  font-size: 13px;
+
+  button {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: var(--error-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+  }
+}
+
+/* ===== 消息流 ===== */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 24px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scroll-behavior: smooth;
+}
+
+/* ===== 输入停靠 ===== */
+.dock {
+  padding: 12px 24px 20px;
+  flex-shrink: 0;
+}
+
+/* ===== Action 链接样式 ===== */
+a[href^='action://'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  background: var(--accent-bg);
+  border: 1px solid var(--on-accent-border);
+  border-radius: 8px;
+  color: var(--accent);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+
+  &:hover {
+    background: var(--accent);
+    color: var(--text-inverse);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--accent-shadow);
+  }
+}
+
+.action-done {
+  background: var(--success-bg);
+  color: var(--success-400);
+  border-color: var(--success-border);
+  cursor: default;
+  pointer-events: none;
+}
+
+.action-error {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-color: var(--error-border);
+  cursor: default;
+  pointer-events: none;
+}
+
+.action-executed {
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  cursor: wait;
+  opacity: 0.8;
+}
+
+/* 响应式 */
+@media (max-width: 640px) {
+  .messages {
+    padding: 16px 16px 4px;
+  }
+
+  .dock {
+    padding: 8px 16px 16px;
+  }
+}

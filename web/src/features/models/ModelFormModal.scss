@@ -1,0 +1,7 @@
+/* 模型表单弹窗（BEM：.model-form-modal）
+   表单/弹窗/路径校验样式均复用全局 ui.scss
+   （modal-* / form-* / path-check-section / btn-check / path-result 等），
+   此处仅保留弹窗内部局部微调。 */
+.model-form-modal__hint {
+  margin: 0;
+}

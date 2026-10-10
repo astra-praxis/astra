@@ -1,0 +1,301 @@
+/* ============================================================
+   星野主题变量（唯一事实来源）— 按 campus-ai-frontend-design 分层
+   - 亮/暗主题通过 <html data-theme="dark|light"> 切换
+   - 每个变量必须同时定义亮/暗两份，漏一份就是暗色模式 bug
+   - 暗色不是简单反转：brand 色阶整体反向（暗色下 brand-50 是深底、brand-700 是浅字）
+   - 下半部分保留旧版变量名（--accent/--bg-card/--error-* 等）作为语义别名，
+     指向上面的新色阶，存量样式无需改动即可跟随主题
+   ============================================================ */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* ===== 1. 品牌色：青墨绿色阶 ===== */
+  --brand-50: #f2faf7;
+  --brand-100: #ddf3ea;
+  --brand-200: #b9e6d6;
+  --brand-300: #8ad3bc;
+  --brand-400: #56b99d;
+  --brand-500: #2f9e82;
+  --brand-600: #237f68;
+  --brand-700: #1d6454;
+
+  /* ===== 2. 语义色（Tailwind emerald / amber / red / blue） ===== */
+  --success-50: #ecfdf5;
+  --success-100: #d1fae5;
+  --success-300: #6ee7b7;
+  --success-400: #34d399;
+  --success-500: #10b981;
+  --success-600: #059669;
+  --success-700: #047857;
+
+  --warning-50: #fffbeb;
+  --warning-100: #fef3c7;
+  --warning-300: #fcd34d;
+  --warning-400: #fbbf24;
+  --warning-500: #f59e0b;
+  --warning-600: #d97706;
+  --warning-700: #b45309;
+
+  --danger-50: #fef2f2;
+  --danger-100: #fee2e2;
+  --danger-200: #fecaca;
+  --danger-300: #fca5a5;
+  --danger-400: #f87171;
+  --danger-500: #ef4444;
+  --danger-600: #dc2626;
+  --danger-700: #b91c1c;
+
+  --info-50: #eff6ff;
+  --info-100: #dbeafe;
+  --info-300: #93c5fd;
+  --info-400: #60a5fa;
+  --info-500: #3b82f6;
+  --info-600: #2563eb;
+  --info-700: #1d4ed8;
+
+  /* ===== 3. 背景/表面 ===== */
+  --bg-body: #f2f5f4;
+  --bg-surface: #ffffff;
+  --bg-surface-soft: #f6faf8;
+  --bg-elevated: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.72);
+
+  /* ===== 4. 文字 ===== */
+  --text-primary: #1c2b27;
+  --text-secondary: #51645d;
+  --text-muted: #8a9b95;
+  --text-placeholder: #c2cfc9;
+  --text-inverse: #ffffff;
+
+  /* ===== 5. 边框 ===== */
+  --border-color: #dde7e3;
+  --border-strong: #c4d2cc;
+  --divider: #eaf1ee;
+
+  /* ===== 6. 渐变/阴影/圆角 ===== */
+  --gradient-brand: linear-gradient(135deg, #2f9e82, #1d6454);
+  --shadow-sm: rgba(20, 32, 27, 0.05);
+  --shadow-md: rgba(20, 32, 27, 0.08);
+  --shadow-hover: rgba(20, 32, 27, 0.12);
+  --shadow-lg: 0 24px 48px rgba(20, 32, 27, 0.22);
+  --shadow-glow: 0 4px 16px rgba(47, 158, 130, 0.35);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* ===== 7. 组件级 ===== */
+  --overlay: rgba(8, 14, 12, 0.55);
+  --tooltip-bg: #1c2b27;
+  --tooltip-text: #f2faf7;
+  --scrollbar-thumb: #c4d2cc;
+  --scrollbar-thumb-hover: #8a9b95;
+  --on-accent-text: rgba(255, 255, 255, 0.88);
+  --on-accent-soft: rgba(255, 255, 255, 0.25);
+  --on-accent-border: rgba(255, 255, 255, 0.2);
+
+  /* 代码块（设计约定：亮暗主题下都用墨绿深底） */
+  --code-bg: #101b17;
+  --code-bg-deep: #0b1210;
+  --code-text: #dce8e3;
+  --code-border: rgba(255, 255, 255, 0.08);
+
+  /* ===== 语义别名（旧变量名 → 新色阶） ===== */
+  --bg-app: var(--bg-body);
+  --bg-card: var(--bg-surface);
+  --bg-card-hover: var(--bg-surface-soft);
+  --bg-subtle: var(--bg-surface-soft);
+  --bg-input: #ffffff;
+
+  --border: var(--border-color);
+  --border-light: var(--divider);
+
+  --accent: var(--brand-500);
+  --accent-hover: var(--brand-600);
+  --accent-bg: var(--brand-50);
+  --accent-bg-hover: var(--brand-100);
+  --accent-gradient: var(--gradient-brand);
+  --accent-shadow: rgba(47, 158, 130, 0.3);
+  --accent-shadow-hover: rgba(47, 158, 130, 0.4);
+  --accent-light: rgba(47, 158, 130, 0.1);
+  --accent-ring: rgba(47, 158, 130, 0.28);
+
+  --link: var(--info-500);
+  --link-hover: var(--info-600);
+
+  --error-bg: var(--danger-50);
+  --error-text: var(--danger-600);
+  --error-border: var(--danger-200);
+  --error-muted: var(--danger-300);
+  --error-hover-bg: var(--danger-100);
+  --success-bg: var(--success-50);
+  --success-text: var(--success-600);
+  --success-border: rgba(16, 185, 129, 0.25);
+  --warning-bg: var(--warning-50);
+  --warning-text: var(--warning-600);
+  --warning-border: rgba(245, 158, 11, 0.3);
+  --info-bg: var(--info-50);
+  --info-text: var(--info-600);
+
+  --highlight-bg: rgba(254, 240, 138, 0.5);
+  --highlight-text: #1e293b;
+
+  /* 深色侧边栏（两种主题下侧边栏都是墨绿深底） */
+  --sidebar-bg: #0f1a16;
+  --sidebar-text: #93a8a0;
+  --sidebar-text-hover: #dce8e3;
+  --sidebar-active-bg: #56b99d;
+  --sidebar-active-text: #0f1a16;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-hover-bg: rgba(86, 185, 157, 0.14);
+  --sidebar-accent: #56b99d;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* ===== 1. 品牌色：青墨绿色阶（反向） ===== */
+  --brand-50: #12201b;
+  --brand-100: #1a2c26;
+  --brand-200: #243c33;
+  --brand-300: #4f7a6b;
+  --brand-400: #6fa894;
+  --brand-500: #8ac7b2;
+  --brand-600: #a8dccb;
+  --brand-700: #c6ecdd;
+
+  /* ===== 2. 语义色 ===== */
+  --success-50: rgba(16, 185, 129, 0.12);
+  --success-100: rgba(16, 185, 129, 0.18);
+  --success-300: #6ee7b7;
+  --success-400: #34d399;
+  --success-500: #10b981;
+  --success-600: #34d399;
+  --success-700: #6ee7b7;
+
+  --warning-50: rgba(245, 158, 11, 0.12);
+  --warning-100: rgba(245, 158, 11, 0.18);
+  --warning-300: #fcd34d;
+  --warning-400: #fbbf24;
+  --warning-500: #f59e0b;
+  --warning-600: #fbbf24;
+  --warning-700: #fcd34d;
+
+  --danger-50: rgba(239, 68, 68, 0.14);
+  --danger-100: rgba(239, 68, 68, 0.2);
+  --danger-200: rgba(239, 68, 68, 0.32);
+  --danger-300: #fca5a5;
+  --danger-400: #f87171;
+  --danger-500: #ef4444;
+  --danger-600: #f87171;
+  --danger-700: #fca5a5;
+
+  --info-50: rgba(59, 130, 246, 0.12);
+  --info-100: rgba(59, 130, 246, 0.18);
+  --info-300: #93c5fd;
+  --info-400: #60a5fa;
+  --info-500: #3b82f6;
+  --info-600: #60a5fa;
+  --info-700: #93c5fd;
+
+  /* ===== 3. 背景/表面 ===== */
+  --bg-body: #0e1615;
+  --bg-surface: #152019;
+  --bg-surface-soft: #1a2a24;
+  --bg-elevated: #1c2b26;
+  --bg-glass: rgba(14, 22, 21, 0.72);
+
+  /* ===== 4. 文字 ===== */
+  --text-primary: #e4ece9;
+  --text-secondary: #a3b5ae;
+  --text-muted: #6d817a;
+  --text-placeholder: #46564f;
+  --text-inverse: #0e1615;
+
+  /* ===== 5. 边框 ===== */
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --divider: rgba(255, 255, 255, 0.06);
+
+  /* ===== 6. 渐变/阴影/圆角 ===== */
+  --gradient-brand: linear-gradient(135deg, #2f9e82, #1d6454);
+  --shadow-sm: rgba(0, 0, 0, 0.25);
+  --shadow-md: rgba(0, 0, 0, 0.35);
+  --shadow-hover: rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 24px 48px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 4px 16px rgba(47, 158, 130, 0.4);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* ===== 7. 组件级 ===== */
+  --overlay: rgba(0, 0, 0, 0.6);
+  --tooltip-bg: #e4ece9;
+  --tooltip-text: #12201b;
+  --scrollbar-thumb: #2a3b35;
+  --scrollbar-thumb-hover: #3a4d46;
+  --on-accent-text: rgba(255, 255, 255, 0.88);
+  --on-accent-soft: rgba(255, 255, 255, 0.25);
+  --on-accent-border: rgba(255, 255, 255, 0.2);
+
+  /* 代码块（设计约定：亮暗主题下都用墨绿深底） */
+  --code-bg: #101b17;
+  --code-bg-deep: #0b1210;
+  --code-text: #dce8e3;
+  --code-border: rgba(255, 255, 255, 0.08);
+
+  /* ===== 语义别名（旧变量名 → 新色阶） ===== */
+  --bg-app: var(--bg-body);
+  --bg-card: var(--bg-surface);
+  --bg-card-hover: var(--bg-surface-soft);
+  --bg-subtle: var(--bg-surface-soft);
+  --bg-input: #1c2b26;
+
+  --border: var(--border-color);
+  --border-light: var(--divider);
+
+  --accent: var(--brand-500);
+  --accent-hover: var(--brand-600);
+  --accent-bg: var(--brand-50);
+  --accent-bg-hover: var(--brand-100);
+  --accent-gradient: var(--gradient-brand);
+  --accent-shadow: rgba(47, 158, 130, 0.35);
+  --accent-shadow-hover: rgba(47, 158, 130, 0.45);
+  --accent-light: rgba(138, 199, 178, 0.12);
+  --accent-ring: rgba(138, 199, 178, 0.3);
+
+  --link: var(--info-400);
+  --link-hover: var(--info-300);
+
+  --error-bg: rgba(220, 38, 38, 0.15);
+  --error-text: var(--danger-400);
+  --error-border: rgba(220, 38, 38, 0.3);
+  --error-muted: var(--danger-400);
+  --error-hover-bg: rgba(220, 38, 38, 0.2);
+  --success-bg: rgba(16, 185, 129, 0.15);
+  --success-text: var(--success-400);
+  --success-border: rgba(16, 185, 129, 0.3);
+  --warning-bg: rgba(245, 158, 11, 0.15);
+  --warning-text: var(--warning-400);
+  --warning-border: rgba(245, 158, 11, 0.3);
+  --info-bg: rgba(59, 130, 246, 0.15);
+  --info-text: var(--info-400);
+
+  --highlight-bg: rgba(254, 240, 138, 0.25);
+  --highlight-text: #e4ece9;
+
+  /* 深色侧边栏（两种主题下侧边栏都是墨绿深底） */
+  --sidebar-bg: #0a1210;
+  --sidebar-text: #7e938b;
+  --sidebar-text-hover: #dce8e3;
+  --sidebar-active-bg: #56b99d;
+  --sidebar-active-text: #0a1210;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-hover-bg: rgba(86, 185, 157, 0.16);
+  --sidebar-accent: #56b99d;
+}

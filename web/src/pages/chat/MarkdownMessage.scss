@@ -1,0 +1,378 @@
+/* ============================================================
+   Markdown 消息渲染样式
+   移植自 src/routes/chat/MarkdownMessage.svelte <style>
+   ============================================================ */
+
+.md-content {
+  line-height: 1.7;
+  font-size: 14.5px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+
+  p {
+    margin: 0 0 8px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    margin: 16px 0 8px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  h1 {
+    font-size: 1.3em;
+  }
+
+  h2 {
+    font-size: 1.15em;
+  }
+
+  h3 {
+    font-size: 1.05em;
+  }
+
+  ul,
+  ol {
+    margin: 4px 0 8px;
+    padding-left: 20px;
+  }
+
+  li {
+    margin-bottom: 2px;
+  }
+
+  blockquote {
+    margin: 8px 0;
+    padding: 4px 12px;
+    border-left: 3px solid var(--accent);
+    color: var(--text-secondary);
+    background: var(--bg-subtle);
+    border-radius: 0 6px 6px 0;
+  }
+
+  code {
+    font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+    font-size: 0.88em;
+    padding: 1px 5px;
+    background: var(--bg-subtle);
+    border-radius: 4px;
+    color: var(--accent);
+  }
+
+  pre {
+    margin: 10px 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--code-bg);
+    position: relative;
+    max-width: 100%;
+
+    code {
+      display: block;
+      padding: 14px 16px;
+      background: transparent;
+      font-size: 13px;
+      line-height: 1.55;
+      overflow-x: auto;
+      max-width: 100%;
+      color: var(--code-text);
+      font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+      white-space: pre;
+      tab-size: 2;
+    }
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+
+  th,
+  td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+  }
+
+  th {
+    background: var(--bg-subtle);
+    font-weight: 600;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 16px 0;
+  }
+
+  a {
+    color: var(--link);
+    text-decoration: underline;
+
+    &:hover {
+      color: var(--link-hover);
+    }
+  }
+
+  img {
+    max-width: 100%;
+    border-radius: 8px;
+    margin: 8px 0;
+  }
+}
+
+.md-empty {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ===== 执行按钮区域样式 ===== */
+.md-content .code-x-btn {
+  position: absolute;
+  top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  background: color-mix(in srgb, var(--code-text) 8%, transparent);
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--code-text) 70%, transparent);
+  cursor: pointer;
+  transition: all 0.15s;
+  opacity: 0;
+  font-family: inherit;
+  z-index: 2;
+}
+
+.md-content .code-exec-btn {
+  right: 68px;
+  color: var(--success-400);
+  border-color: var(--success-border);
+
+  &:hover {
+    background: color-mix(in srgb, var(--success-400) 20%, transparent);
+    color: var(--success-300);
+    border-color: color-mix(in srgb, var(--success-400) 50%, transparent);
+  }
+}
+
+.md-content .code-copy-btn {
+  right: 6px;
+}
+
+.md-content pre:hover .code-x-btn {
+  opacity: 1;
+}
+
+.md-content .code-x-btn:hover {
+  background: color-mix(in srgb, var(--code-text) 15%, transparent);
+  color: var(--code-text);
+}
+
+.md-content .code-x-btn.copied {
+  background: color-mix(in srgb, var(--success-400) 15%, transparent);
+  color: var(--success-400);
+  border-color: var(--success-border);
+}
+
+/* ===== 命令输出区域 ===== */
+.md-content .command-output {
+  margin: -4px 0 10px;
+  border-radius: 0 0 10px 10px;
+  overflow: hidden;
+  background: var(--code-bg-deep);
+  border: 1px solid var(--code-border);
+  border-top: none;
+  font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+  font-size: 13px;
+  animation: md-slide-down 0.2s ease-out;
+}
+
+.md-content .output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--code-text) 4%, transparent);
+  border-bottom: 1px solid var(--code-border);
+}
+
+.md-content .output-title {
+  color: color-mix(in srgb, var(--code-text) 50%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.md-content .output-close {
+  background: none;
+  border: none;
+  color: color-mix(in srgb, var(--code-text) 30%, transparent);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+
+  &:hover {
+    color: color-mix(in srgb, var(--code-text) 80%, transparent);
+  }
+}
+
+.md-content .output-body {
+  padding: 8px 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.md-content .output-status {
+  font-size: 11px;
+  margin-bottom: 6px;
+  letter-spacing: 0.3px;
+
+  &.running {
+    color: var(--info-400);
+  }
+
+  &.done {
+    color: var(--success-400);
+  }
+
+  &.error {
+    color: var(--danger-400);
+  }
+}
+
+.md-content .output-lines {
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.md-content .output-line {
+  padding: 1px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--code-text);
+
+  &.stderr {
+    color: var(--danger-300);
+  }
+
+  &.error {
+    color: var(--danger-400);
+    padding: 4px 0;
+  }
+}
+
+.md-content .loading {
+  display: inline-block;
+  animation: md-pulse 1.2s ease-in-out infinite;
+  font-size: 16px;
+}
+
+/* ===== 确认对话框 ===== */
+.md-content .confirm-dialog {
+  padding: 4px 0;
+}
+
+.md-content .confirm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warning-400);
+  margin-bottom: 8px;
+}
+
+.md-content .confirm-preview {
+  background: var(--code-bg-deep);
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+  font-size: 12px;
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 10px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.md-content .confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+
+  button {
+    padding: 6px 16px;
+    border-radius: 6px;
+    border: none;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+}
+
+.md-content .btn-cancel {
+  background: color-mix(in srgb, var(--code-text) 8%, transparent);
+  color: color-mix(in srgb, var(--code-text) 70%, transparent);
+  border: 1px solid var(--code-border);
+
+  &:hover {
+    background: color-mix(in srgb, var(--code-text) 15%, transparent);
+    color: var(--code-text);
+  }
+}
+
+.md-content .btn-confirm {
+  background: var(--success-400);
+  color: var(--code-bg);
+  font-weight: 600;
+
+  &:hover {
+    background: var(--success-300);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--success-500) 30%, transparent);
+  }
+}
+
+@keyframes md-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes md-pulse {
+
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}

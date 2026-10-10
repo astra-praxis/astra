@@ -1,0 +1,442 @@
+/* 下载管理页面样式 — 移植自 src/routes/tools/downloader/+page.svelte */
+.downloader-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+
+  /* 同名类会被其他页面样式覆盖（Vite 全局打包），必须作用域化 */
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 0;
+    }
+  }
+
+  .btn-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 13px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+    }
+  }
+}
+
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-refresh,
+.btn-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 15px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 15px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--error-bg);
+    color: var(--error-text);
+    border-color: var(--error-border);
+  }
+
+  &.confirming {
+    background: var(--error-text);
+    color: var(--text-inverse);
+    border-color: var(--error-text);
+  }
+}
+
+.btn-refresh:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+.btn-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-add {
+  background: var(--accent);
+  color: var(--text-inverse);
+  border: none;
+
+  &:hover {
+    background: var(--accent-hover);
+  }
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 12px;
+  color: var(--error-text);
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.error-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 16px;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+.final-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  border: 1px solid transparent;
+
+  &.success {
+    background: var(--success-bg);
+    border-color: var(--success-text);
+    color: var(--success-text);
+  }
+
+  &.error {
+    background: var(--error-bg);
+    border-color: var(--error-border);
+    color: var(--error-text);
+  }
+
+  .error-dismiss {
+    margin-left: auto;
+    color: inherit;
+    background: none;
+    border: none;
+    opacity: 0.6;
+    cursor: pointer;
+    font-size: 16px;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px;
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: dl-spin 0.8s linear infinite;
+}
+
+@keyframes dl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  background: var(--bg-card);
+  border-radius: 16px;
+  border: 2px dashed var(--border);
+}
+
+.empty-icon-big {
+  font-size: 56px;
+  margin-bottom: 16px;
+}
+
+.empty-state h3 {
+  font-size: 20px;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+
+.empty-state p {
+  color: var(--text-muted);
+  font-size: 15px;
+  margin: 0;
+}
+
+.tasks-count {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.task-card {
+  background: var(--bg-card);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 1px 3px var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--border);
+  }
+}
+
+.task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.task-info {
+  min-width: 0;
+}
+
+.task-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.task-filename {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-status {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.s-pending {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.s-downloading {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.s-paused {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.s-completed {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.s-failed {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.s-cancelled {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.task-url {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 6px;
+}
+
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.meta-divider {
+  color: var(--text-muted);
+}
+
+.progress-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-subtle);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+
+  &.paused {
+    background: var(--warning-text);
+  }
+}
+
+.progress-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+  min-width: 34px;
+  text-align: right;
+}
+
+.task-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--error-bg);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--error-text);
+  line-height: 1.5;
+}
+
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.btn-group {
+  display: flex;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.btn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--bg-card-hover);
+  }
+}
+
+/* 各操作按钮 hover 强调色（与原版一致） */
+.btn-pause:hover {
+  color: var(--warning-text);
+  border-color: var(--warning-text);
+}
+
+.btn-resume:hover {
+  color: var(--success-text);
+  border-color: var(--success-text);
+}
+
+.btn-retry:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-file:hover,
+.btn-folder:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-delete-sm:hover {
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-color: var(--error-border);
+}

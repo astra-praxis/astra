@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import {
@@ -34,6 +33,11 @@ import {
 } from 'lucide-react';
 import OrbArt from '@/components/illustrations/OrbArt';
 import { useChatToolbarStore } from '@/stores/chatToolbar';
+import {
+  useAgentStore,
+  ensureAgentListeners,
+  type Entry,
+} from '@/stores/agent';
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter, useMention } from '@/hooks/useMention';
 import ChatToolbar from '@/components/chat/ChatToolbar';
@@ -45,56 +49,7 @@ import { parseSlashCommand, useSlash, type UserSkillLite } from '@/hooks/useSlas
 import AgentHistoryPanel, { type AgentSessionMeta } from './AgentHistoryPanel';
 import './AgentPage.scss';
 
-// ===== 事件模型（与 agent-core Envelope 对齐，type 标签 snake_case） =====
-
-interface AgentEnvelope {
-  session_id: string;
-  run_id: string;
-  sequence: number;
-  type: string;
-  text?: string;
-  status?: string;
-  tool_call_id?: string;
-  tool_name?: string;
-  args_summary?: string;
-  result_summary?: string;
-  error?: string;
-  summary?: string;
-  final_text?: string;
-  decision?: string;
-  artifacts?: Array<{ path: string; kind: string }>;
-}
-
-type ToolStatus = 'running' | 'completed' | 'failed' | 'denied';
-
-type PermState = 'pending' | 'allowed' | 'denied';
-
-type Entry =
-  | { kind: 'user'; text: string }
-  | { kind: 'assistant'; text: string; streaming: boolean }
-  | {
-      kind: 'tool';
-      callId: string;
-      toolName: string;
-      argsSummary: string;
-      status: ToolStatus;
-      result?: string;
-      artifacts?: Array<{ path: string; kind: string }>;
-      /** Confirm 工具的确认状态：内嵌在工具卡里，不再单出一张权限卡 */
-      perm?: { state: PermState; summary: string };
-    }
-  | {
-      kind: 'permission';
-      callId: string;
-      toolName: string;
-      summary: string;
-      state: PermState;
-    }
-  | { kind: 'terminal'; outcome: 'completed' | 'failed' | 'cancelled'; text?: string };
-
-function newSessionId(): string {
-  return `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
+// 事件模型与条目类型见 stores/agent.ts（全局会话状态的唯一事实来源）
 
 const STATUS_LABEL: Record<string, string> = {
   analyzing: '分析中',
@@ -114,27 +69,32 @@ const PERM_ACTION_LABEL: Record<string, string> = {
 };
 
 export default function AgentPage() {
-  // ===== 会话与条目 =====
-  const sessionIdRef = useRef(newSessionId());
-  const [entries, setEntries] = useState<Entry[]>([]);
-  const entriesRef = useRef(entries);
+  // ===== 全局会话状态（zustand；切页不丢，事件由模块级单例监听持续写入） =====
+  const sessionId = useAgentStore((s) => s.sessionId);
+  const entries = useAgentStore((s) => s.entries);
+  const input = useAgentStore((s) => s.input);
+  const setInput = useAgentStore((s) => s.setInput);
+  const running = useAgentStore((s) => s.running);
+  const status = useAgentStore((s) => s.status);
+  const error = useAgentStore((s) => s.error);
+  const setError = useAgentStore((s) => s.setError);
+  const projectPath = useAgentStore((s) => s.projectPath);
+  const setProjectPath = useAgentStore((s) => s.setProjectPath);
+  const sessions = useAgentStore((s) => s.sessions);
+  const refreshSessions = useAgentStore((s) => s.refreshSessions);
+  const saveSession = useAgentStore((s) => s.saveSession);
+  const pushUser = useAgentStore((s) => s.pushUser);
+  const pushTerminal = useAgentStore((s) => s.pushTerminal);
+  const setRunState = useAgentStore((s) => s.setRunState);
+
+  // 事件监听为模块级单例：首次进入本页时挂载，卸载后不拆除（切页对话继续）
   useEffect(() => {
-    entriesRef.current = entries;
-  });
+    ensureAgentListeners();
+  }, []);
 
-  const [input, setInput] = useState('');
-  const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState('');
-
-  // ===== 项目选择（空 = 纯聊天；顶部工具栏选择文件夹，@ 只负责引用文件） =====
+  // ===== 项目选择（绑定在 store；顶部工具栏选择文件夹，@ 只负责引用文件） =====
   const projects = useWorkspaceStore((s) => s.projects);
   const editor = useWorkspaceStore((s) => s.editor);
-  const [projectPath, setProjectPath] = useState('');
-  const projectPathRef = useRef(projectPath);
-  useEffect(() => {
-    projectPathRef.current = projectPath;
-  }, [projectPath]);
 
   // ===== 项目文件列表（@ 引用候选；随项目切换重新加载） =====
   const [files, setFiles] = useState<string[]>([]);
@@ -157,11 +117,6 @@ export default function AgentPage() {
     };
   }, [projectPath]);
 
-  // 一次性 listener effect 里需要调用最新 saveSession：通过 ref 解除 stale closure
-  const saveSessionRef = useRef<(id: string, path: string, ents: Entry[]) => Promise<void>>(
-    async () => {},
-  );
-
   // ===== @ 文件引用（与 chat 页共用 useMention，条目为文件相对路径；不再绑定项目） =====
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mention = useMention(files, textareaRef, undefined, setInput);
@@ -182,49 +137,12 @@ export default function AgentPage() {
   // 气泡内 @文件 chip 解析用的文件集合（files 变化时重建）
   const fileSet = useMemo(() => new Set(files), [files]);
 
-  // ===== 会话历史（右侧常驻面板；后端 agent_sessions.json 持久化） =====
-  const [sessions, setSessions] = useState<AgentSessionMeta[]>([]);
+  // ===== 历史面板开关（易失 UI 状态，留在组件内） =====
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState(sessionIdRef.current);
-
-  const refreshSessions = useCallback(async () => {
-    try {
-      const list = await invoke<AgentSessionMeta[]>('list_agent_sessions');
-      setSessions(list);
-    } catch {
-      // 后端不可用（本地调试）时忽略
-    }
-  }, []);
 
   useEffect(() => {
     void refreshSessions();
   }, [refreshSessions]);
-
-  /** 保存当前会话：run 结束 / 新对话 / 切换历史会话时调用（空条目跳过） */
-  const saveSession = useCallback(
-    async (id: string, path: string, ents: Entry[]) => {
-      if (ents.length === 0) return;
-      const firstUser = ents.find((e): e is Extract<Entry, { kind: 'user' }> => e.kind === 'user');
-      const title = firstUser ? firstUser.text.slice(0, 30) : 'Agent 会话';
-      const projectName = projects.find((p) => p.path === path)?.name ?? '';
-      try {
-        await invoke('save_agent_session', {
-          id,
-          projectPath: path,
-          projectName,
-          title,
-          entries: ents,
-        });
-        await refreshSessions();
-      } catch (e) {
-        console.error('保存会话失败', e);
-      }
-    },
-    [projects, refreshSessions],
-  );
-  useEffect(() => {
-    saveSessionRef.current = saveSession;
-  }, [saveSession]);
 
   // ===== 模型来源（复用标题栏 toolbar 的选择） =====
   const sourceType = useChatToolbarStore((s) => s.sourceType);
@@ -254,154 +172,7 @@ export default function AgentPage() {
     input.trim().length > 0 &&
     (sourceType === 'model' ? !!selectedModelPort : !!selectedProviderId && !!modelName);
 
-  // ===== 事件订阅 =====
-  // 注意：StrictMode dev 下 effect 会 mount→unmount→remount，cleanup 必须等
-  // listen promise resolve 后统一反注册（chat 页同款模式），否则泄漏监听器，
-  // 每个事件被处理两次（权限卡出现两张、流式文本重复拼接）。
-  useEffect(() => {
-    const listeners: Promise<UnlistenFn>[] = [
-      listen<AgentEnvelope>('agent-event', (e) => handleEnvelope(e.payload)),
-    ];
-    return () => {
-      Promise.all(listeners).then((fns) => fns.forEach((fn) => fn()));
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function handleEnvelope(env: AgentEnvelope) {
-    if (env.session_id !== sessionIdRef.current) return; // 旧会话残余事件
-    setEntries((prev) => applyEnvelope(prev, env));
-  }
-
-  function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
-    switch (env.type) {
-      case 'message_delta': {
-        const text = env.text ?? '';
-        const last = prev[prev.length - 1];
-        if (last && last.kind === 'assistant' && last.streaming) {
-          const next = [...prev];
-          next[next.length - 1] = { ...last, text: last.text + text };
-          return next;
-        }
-        return [...prev, { kind: 'assistant', text, streaming: true }];
-      }
-      case 'tool_call_started': {
-        const rest = prev.filter(
-          (e) => !(e.kind === 'tool' && e.callId === env.tool_call_id),
-        );
-        return [
-          ...rest,
-          {
-            kind: 'tool',
-            callId: env.tool_call_id!,
-            toolName: env.tool_name!,
-            argsSummary: env.args_summary ?? '',
-            status: 'running',
-          },
-        ];
-      }
-      case 'tool_call_completed':
-        return prev.map((e) =>
-          e.kind === 'tool' && e.callId === env.tool_call_id
-            ? {
-                ...e,
-                status: 'completed',
-                result: env.result_summary,
-                artifacts: env.artifacts,
-              }
-            : e,
-        );
-      case 'tool_call_failed':
-        return prev.map((e) => {
-          if (e.kind !== 'tool' || e.callId !== env.tool_call_id) return e;
-          const denied = env.error?.includes('拒绝') ?? false;
-          return { ...e, status: denied ? 'denied' : 'failed', result: env.error };
-        });
-      case 'permission_requested': {
-        // 确认 UI 内嵌到同 callId 的工具卡（Zed 模式），不再单独出一张权限卡；
-        // 工具卡还没到（理论上不应发生）时才落回独立权限条目，且按 callId 去重
-        const toolIdx = prev.findIndex((e) => e.kind === 'tool' && e.callId === env.tool_call_id);
-        if (toolIdx >= 0) {
-          return prev.map((e, i) =>
-            i === toolIdx && e.kind === 'tool'
-              ? { ...e, perm: { state: 'pending' as const, summary: env.summary ?? '' } }
-              : e,
-          );
-        }
-        const exists = prev.some((e) => e.kind === 'permission' && e.callId === env.tool_call_id);
-        if (exists) return prev;
-        return [
-          ...prev,
-          {
-            kind: 'permission',
-            callId: env.tool_call_id!,
-            toolName: env.tool_name!,
-            summary: env.summary ?? '',
-            state: 'pending',
-          },
-        ];
-      }
-      case 'permission_decided':
-        return prev.map((e) => {
-          if (e.kind === 'tool' && e.callId === env.tool_call_id && e.perm) {
-            return { ...e, perm: { ...e.perm, state: env.decision === 'allow' ? ('allowed' as const) : ('denied' as const) } };
-          }
-          if (e.kind === 'permission' && e.callId === env.tool_call_id) {
-            return { ...e, state: env.decision === 'allow' ? ('allowed' as const) : ('denied' as const) };
-          }
-          return e;
-        });
-      case 'run_completed':
-      case 'run_failed':
-      case 'run_cancelled': {
-        // 结束流式中的助手条目
-        const closed = prev.map((e) =>
-          e.kind === 'assistant' && e.streaming ? { ...e, streaming: false } : e,
-        );
-        if (env.type === 'run_completed') {
-          const last = closed[closed.length - 1];
-          if (last && last.kind === 'assistant' && last.text.trim()) {
-            return closed;
-          }
-          // 没有文本产出的 Run（如全部工具失败）：补一条终态
-          return [...closed, { kind: 'terminal', outcome: 'completed' }];
-        }
-        if (env.type === 'run_failed') {
-          return [...closed, { kind: 'terminal', outcome: 'failed', text: env.error }];
-        }
-        return [...closed, { kind: 'terminal', outcome: 'cancelled' }];
-      }
-      default:
-        return prev;
-    }
-  }
-
-  // 状态与运行标志放在 applyEnvelope 之外单独同步，避免嵌套 setState
-  useEffect(() => {
-    const listeners: Promise<UnlistenFn>[] = [
-      listen<AgentEnvelope>('agent-event', (e) => {
-        const env = e.payload;
-        if (env.session_id !== sessionIdRef.current) return;
-        if (env.type === 'status_changed') {
-          setStatus(env.status ?? null);
-        } else if (
-          env.type === 'run_completed' ||
-          env.type === 'run_failed' ||
-          env.type === 'run_cancelled'
-        ) {
-          setRunning(false);
-          setStatus(null);
-          // Run 结束后持久化会话（entries 已在 setEntries 里更新，读 ref 拿最新值）
-          requestAnimationFrame(() => {
-            void saveSessionRef.current(sessionIdRef.current, projectPathRef.current, entriesRef.current);
-          });
-        }
-      }),
-    ];
-    return () => {
-      Promise.all(listeners).then((fns) => fns.forEach((fn) => fn()));
-    };
-  }, []);
+  // ===== 事件订阅：见 stores/agent.ts 的模块级单例（ensureAgentListeners） =====
 
   // ===== 动作 =====
   const scrollToBottom = useCallback(() => {
@@ -458,15 +229,13 @@ export default function AgentPage() {
 
     setInput('');
     setError('');
-    // 会话记录保留原始 /技能名 文本，回放时可读
-    setEntries((prev) => [...prev, { kind: 'user', text: raw }]);
-    setRunning(true);
-    setStatus('analyzing');
+    pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
+    setRunState(true, 'analyzing');
 
     try {
       await invoke('agent_start_run', {
         req: {
-          session_id: sessionIdRef.current,
+          session_id: sessionId,
           user_text: text,
           skill: skillName,
           provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
@@ -480,11 +249,10 @@ export default function AgentPage() {
         },
       });
     } catch (e) {
-      setRunning(false);
-      setStatus(null);
-      setEntries((prev) => [...prev, { kind: 'terminal', outcome: 'failed', text: String(e) }]);
+      setRunState(false, null);
+      pushTerminal('failed', String(e));
     }
-  }, [input, running, projectPath, selectedProvider, systemPrompt, skills]);
+  }, [input, running, projectPath, selectedProvider, systemPrompt, skills, sessionId, setInput, setError, pushUser, setRunState]);
 
   const handleStop = useCallback(async () => {
     try {
@@ -492,20 +260,22 @@ export default function AgentPage() {
     } catch {
       // ignore
     }
-    setRunning(false);
-    setStatus(null);
-  }, []);
+    setRunState(false, null);
+  }, [setRunState]);
 
-  const handleDecide = useCallback(async (callId: string, allow: boolean) => {
-    try {
-      await invoke('agent_permission_decide', {
-        toolCallId: callId,
-        decision: allow ? 'allow' : 'deny',
-      });
-    } catch (e) {
-      setError(String(e));
-    }
-  }, []);
+  const handleDecide = useCallback(
+    async (callId: string, allow: boolean) => {
+      try {
+        await invoke('agent_permission_decide', {
+          toolCallId: callId,
+          decision: allow ? 'allow' : 'deny',
+        });
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [setError],
+  );
 
   // ===== @ 提及 + / 技能输入处理 =====
 
@@ -564,47 +334,36 @@ export default function AgentPage() {
 
   const newChat = useCallback(async () => {
     if (running) return;
-    const old = sessionIdRef.current;
-    void saveSession(old, projectPath, entriesRef.current);
-    sessionIdRef.current = newSessionId();
-    setCurrentSessionId(sessionIdRef.current);
-    setEntries([]);
-    setStatus(null);
-    setError('');
-    setInput('');
-    invoke('agent_reset_session', { sessionId: old }).catch(() => {
+    const st = useAgentStore.getState();
+    void st.saveSession(st.sessionId); // 旧会话落盘后重置（saveSession 内部读 get()，拿到的是保存时的快照）
+    st.startNewChat();
+    invoke('agent_reset_session', { sessionId: st.sessionId }).catch(() => {
       // 后端不可用时忽略（本地调试）
     });
-  }, [running, saveSession, projectPath]);
+  }, [running]);
 
   /** 从历史面板恢复会话（只读回放 + 续聊重新建 Thread） */
   const selectSession = useCallback(
     (s: AgentSessionMeta) => {
       if (running) return;
-      void saveSession(sessionIdRef.current, projectPath, entriesRef.current);
-      sessionIdRef.current = s.id;
-      setCurrentSessionId(s.id);
-      setProjectPath(s.project_path);
-      try {
-        setEntries(s.entries as Entry[]);
-      } catch {
-        setEntries([]);
-      }
+      const st = useAgentStore.getState();
+      void st.saveSession(st.sessionId);
+      st.loadSession(s);
       setError('');
     },
-    [running, saveSession, projectPath],
+    [running, setError],
   );
 
   const deleteSession = useCallback(
     (id: string) => {
       invoke('delete_agent_session', { id })
         .then(() => {
-          setSessions((prev) => prev.filter((s) => s.id !== id));
-          if (sessionIdRef.current === id) void newChat();
+          void refreshSessions();
+          if (useAgentStore.getState().sessionId === id) void newChat();
         })
         .catch((e) => setError(`删除会话失败: ${e}`));
     },
-    [newChat],
+    [newChat, refreshSessions, setError],
   );
 
   // ===== 渲染 =====
@@ -809,7 +568,7 @@ export default function AgentPage() {
         {historyOpen && (
           <AgentHistoryPanel
             sessions={sessions}
-            currentSessionId={currentSessionId}
+            currentSessionId={sessionId}
             running={running}
             onSelect={(s) => selectSession(s)}
             onDelete={deleteSession}

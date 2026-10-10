@@ -7,6 +7,7 @@ import type { ProjectDetail as ProjectDetailData, SubDetail } from './types';
 import NodeModulesPanel from './NodeModulesPanel';
 import {
   Activity,
+  Bot,
   ChevronLeft,
   FileText,
   Folder,
@@ -21,6 +22,8 @@ interface Props {
   editor: EditorSetting;
   onBack: () => void;
   onOpenEditor: (path: string) => void;
+  /** 在 Agent 页打开该项目 */
+  onOpenAgent: (path: string) => void;
 }
 
 export default function ProjectDetailView({
@@ -29,6 +32,7 @@ export default function ProjectDetailView({
   editor,
   onBack,
   onOpenEditor,
+  onOpenAgent,
 }: Props) {
   const navigate = useNavigate();
 
@@ -164,6 +168,14 @@ export default function ProjectDetailView({
             >
               <Play size={16} strokeWidth={2.5} />
               在 {editor.name || '编辑器'} 中打开
+            </button>
+            <button
+              className="project-detail__agent-btn"
+              onClick={() => onOpenAgent(project.path)}
+              title="在 Agent 页打开该项目"
+            >
+              <Bot size={16} strokeWidth={2} />
+              Agent 打开
             </button>
             {hasCaspPortal && (
               <button className="project-detail__dev-btn" onClick={gotoDevMode}>

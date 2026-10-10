@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { invoke } from '@tauri-apps/api/core';
 import { useWorkspaceStore } from '@/stores/workspace';
+import { useAgentStore } from '@/stores/agent';
 import type { EditorSetting } from '@/stores/workspace';
 import ProjectCardView from '@/features/home/ProjectCard';
 import ProjectDetailView from '@/features/home/ProjectDetail';
@@ -114,6 +115,12 @@ export default function WorkspacePage() {
     });
   }
 
+  // ===== 一键在 Agent 页打开项目 =====
+  function openInAgent(path: string) {
+    useAgentStore.getState().setProjectPath(path);
+    navigate('/agent');
+  }
+
   // ===== 项目详情 =====
   async function showDetail(projectPath: string) {
     // 滚动到顶部
@@ -194,6 +201,7 @@ export default function WorkspacePage() {
           editor={editorForDetail}
           onBack={backToWorkspace}
           onOpenEditor={openEditorForPath}
+          onOpenAgent={openInAgent}
         />
       ) : (
         !loading &&
@@ -280,6 +288,7 @@ export default function WorkspacePage() {
                     editorName={editor.name}
                     onOpen={(p) => void showDetail(p.path)}
                     onOpenProject={(path) => void openProject(path)}
+                    onOpenAgent={openInAgent}
                   />
                 ))}
               </div>

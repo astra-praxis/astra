@@ -22,6 +22,8 @@ const WALK_MAX_ENTRIES: usize = 1000;
 pub struct UserSkillMeta {
     /// 规范名 = 目录名（/调用 与 read_skill 都用这个名字）
     pub name: String,
+    /// 展示名 = SKILL.md frontmatter 的 name 字段（缺省回退目录名）
+    pub display_name: String,
     pub description: String,
     pub path: String,
     pub file_count: usize,
@@ -38,6 +40,17 @@ pub struct UserSkillFile {
 pub struct SkillSummary {
     pub name: String,
     pub description: String,
+}
+
+/// 全局技能同步报告（~/.agents/skills → 应用技能库，覆盖语义）
+#[derive(Debug, Serialize)]
+pub struct SyncReport {
+    /// 本次新导入的技能名
+    pub imported: Vec<String>,
+    /// 已存在并被全局版本覆盖更新的技能名
+    pub updated: Vec<String>,
+    /// 跳过的 (技能名, 原因)
+    pub skipped: Vec<(String, String)>,
 }
 
 // ===== 校验 =====
@@ -82,8 +95,8 @@ pub fn validate_rel_path(rel: &str) -> Result<(), String> {
 
 // ===== 目录级核心逻辑（可单测） =====
 
-/// 从 SKILL.md 内容解析 frontmatter description（name 一律用目录名，不信任 frontmatter）
-fn parse_description(content: &str) -> String {
+/// 从 SKILL.md frontmatter 提取指定字段（name/description 等），单行、去可选引号
+fn parse_frontmatter_field(content: &str, field: &str) -> String {
     let content = content.trim();
     if !content.starts_with("---") {
         return String::new();
@@ -94,18 +107,35 @@ fn parse_description(content: &str) -> String {
     let Some(end) = rest.find("---") else {
         return String::new();
     };
+    let prefix = format!("{field}:");
     for line in rest[..end].lines() {
-        if let Some(v) = line.trim().strip_prefix("description:") {
+        if let Some(v) = line.trim().strip_prefix(&prefix) {
             return v.trim().trim_matches('"').trim_matches('\'').to_string();
         }
     }
     String::new()
 }
 
+fn parse_description(content: &str) -> String {
+    parse_frontmatter_field(content, "description")
+}
+
 fn skill_description(skill_dir: &Path) -> String {
     fs::read_to_string(skill_dir.join("SKILL.md"))
         .map(|c| parse_description(&c))
         .unwrap_or_default()
+}
+
+/// SKILL.md frontmatter 的 name 字段（可选；展示用，规范名始终是目录名）
+fn skill_frontmatter_name(skill_dir: &Path) -> Option<String> {
+    let n = fs::read_to_string(skill_dir.join("SKILL.md"))
+        .map(|c| parse_frontmatter_field(&c, "name"))
+        .unwrap_or_default();
+    if n.is_empty() {
+        None
+    } else {
+        Some(n)
+    }
 }
 
 /// 递归统计技能内文件数（跳过隐藏目录与 .git）
@@ -192,6 +222,7 @@ pub fn list_in(dir: &Path) -> Vec<UserSkillMeta> {
             }
             let mut budget = WALK_MAX_ENTRIES;
             Some(UserSkillMeta {
+                display_name: skill_frontmatter_name(&path).unwrap_or_else(|| name.clone()),
                 description: skill_description(&path),
                 path: path.to_string_lossy().to_string(),
                 file_count: count_files(&path, &mut budget),
@@ -274,6 +305,58 @@ pub fn import_skill_into(dir: &Path, source: &Path) -> Result<String, String> {
         let _ = fs::write(target.join("SKILL.md"), md);
     }
     Ok(name)
+}
+
+/// 同步全局技能到技能库：~/.agents/skills 下每个含 SKILL.md 的目录
+/// 复制进 lib_dir。已存在的先删后拷（以全局为准覆盖），不存在的新增。
+/// 单个技能失败不中断整体，记入 skipped。
+pub fn sync_global_skills_into(lib_dir: &Path, global_dir: &Path) -> Result<SyncReport, String> {
+    if !global_dir.is_dir() {
+        return Err("全局技能目录不存在或不是目录".into());
+    }
+    let mut report = SyncReport {
+        imported: Vec::new(),
+        updated: Vec::new(),
+        skipped: Vec::new(),
+    };
+    let entries = fs::read_dir(global_dir).map_err(|e| format!("读取全局技能目录失败: {e}"))?;
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let raw = entry.file_name().to_string_lossy().to_string();
+        // 只处理含 SKILL.md 的目录；隐藏目录/散文件一律跳过
+        if !src.is_dir() || !src.join("SKILL.md").is_file() {
+            continue;
+        }
+        if let Err(e) = validate_skill_name(&raw) {
+            report.skipped.push((raw, e));
+            continue;
+        }
+        let name = raw.trim().to_string();
+        let target = lib_dir.join(&name);
+        let existed = target.exists();
+        // 覆盖前必须先删干净，否则全局侧已删除的文件会残留在旧副本里
+        if existed {
+            if let Err(e) = fs::remove_dir_all(&target) {
+                report
+                    .skipped
+                    .push((name.clone(), format!("清理旧版本失败: {e}")));
+                continue;
+            }
+        }
+        match copy_dir_recursive(&src, &target) {
+            Ok(()) => {
+                if existed {
+                    report.updated.push(name);
+                } else {
+                    report.imported.push(name);
+                }
+            }
+            Err(e) => {
+                report.skipped.push((name, e));
+            }
+        }
+    }
+    Ok(report)
 }
 
 /// 读取技能内容：默认 SKILL.md，可指定技能内相对路径。超长截断。
@@ -372,10 +455,11 @@ pub fn create_user_skill(
     let path = dir.join(name.trim());
     let mut budget = WALK_MAX_ENTRIES;
     Ok(UserSkillMeta {
-        name: name.trim().to_string(),
+        display_name: name.trim().to_string(),
         description: description.trim().to_string(),
         path: path.to_string_lossy().to_string(),
         file_count: count_files(&path, &mut budget),
+        name: name.trim().to_string(),
     })
 }
 
@@ -386,11 +470,27 @@ pub fn import_user_skill(app: AppHandle, source: String) -> Result<UserSkillMeta
     let path = dir.join(&name);
     let mut budget = WALK_MAX_ENTRIES;
     Ok(UserSkillMeta {
+        display_name: skill_frontmatter_name(&path).unwrap_or_else(|| name.clone()),
         description: skill_description(&path),
         path: path.to_string_lossy().to_string(),
         file_count: count_files(&path, &mut budget),
         name,
     })
+}
+
+/// 全局技能目录（Zed/agent 通用 ~/.agents/skills）
+fn global_skills_dir() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
+    Ok(home.join(".agents").join("skills"))
+}
+
+#[tauri::command]
+pub fn sync_global_skills(app: AppHandle) -> Result<SyncReport, String> {
+    let global = global_skills_dir()?;
+    if !global.is_dir() {
+        return Err("未找到全局技能目录 ~/.agents/skills".into());
+    }
+    sync_global_skills_into(&app_skills_dir(&app)?, &global)
 }
 
 #[tauri::command]
@@ -556,7 +656,96 @@ mod tests {
     fn description_parser() {
         let md = "---\nname: x\ndescription: \"带引号的描述\"\n---\n\nbody";
         assert_eq!(parse_description(md), "带引号的描述");
-        assert_eq!(parse_description("no frontmatter"), "");
-        assert_eq!(parse_description("---\nbroken"), "");
+        assert_eq!(parse_frontmatter_field(md, "name"), "x");
+        assert_eq!(parse_frontmatter_field("no frontmatter", "name"), "");
+        assert_eq!(parse_frontmatter_field("---\nbroken", "name"), "");
+    }
+
+    #[test]
+    fn display_name_falls_back_to_dir_name() {
+        let root = temp_root("display-name");
+        // 有 frontmatter name
+        let dir = root.join("dir-a");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: 标书撰写\ndescription: d\n---\n",
+        )
+        .unwrap();
+        assert_eq!(skill_frontmatter_name(&dir), Some("标书撰写".to_string()));
+        let list = list_in(&root);
+        assert_eq!(list[0].name, "dir-a");
+        assert_eq!(list[0].display_name, "标书撰写");
+        // 无 frontmatter name → 回退目录名
+        let dir_b = root.join("dir-b");
+        fs::create_dir_all(&dir_b).unwrap();
+        fs::write(dir_b.join("SKILL.md"), "# 无 frontmatter\n").unwrap();
+        let list = list_in(&root);
+        let b = list.iter().find(|s| s.name == "dir-b").unwrap();
+        assert_eq!(b.display_name, "dir-b");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn make_global_skill(global: &Path, name: &str, desc: &str, extra: &[&str]) {
+        let dir = global.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        let md = format!("---\nname: {name}\ndescription: {desc}\n---\n\n# {name}\n");
+        fs::write(dir.join("SKILL.md"), md).unwrap();
+        for f in extra {
+            let fp = dir.join(f);
+            fs::create_dir_all(fp.parent().unwrap()).unwrap();
+            fs::write(fp, "data").unwrap();
+        }
+    }
+
+    #[test]
+    fn sync_global_skills_imports_updates_and_skips() {
+        let lib = temp_root("sync-lib");
+        let global = temp_root("sync-global");
+
+        make_global_skill(&global, "skill-a", "A 的描述", &["docs/guide.md"]);
+        make_global_skill(&global, "skill-b", "B 的描述", &[]);
+        // 无 SKILL.md 的目录静默跳过；. 开头目录会被名称校验拦下进 skipped
+        fs::create_dir_all(global.join("no-md")).unwrap();
+        fs::create_dir_all(global.join(".hidden")).unwrap();
+        fs::write(
+            global.join(".hidden/SKILL.md"),
+            "---\nname: .hidden\ndescription: x\n---\n",
+        )
+        .unwrap();
+
+        // 第一次同步：全部导入
+        let report = sync_global_skills_into(&lib, &global).unwrap();
+        assert_eq!(report.imported.len(), 2);
+        assert!(report.imported.contains(&"skill-a".to_string()));
+        assert!(report.updated.is_empty());
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].0, ".hidden");
+        assert_eq!(list_in(&lib).len(), 2);
+        assert!(lib.join("skill-a/docs/guide.md").exists());
+
+        // 全局侧修改 skill-b 内容并新增文件；删除 skill-a 的一个文件 → 覆盖更新，删除同步生效
+        fs::write(
+            global.join("skill-b/SKILL.md"),
+            "---\nname: skill-b\ndescription: B 新版\n---\n",
+        )
+        .unwrap();
+        fs::write(global.join("skill-b/NEW.md"), "new").unwrap();
+        fs::remove_file(global.join("skill-a/docs/guide.md")).unwrap();
+        let report = sync_global_skills_into(&lib, &global).unwrap();
+        assert!(report.imported.is_empty());
+        assert_eq!(report.updated.len(), 2);
+        assert!(report.updated.contains(&"skill-b".to_string()));
+        assert!(!lib.join("skill-a/docs/guide.md").exists());
+        assert!(lib.join("skill-b/NEW.md").exists());
+        let list = list_in(&lib);
+        let b = list.iter().find(|s| s.name == "skill-b").unwrap();
+        assert_eq!(b.description, "B 新版");
+
+        // 全局目录不存在报错
+        assert!(sync_global_skills_into(&lib, &global.join("nope")).is_err());
+
+        fs::remove_dir_all(&lib).unwrap();
+        fs::remove_dir_all(&global).unwrap();
     }
 }

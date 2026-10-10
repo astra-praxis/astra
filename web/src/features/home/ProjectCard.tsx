@@ -1,6 +1,6 @@
 import { folderColor, folderName, highlight } from './folder-utils';
 import type { ProjectCard as ProjectCardData } from './types';
-import { Folder, Play } from 'lucide-react';
+import { Bot, Folder, Play } from 'lucide-react';
 import './ProjectCard.scss';
 
 interface Props {
@@ -11,6 +11,8 @@ interface Props {
   onOpen: (project: ProjectCardData) => void;
   /** 用编辑器打开项目/子项目 */
   onOpenProject: (path: string) => void;
+  /** 在 Agent 页打开该项目 */
+  onOpenAgent: (path: string) => void;
 }
 
 export default function ProjectCardView({
@@ -19,6 +21,7 @@ export default function ProjectCardView({
   editorName,
   onOpen,
   onOpenProject,
+  onOpenAgent,
 }: Props) {
   const accent = folderColor(project.name);
 
@@ -81,6 +84,17 @@ export default function ProjectCardView({
         )}
         <div className="project-card__footer">
           <div className="project-card__footer-right">
+            <button
+              className="project-card__open-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenAgent(project.path);
+              }}
+              title="在 Agent 页打开该项目"
+            >
+              <Bot size={13} strokeWidth={2} />
+              Agent
+            </button>
             <button
               className="project-card__open-btn"
               onClick={(e) => {

@@ -131,7 +131,8 @@
   }
 }
 
-.project-detail__dev-btn {
+.project-detail__dev-btn,
+.project-detail__agent-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;

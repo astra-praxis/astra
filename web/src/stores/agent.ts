@@ -1,0 +1,299 @@
+/**
+ * Agent 会话全局状态（zustand）
+ *
+ * 目的：Agent 页切走时实时对话不丢——Tauri 事件监听为模块级单例（ensureAgentListeners），
+ * 事件持续写入 store；运行中的 Run、条目流、当前项目绑定全局保留，重新进入 /agent 即恢复。
+ *
+ * 职责边界：
+ * - store 持有会话数据与运行状态：sessionId / entries / running / status / error /
+ *   projectPath / input / sessions（历史列表）
+ * - 输入弹层（@/ /）、历史面板开关、模型参数（systemPrompt 等）是易失 UI 状态，留在页面组件
+ * - agent_start_run / agent_cancel / agent_permission_decide 的调用留在页面组件
+ *   （依赖表单与模型选择校验），store 只承接结果状态
+ */
+import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { useWorkspaceStore } from '@/stores/workspace';
+import type { AgentSessionMeta } from '@/pages/AgentHistoryPanel';
+
+// ===== 事件模型（与 agent-core Envelope 对齐，type 标签 snake_case） =====
+
+export interface AgentEnvelope {
+  session_id: string;
+  run_id: string;
+  sequence: number;
+  type: string;
+  text?: string;
+  status?: string;
+  tool_call_id?: string;
+  tool_name?: string;
+  args_summary?: string;
+  result_summary?: string;
+  error?: string;
+  summary?: string;
+  final_text?: string;
+  decision?: string;
+  artifacts?: Array<{ path: string; kind: string }>;
+}
+
+export type ToolStatus = 'running' | 'completed' | 'failed' | 'denied';
+
+export type PermState = 'pending' | 'allowed' | 'denied';
+
+export type Entry =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string; streaming: boolean }
+  | {
+      kind: 'tool';
+      callId: string;
+      toolName: string;
+      argsSummary: string;
+      status: ToolStatus;
+      result?: string;
+      artifacts?: Array<{ path: string; kind: string }>;
+      /** Confirm 工具的确认状态：内嵌在工具卡里，不再单出一张权限卡 */
+      perm?: { state: PermState; summary: string };
+    }
+  | {
+      kind: 'permission';
+      callId: string;
+      toolName: string;
+      summary: string;
+      state: PermState;
+    }
+  | { kind: 'terminal'; outcome: 'completed' | 'failed' | 'cancelled'; text?: string };
+
+export function newSessionId(): string {
+  return `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Envelope → Entry 归并（纯函数，返回新数组） */
+export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
+  switch (env.type) {
+    case 'message_delta': {
+      const text = env.text ?? '';
+      const last = prev[prev.length - 1];
+      if (last && last.kind === 'assistant' && last.streaming) {
+        const next = [...prev];
+        next[next.length - 1] = { ...last, text: last.text + text };
+        return next;
+      }
+      return [...prev, { kind: 'assistant', text, streaming: true }];
+    }
+    case 'tool_call_started': {
+      const rest = prev.filter((e) => !(e.kind === 'tool' && e.callId === env.tool_call_id));
+      return [
+        ...rest,
+        {
+          kind: 'tool',
+          callId: env.tool_call_id!,
+          toolName: env.tool_name!,
+          argsSummary: env.args_summary ?? '',
+          status: 'running',
+        },
+      ];
+    }
+    case 'tool_call_completed':
+      return prev.map((e) =>
+        e.kind === 'tool' && e.callId === env.tool_call_id
+          ? {
+              ...e,
+              status: 'completed',
+              result: env.result_summary,
+              artifacts: env.artifacts,
+            }
+          : e,
+      );
+    case 'tool_call_failed':
+      return prev.map((e) => {
+        if (e.kind !== 'tool' || e.callId !== env.tool_call_id) return e;
+        const denied = env.error?.includes('拒绝') ?? false;
+        return { ...e, status: denied ? ('denied' as const) : ('failed' as const), result: env.error };
+      });
+    case 'permission_requested': {
+      // 确认 UI 内嵌到同 callId 的工具卡（Zed 模式），不再单独出一张权限卡；
+      // 工具卡还没到（理论上不应发生）时才落回独立权限条目，且按 callId 去重
+      const toolIdx = prev.findIndex((e) => e.kind === 'tool' && e.callId === env.tool_call_id);
+      if (toolIdx >= 0) {
+        return prev.map((e, i) =>
+          i === toolIdx && e.kind === 'tool'
+            ? { ...e, perm: { state: 'pending' as const, summary: env.summary ?? '' } }
+            : e,
+        );
+      }
+      const exists = prev.some((e) => e.kind === 'permission' && e.callId === env.tool_call_id);
+      if (exists) return prev;
+      return [
+        ...prev,
+        {
+          kind: 'permission',
+          callId: env.tool_call_id!,
+          toolName: env.tool_name!,
+          summary: env.summary ?? '',
+          state: 'pending',
+        },
+      ];
+    }
+    case 'permission_decided':
+      return prev.map((e) => {
+        if (e.kind === 'tool' && e.callId === env.tool_call_id && e.perm) {
+          return {
+            ...e,
+            perm: { ...e.perm, state: env.decision === 'allow' ? ('allowed' as const) : ('denied' as const) },
+          };
+        }
+        if (e.kind === 'permission' && e.callId === env.tool_call_id) {
+          return { ...e, state: env.decision === 'allow' ? ('allowed' as const) : ('denied' as const) };
+        }
+        return e;
+      });
+    case 'run_completed':
+    case 'run_failed':
+    case 'run_cancelled': {
+      // 结束流式中的助手条目
+      const closed = prev.map((e) =>
+        e.kind === 'assistant' && e.streaming ? { ...e, streaming: false } : e,
+      );
+      if (env.type === 'run_completed') {
+        const last = closed[closed.length - 1];
+        if (last && last.kind === 'assistant' && last.text.trim()) {
+          return closed;
+        }
+        // 没有文本产出的 Run（如全部工具失败）：补一条终态
+        return [...closed, { kind: 'terminal', outcome: 'completed' }];
+      }
+      if (env.type === 'run_failed') {
+        return [...closed, { kind: 'terminal', outcome: 'failed', text: env.error }];
+      }
+      return [...closed, { kind: 'terminal', outcome: 'cancelled' }];
+    }
+    default:
+      return prev;
+  }
+}
+
+// ===== Store =====
+
+interface AgentState {
+  sessionId: string;
+  entries: Entry[];
+  input: string;
+  running: boolean;
+  status: string | null;
+  error: string;
+  /** 项目绑定（空 = 纯聊天）；顶部工具栏选择，@ 只负责引用文件 */
+  projectPath: string;
+  /** 历史会话列表（save/list/delete 后经 refreshSessions 刷新） */
+  sessions: AgentSessionMeta[];
+
+  setInput: (v: string) => void;
+  setError: (v: string) => void;
+  setProjectPath: (v: string) => void;
+  setRunState: (running: boolean, status: string | null) => void;
+  pushUser: (text: string) => void;
+  pushTerminal: (outcome: 'completed' | 'failed' | 'cancelled', text?: string) => void;
+  /** 新对话：重置会话（旧会话保存由调用方先行调用 saveSession） */
+  startNewChat: () => void;
+  /** 从历史面板恢复会话（只读回放 + 续聊重新建 Thread） */
+  loadSession: (s: AgentSessionMeta) => void;
+  /** 保存会话到后端并刷新列表（默认保存当前会话；空条目跳过） */
+  saveSession: (id?: string) => Promise<void>;
+  refreshSessions: () => Promise<void>;
+}
+
+export const useAgentStore = create<AgentState>((set, get) => ({
+  sessionId: newSessionId(),
+  entries: [],
+  input: '',
+  running: false,
+  status: null,
+  error: '',
+  projectPath: '',
+  sessions: [],
+
+  setInput: (v) => set({ input: v }),
+  setError: (v) => set({ error: v }),
+  setProjectPath: (v) => set({ projectPath: v }),
+  setRunState: (running, status) => set({ running, status }),
+  pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }] })),
+  pushTerminal: (outcome, text) =>
+    set((s) => ({ entries: [...s.entries, { kind: 'terminal', outcome, text }] })),
+  startNewChat: () =>
+    set({ sessionId: newSessionId(), entries: [], status: null, error: '', input: '' }),
+  loadSession: (s) =>
+    set({
+      sessionId: s.id,
+      entries: (s.entries as Entry[]) ?? [],
+      projectPath: s.project_path ?? '',
+      status: null,
+      error: '',
+    }),
+  refreshSessions: async () => {
+    try {
+      set({ sessions: await invoke<AgentSessionMeta[]>('list_agent_sessions') });
+    } catch {
+      // 后端不可用（本地调试）时忽略
+    }
+  },
+  saveSession: async (id) => {
+    const { entries, projectPath } = get();
+    if (entries.length === 0) return;
+    const firstUser = entries.find((e): e is Extract<Entry, { kind: 'user' }> => e.kind === 'user');
+    const title = firstUser ? firstUser.text.slice(0, 30) : 'Agent 会话';
+    const projectName =
+      useWorkspaceStore.getState().projects.find((p) => p.path === projectPath)?.name ?? '';
+    try {
+      await invoke('save_agent_session', {
+        id: id ?? get().sessionId,
+        projectPath,
+        projectName,
+        title,
+        entries,
+      });
+      await get().refreshSessions();
+    } catch (e) {
+      console.error('保存会话失败', e);
+    }
+  },
+}));
+
+// ===== 模块级单例事件监听 =====
+
+let listenersAttached = false;
+
+/**
+ * 挂载 agent-event 监听（幂等）。必须在页面组件 mount 时调用一次；
+ * 页面卸载后监听不拆除，事件持续写入 store，实现「切页对话不丢」。
+ */
+export function ensureAgentListeners(): void {
+  if (listenersAttached) return;
+  listenersAttached = true;
+  listen<AgentEnvelope>('agent-event', (e) => {
+    const env = e.payload;
+    const st = useAgentStore.getState();
+    if (env.session_id !== st.sessionId) return; // 旧会话残余事件
+
+    if (env.type === 'status_changed') {
+      useAgentStore.setState({ status: env.status ?? null });
+      return;
+    }
+
+    if (
+      env.type === 'run_completed' ||
+      env.type === 'run_failed' ||
+      env.type === 'run_cancelled'
+    ) {
+      // 先归并终态条目（setState 同步生效），再收运行标志、落盘
+      useAgentStore.setState((s) => ({ entries: applyEnvelope(s.entries, env) }));
+      useAgentStore.setState({ running: false, status: null });
+      void st.saveSession();
+      return;
+    }
+
+    useAgentStore.setState((s) => ({ entries: applyEnvelope(s.entries, env) }));
+  }).catch(() => {
+    // Tauri 不可用（纯 web 调试）时允许下次重试
+    listenersAttached = false;
+  });
+}

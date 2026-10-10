@@ -187,8 +187,8 @@ body .content:has(.agent-root) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  // 右侧不留 padding，滚动条贴面板边缘
-  padding: 16px 0 16px 16px;
+  // 右侧 16px 与 dock 外边距对齐；滚动条仍贴容器右缘（在 padding 外侧）
+  padding: 16px 16px;
 }
 
 /* ===== 空状态 ===== */

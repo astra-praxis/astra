@@ -1528,6 +1528,7 @@ pub fn run() {
             user_skills::list_user_skills,
             user_skills::create_user_skill,
             user_skills::import_user_skill,
+            user_skills::sync_global_skills,
             user_skills::list_user_skill_files,
             user_skills::read_user_skill_file,
             user_skills::write_user_skill_file,

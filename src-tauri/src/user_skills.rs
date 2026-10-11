@@ -4,17 +4,19 @@
 //! 供「我的 Skills」页面导入/新建/多文件编辑，并供 Agent 通过
 //! list_skills / read_skill 工具发现与读取、通过 /技能名 直接调用。
 //!
-//! 分层：核心逻辑全部基于目录路径（可单测），#[tauri::command] 只做薄包装。
-//! 路径安全：技能名与文件相对路径均校验，读取走 agent_core::ensure_within_root
-//! （canonicalize 含符号链接逃逸拦截）。
+//! 分层：读路径（摘要/读取/校验）与 Agent 工具共用 agent-core 的
+//! skill_tools 实现（re-export，避免双份逻辑漂移）；本文件保留写操作
+//! （新建/导入/同步/删除）与目录级元数据（display_name/file_count）。
+
+pub use agent_core::skill_tools::{
+    read_skill_content, summary_in, validate_rel_path, validate_skill_name,
+};
 
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
-/// 单个技能文件读取上限（字符数），超过截断并提示
-const SKILL_READ_MAX_CHARS: usize = 30_000;
 /// 目录递归统计/列举的条目上限（防异常大目录拖垮 UI）
 const WALK_MAX_ENTRIES: usize = 1000;
 
@@ -35,12 +37,7 @@ pub struct UserSkillFile {
     pub size: u64,
 }
 
-/// Agent 侧的轻量摘要（注入 system prompt / 前端 / 弹窗）
-#[derive(Debug, Clone)]
-pub struct SkillSummary {
-    pub name: String,
-    pub description: String,
-}
+/// Agent 侧的轻量摘要类型由 agent-core::skill_tools 提供（见文件头 re-export）
 
 /// 全局技能同步报告（~/.agents/skills → 应用技能库，覆盖语义）
 #[derive(Debug, Serialize)]
@@ -53,45 +50,7 @@ pub struct SyncReport {
     pub skipped: Vec<(String, String)>,
 }
 
-// ===== 校验 =====
-
-/// 技能名（目录名）校验：非空、不以 . 开头、不含路径分隔符与 ..
-pub fn validate_skill_name(name: &str) -> Result<(), String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("技能名不能为空".into());
-    }
-    if name.starts_with('.') {
-        return Err("技能名不能以 . 开头".into());
-    }
-    if name == "." || name == ".." {
-        return Err("技能名非法".into());
-    }
-    if name.contains('/') || name.contains('\\') {
-        return Err("技能名不能包含路径分隔符".into());
-    }
-    Ok(())
-}
-
-/// 技能内文件相对路径校验：拒绝绝对路径、.. 分量、\ 分隔符
-pub fn validate_rel_path(rel: &str) -> Result<(), String> {
-    if rel.trim().is_empty() {
-        return Err("文件路径不能为空".into());
-    }
-    if rel.starts_with('/') {
-        return Err("文件路径必须是相对路径".into());
-    }
-    if rel.contains('\\') {
-        return Err("文件路径请使用 / 分隔".into());
-    }
-    if Path::new(rel)
-        .components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return Err("文件路径不能包含 ..".into());
-    }
-    Ok(())
-}
+// ===== 校验（实现在 agent-core::skill_tools，此处 re-export） =====
 
 // ===== 目录级核心逻辑（可单测） =====
 
@@ -234,17 +193,6 @@ pub fn list_in(dir: &Path) -> Vec<UserSkillMeta> {
     skills
 }
 
-/// Agent 用摘要列表（name + description）
-pub fn summary_in(dir: &Path) -> Vec<SkillSummary> {
-    list_in(dir)
-        .into_iter()
-        .map(|m| SkillSummary {
-            name: m.name,
-            description: m.description,
-        })
-        .collect()
-}
-
 /// 新建技能：创建目录 + SKILL.md 脚手架
 pub fn create_skill_in(dir: &Path, name: &str, description: &str) -> Result<(), String> {
     validate_skill_name(name)?;
@@ -357,28 +305,6 @@ pub fn sync_global_skills_into(lib_dir: &Path, global_dir: &Path) -> Result<Sync
         }
     }
     Ok(report)
-}
-
-/// 读取技能内容：默认 SKILL.md，可指定技能内相对路径。超长截断。
-pub fn read_skill_content(dir: &Path, name: &str, file: Option<&str>) -> Result<String, String> {
-    validate_skill_name(name)?;
-    let skill_dir = dir.join(name.trim());
-    if !skill_dir.is_dir() {
-        return Err(format!("技能 '{name}' 不存在"));
-    }
-    let rel = file.unwrap_or("SKILL.md");
-    validate_rel_path(rel)?;
-    let full = agent_core::ensure_within_root(&skill_dir, Path::new(rel))
-        .map_err(|e| format!("路径校验失败: {e}"))?;
-    let content =
-        fs::read_to_string(skill_dir.join(full)).map_err(|e| format!("读取技能文件失败: {e}"))?;
-    if content.chars().count() > SKILL_READ_MAX_CHARS {
-        let truncated: String = content.chars().take(SKILL_READ_MAX_CHARS).collect();
-        return Ok(format!(
-            "{truncated}\n\n（内容超过 {SKILL_READ_MAX_CHARS} 字符已截断；如需更多内容请用 file 参数按文件分段读取）"
-        ));
-    }
-    Ok(content)
 }
 
 /// 写入技能内文件（父目录自动创建）

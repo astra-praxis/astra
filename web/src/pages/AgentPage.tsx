@@ -25,6 +25,7 @@ import {
   FolderOpen,
   History,
   Sparkles,
+  HelpCircle,
   Loader2,
   Plus,
   Square,
@@ -62,9 +63,14 @@ const STATUS_LABEL: Record<string, string> = {
 // 权限确认卡文案按工具区分（未收录的工具用兜底文案）
 const PERM_ACTION_LABEL: Record<string, string> = {
   write_file: '请求写入文件',
+  edit_file: '请求修改文件',
+  copy_path: '请求复制文件/目录',
+  move_path: '请求移动/重命名',
+  create_directory: '请求创建目录',
   shell_execute: '请求执行命令',
   build_docx: '请求生成 docx 文档',
   extract_document: '请求转换文档为 Markdown',
+  fetch: '请求抓取网页',
   read_file: '请求读取文件',
   list_files: '请求列出目录',
 };
@@ -291,6 +297,13 @@ export default function AgentPage() {
     [setError],
   );
 
+  const handleAnswer = useCallback(
+    (questionId: string, answer: string | null) => {
+      void useAgentStore.getState().answerQuestion(questionId, answer);
+    },
+    [],
+  );
+
   // ===== @ 提及 + / 技能输入处理 =====
 
   function handleTextareaChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -484,7 +497,14 @@ export default function AgentPage() {
             )}
 
             {entries.map((e, i) => (
-              <EntryView key={i} entry={e} onDecide={handleDecide} skills={skills} fileSet={fileSet} />
+              <EntryView
+                key={i}
+                entry={e}
+                onDecide={handleDecide}
+                onAnswer={handleAnswer}
+                skills={skills}
+                fileSet={fileSet}
+              />
             ))}
 
             {running && (
@@ -632,11 +652,13 @@ function parseUserRefs(
 function EntryView({
   entry,
   onDecide,
+  onAnswer,
   skills,
   fileSet,
 }: {
   entry: Entry;
   onDecide: (callId: string, allow: boolean) => Promise<void>;
+  onAnswer: (questionId: string, answer: string | null) => void;
   skills: UserSkillLite[];
   fileSet: Set<string>;
 }) {
@@ -687,6 +709,8 @@ function EntryView({
       );
     case 'tool':
       return <ToolEntry entry={entry} onDecide={onDecide} />;
+    case 'question':
+      return <QuestionEntry entry={entry} onAnswer={onAnswer} />;
     case 'permission': {
       const pending = entry.state === 'pending';
       const label = PERM_ACTION_LABEL[entry.toolName] ?? '请求执行操作';
@@ -739,6 +763,78 @@ function EntryView({
   }
 }
 
+// ===== 提问卡（ask_user：选项按钮 + 自由文本；答案 verbatim 回传模型） =====
+
+function QuestionEntry({
+  entry,
+  onAnswer,
+}: {
+  entry: Extract<Entry, { kind: 'question' }>;
+  onAnswer: (questionId: string, answer: string | null) => void;
+}) {
+  const [freeText, setFreeText] = useState('');
+  const answered = entry.answer !== undefined || entry.declined;
+  return (
+    <div className="aentry aentry--question is-answered">
+      <div className="aentry__q-head">
+        <HelpCircle size={14} strokeWidth={1.8} />
+        <span>{entry.question}</span>
+      </div>
+      {answered ? (
+        <div className={`aentry__q-state${entry.declined ? ' is-declined' : ''}`}>
+          {entry.declined ? '未回答' : `你的回答：${entry.answer}`}
+        </div>
+      ) : (
+        <div className="aentry__q-body">
+          {entry.options.length > 0 && (
+            <div className="aentry__q-options">
+              {entry.options.map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => onAnswer(entry.questionId, o)}
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+          )}
+          {entry.allowFreeText && (
+            <div className="aentry__q-free">
+              <input
+                type="text"
+                value={freeText}
+                placeholder={entry.options.length > 0 ? '或输入自定义回答…' : '输入你的回答…'}
+                onChange={(e) => setFreeText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && freeText.trim()) {
+                    onAnswer(entry.questionId, freeText.trim());
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="is-allow"
+                disabled={!freeText.trim()}
+                onClick={() => onAnswer(entry.questionId, freeText.trim())}
+              >
+                <Check size={13} strokeWidth={2} />
+                回答
+              </button>
+            </div>
+          )}
+          <div className="aentry__q-actions">
+            <button type="button" className="is-deny" onClick={() => onAnswer(entry.questionId, null)}>
+              <X size={13} strokeWidth={2} />
+              取消回答
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== 工具卡片（结果默认折叠，点击展开，避免大段文件/终端输出刷屏） =====
 
 function ToolEntry({
@@ -752,13 +848,19 @@ function ToolEntry({
   const [expanded, setExpanded] = useState(false);
   const hasBody = !!(entry.result || (entry.artifacts && entry.artifacts.length > 0));
   const perm = entry.perm;
-  // 写文件类工具展示完整内容，shell 展示完整命令（args 由 tool_call_started 事件携带，旧会话无此字段）
+  // 写文件类工具展示完整内容，shell 展示完整命令，edit 展示新旧文本对照
+  // （args 由 tool_call_started 事件携带，旧会话无此字段）
   const contentPreview =
     entry.args && typeof entry.args.content === 'string'
       ? entry.args.content
-      : entry.toolName === 'shell_execute' && entry.args && typeof entry.args.command === 'string'
-        ? entry.args.command
-        : undefined;
+      : entry.toolName === 'edit_file' &&
+        entry.args &&
+        typeof entry.args.old_text === 'string' &&
+        typeof entry.args.new_text === 'string'
+        ? `- ${entry.args.old_text}\n+ ${entry.args.new_text}`
+        : entry.toolName === 'shell_execute' && entry.args && typeof entry.args.command === 'string'
+          ? entry.args.command
+          : undefined;
   const previewLines = contentPreview ? contentPreview.split('\n').length : 0;
   return (
     <div className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}>

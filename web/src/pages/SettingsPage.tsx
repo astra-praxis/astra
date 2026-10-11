@@ -21,6 +21,7 @@ interface AppSettings {
   workspaces: WorkspaceConfig[];
   active_workspace: string | null;
   scan_depth: number;
+  search_endpoint?: string | null;
 }
 
 interface WorkspaceConfig {
@@ -63,6 +64,8 @@ export default function SettingsPage() {
   const setMaxTurns = useAgentStore((s) => s.setMaxTurns);
   const autoCompactTokens = useAgentStore((s) => s.autoCompactTokens);
   const setAutoCompactTokens = useAgentStore((s) => s.setAutoCompactTokens);
+  // Agent search_web 的 SearXNG 实例地址（可选；空 = 用 DuckDuckGo）
+  const [searchEndpoint, setSearchEndpoint] = useState('');
 
   // ===== 加载设置 =====
   useEffect(() => {
@@ -80,6 +83,7 @@ export default function SettingsPage() {
         setWorkspaces(settings.workspaces);
         setActiveWorkspace(settings.active_workspace);
         setScanDepth(settings.scan_depth || 3);
+        setSearchEndpoint(settings.search_endpoint ?? '');
 
         // 检查当前设置是否在预设中
         const match = presetEditors.find((e) => e.command === settings.editor.command);
@@ -139,6 +143,7 @@ export default function SettingsPage() {
           workspaces,
           active_workspace: activeWorkspace,
           scan_depth: scanDepth,
+          search_endpoint: searchEndpoint.trim() || null,
         },
       });
 
@@ -473,6 +478,21 @@ export default function SettingsPage() {
               const n = Number(e.target.value);
               if (Number.isFinite(n) && n >= 0) setAutoCompactTokens(n);
             }}
+          />
+        </div>
+        <div className="agent-perm-row">
+          <div className="agent-perm-text">
+            <span className="agent-perm-title">搜索服务地址（可选）</span>
+            <span className="agent-perm-desc">
+              Agent 的 search_web 工具默认用 DuckDuckGo（部分网络不可达）。填写一个 SearXNG 实例地址（如 https://searx.example.org）可切换到该实例，保存后新会话生效。
+            </span>
+          </div>
+          <input
+            type="text"
+            value={searchEndpoint}
+            placeholder="https://searx.example.org"
+            className="agent-perm-input agent-perm-input--wide"
+            onChange={(e) => setSearchEndpoint(e.target.value)}
           />
         </div>
       </div>

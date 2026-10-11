@@ -232,6 +232,10 @@
   &:focus {
     border-color: var(--accent, var(--brand-500));
   }
+
+  &--wide {
+    width: 240px;
+  }
 }
 
 .theme-grid {

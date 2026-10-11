@@ -66,6 +66,17 @@ export type Entry =
       summary: string;
       state: PermState;
     }
+  | {
+      kind: 'question';
+      questionId: string;
+      question: string;
+      options: string[];
+      allowFreeText: boolean;
+      /** 已回答的答案（verbatim 展示） */
+      answer?: string;
+      /** 用户取消/拒绝回答 */
+      declined?: boolean;
+    }
   | { kind: 'terminal'; outcome: 'completed' | 'failed' | 'cancelled'; text?: string };
 
 export function newSessionId(): string {
@@ -187,6 +198,15 @@ export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
   }
 }
 
+/** agent-question 事件载荷（ask_user 提问卡） */
+export interface AgentQuestionPayload {
+  session_id: string;
+  question_id: string;
+  question: string;
+  options: string[];
+  allow_free_text: boolean;
+}
+
 // ===== Store =====
 
 interface AgentState {
@@ -219,6 +239,10 @@ interface AgentState {
   setRunState: (running: boolean, status: string | null) => void;
   pushUser: (text: string) => void;
   pushTerminal: (outcome: 'completed' | 'failed' | 'cancelled', text?: string) => void;
+  /** 收到 ask_user 提问事件（追加问题卡条目） */
+  pushQuestion: (q: AgentQuestionPayload) => void;
+  /** 回答问题卡：answer 为 null 表示取消（本地立即置态，后端 oneshot 解析） */
+  answerQuestion: (questionId: string, answer: string | null) => Promise<void>;
   /** 新对话：重置会话（旧会话保存由调用方先行调用 saveSession） */
   startNewChat: () => void;
   /** 从历史面板恢复会话（只读回放 + 续聊重新建 Thread） */
@@ -269,6 +293,36 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }] })),
   pushTerminal: (outcome, text) =>
     set((s) => ({ entries: [...s.entries, { kind: 'terminal', outcome, text }] })),
+  pushQuestion: (q) =>
+    set((s) => ({
+      entries: [
+        ...s.entries,
+        {
+          kind: 'question',
+          questionId: q.question_id,
+          question: q.question,
+          options: q.options,
+          allowFreeText: q.allow_free_text,
+        },
+      ],
+    })),
+  answerQuestion: async (questionId, answer) => {
+    // 本地先置态（回答/取消后卡片禁用），后端 oneshot 解析由 invoke 完成
+    set((s) => ({
+      entries: s.entries.map((e) =>
+        e.kind === 'question' && e.questionId === questionId
+          ? answer === null
+            ? { ...e, declined: true }
+            : { ...e, answer }
+          : e,
+      ),
+    }));
+    try {
+      await invoke('agent_question_answer', { questionId, answer });
+    } catch (e) {
+      console.error('回答提交失败', e);
+    }
+  },
   startNewChat: () =>
     set({ sessionId: newSessionId(), entries: [], status: null, error: '', input: '' }),
   loadSession: (s) =>
@@ -328,6 +382,13 @@ export function ensureAgentListeners(): void {
       useAgentStore.setState({ status: env.status ?? null });
       return;
     }
+
+    // ask_user 提问事件（独立于 Envelope 流，载荷自带 session_id 过滤旧会话）
+    listen<AgentQuestionPayload>('agent-question', (e) => {
+      const q = e.payload;
+      if (q.session_id !== useAgentStore.getState().sessionId) return;
+      useAgentStore.getState().pushQuestion(q);
+    }).catch(() => {});
 
     if (
       env.type === 'run_completed' ||

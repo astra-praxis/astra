@@ -684,6 +684,136 @@ body .content:has(.agent-root) {
   }
 }
 
+/* ===== 提问卡（ask_user） ===== */
+
+.aentry--question {
+  align-self: stretch;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--info-50, var(--bg-surface));
+  border: 1px solid var(--info-300, var(--border-color));
+  border-radius: 12px;
+  font-size: 12.5px;
+
+  .aentry__q-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--info-700, var(--text-primary));
+    font-weight: 600;
+    line-height: 1.45;
+  }
+
+  .aentry__q-state {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+
+    &.is-declined {
+      color: var(--text-muted);
+    }
+  }
+
+  .aentry__q-body {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .aentry__q-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+
+    button {
+      padding: 5px 14px;
+      font-size: 12px;
+      color: var(--info-700, var(--text-primary));
+      background: var(--bg-surface);
+      border: 1px solid var(--info-300, var(--border-color));
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+
+      &:hover {
+        background: var(--info-100, var(--bg-surface-soft));
+      }
+    }
+  }
+
+  .aentry__q-free {
+    display: flex;
+    gap: 6px;
+
+    input {
+      flex: 1;
+      padding: 5px 10px;
+      font-size: 12.5px;
+      color: var(--text-primary);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      outline: none;
+
+      &:focus {
+        border-color: var(--info-500, var(--brand-500));
+      }
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 14px;
+      font-size: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+
+      &.is-allow {
+        color: #fff;
+        background: var(--success-600);
+        border: 1px solid var(--success-600);
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        &:hover:not(:disabled) {
+          background: var(--success-700);
+        }
+      }
+    }
+  }
+
+  .aentry__q-actions {
+    display: flex;
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 14px;
+      font-size: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+
+      &.is-deny {
+        color: var(--danger-700);
+        background: transparent;
+        border: 1px solid var(--danger-300);
+
+        &:hover {
+          background: var(--danger-50);
+        }
+      }
+    }
+  }
+}
+
 /* ===== 终态条 ===== */
 
 .aentry--terminal {

@@ -32,4 +32,14 @@ pub enum Error {
     Other(String),
 }
 
+impl Error {
+    /// 工具错误的便捷构造（各工具模块共用）
+    pub fn tool(tool: &str, message: impl Into<String>) -> Self {
+        Error::Tool {
+            tool: tool.into(),
+            message: message.into(),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;

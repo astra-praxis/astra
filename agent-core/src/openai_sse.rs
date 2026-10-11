@@ -16,8 +16,9 @@ use crate::model::{ChatMessage, MessageContent, ModelRequest, Role};
 
 // ===== 请求构造 =====
 
-/// 把平铺消息块序列转成 OpenAI messages 数组。
-/// - User 文本 → user；User ToolResult → role:"tool"（openai 协议要求独立消息）
+/// 把平铺消息块序列转成 OpenAI messages 数组（单遍，严格保序）。
+/// - User 文本 → user；User ToolResult → role:"tool"（openai 协议要求独立消息，
+///   排在同一条 user 消息的文本之后）
 /// - Assistant 文本/ToolUse → assistant（ToolUse 进 tool_calls 数组）
 /// - Compaction → user + 前缀说明（与原 rig 实现一致）
 /// - System → system；空消息列表回退空 user
@@ -32,14 +33,41 @@ pub fn to_openai_messages(messages: &[ChatMessage]) -> Vec<Value> {
                 let text = texts_of(&m.content);
                 out.push(json!({"role": "system", "content": text}));
             }
-            Role::User | Role::Compaction => {
+            Role::Compaction => {
                 let summary = texts_of(&m.content);
-                let text = if m.role == Role::Compaction {
-                    Role::compaction_prefixed(&summary)
-                } else {
-                    summary
-                };
-                out.push(json!({"role": "user", "content": text}));
+                out.push(json!({"role": "user", "content": Role::compaction_prefixed(&summary)}));
+            }
+            Role::User => {
+                let mut texts: Vec<String> = Vec::new();
+                for c in &m.content {
+                    if let MessageContent::Text { text } = c {
+                        texts.push(text.clone());
+                    }
+                }
+                // 文本部分（如有）在前
+                if !texts.is_empty() {
+                    out.push(json!({"role": "user", "content": texts.join("\n")}));
+                }
+                // ToolResult 展开为独立 tool 消息
+                for c in &m.content {
+                    if let MessageContent::ToolResult {
+                        call_id,
+                        content,
+                        is_error,
+                    } = c
+                    {
+                        let body = if *is_error {
+                            format!("[错误] {content}")
+                        } else {
+                            content.clone()
+                        };
+                        out.push(json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": body,
+                        }));
+                    }
+                }
             }
             Role::Assistant => {
                 let mut text = String::new();
@@ -70,55 +98,7 @@ pub fn to_openai_messages(messages: &[ChatMessage]) -> Vec<Value> {
             }
         }
     }
-    // ToolResult 块按 openai 协议转成独立 role:"tool" 消息，排在所属 assistant 之后。
-    // 同一条 User 消息里的文本也要保留（放 tool 消息之后作为补充 user 消息）
-    let mut final_out: Vec<Value> = Vec::with_capacity(out.len() + 2);
-    for m in messages {
-        match m.role {
-            Role::User | Role::Compaction => {
-                let mut texts: Vec<String> = Vec::new();
-                for c in &m.content {
-                    if let MessageContent::Text { text } = c {
-                        texts.push(text.clone());
-                    }
-                }
-                // 先放这条 user 的纯文本（如有）
-                if !texts.is_empty() || m.role == Role::Compaction {
-                    let text = texts.join("\n");
-                    let text = if m.role == Role::Compaction {
-                        // compaction 消息的原文整体加前缀
-                        let summary = texts_of(&m.content);
-                        Role::compaction_prefixed(&summary)
-                    } else {
-                        text
-                    };
-                    final_out.push(json!({"role": "user", "content": text}));
-                }
-                // 再把其中的 ToolResult 展开为独立 tool 消息
-                for c in &m.content {
-                    if let MessageContent::ToolResult {
-                        call_id,
-                        content,
-                        is_error,
-                    } = c
-                    {
-                        let body = if *is_error {
-                            format!("[错误] {content}")
-                        } else {
-                            content.clone()
-                        };
-                        final_out.push(json!({
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": body,
-                        }));
-                    }
-                }
-            }
-            _ => final_out.push(out.remove(0)),
-        }
-    }
-    final_out
+    out
 }
 
 /// 提取内容块里的全部文本（拼接）
@@ -471,6 +451,33 @@ mod tests {
         assert_eq!(out[0]["content"], "顺便");
         assert_eq!(out[1]["role"], "tool");
         assert_eq!(out[1]["content"], "[错误] 结果");
+    }
+
+    #[test]
+    fn multi_turn_tool_loop_order_strictly_preserved() {
+        // 回归测试：旧的两遍转换会把 user 消息重复、丢失尾部 assistant。
+        // 场景：完整一轮工具调用 + 最终回答，共 5 条消息。
+        let msgs = vec![
+            user("hi"),
+            assistant_tool_use("t1", "read_file", json!({"path": "a.txt"})),
+            tool_result("t1", "文件内容"),
+            user("继续"),
+            ChatMessage {
+                role: Role::Assistant,
+                content: vec![MessageContent::text("done")],
+            },
+        ];
+        let out = to_openai_messages(&msgs);
+        let roles: Vec<&str> = out.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(
+            roles,
+            vec!["user", "assistant", "tool", "user", "assistant"],
+            "消息顺序必须严格保持"
+        );
+        assert_eq!(out[1]["tool_calls"][0]["id"], "t1");
+        assert_eq!(out[2]["tool_call_id"], "t1");
+        assert_eq!(out[3]["content"], "继续");
+        assert_eq!(out[4]["content"], "done");
     }
 
     #[test]

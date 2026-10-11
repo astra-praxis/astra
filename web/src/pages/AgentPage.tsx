@@ -14,6 +14,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import {
   ArrowRight,
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -48,7 +49,7 @@ import SlashPopup from './chat/SlashPopup';
 import SettingsSheet from './chat/SettingsSheet';
 import { parseSlashCommand, useSlash, type UserSkillLite } from '@/hooks/useSlash';
 import AgentHistoryPanel, { type AgentSessionMeta } from './AgentHistoryPanel';
-import { ThinkingBlock } from '@/components/agent/ThinkingBlock';
+import { StreamBlock } from '@/components/agent/StreamBlock';
 import './AgentPage.scss';
 
 // 事件模型与条目类型见 stores/agent.ts（全局会话状态的唯一事实来源）
@@ -709,7 +710,7 @@ function EntryView({
         </div>
       );
     case 'thinking':
-      return <ThinkingBlock text={entry.text} done={entry.done} />;
+      return <StreamBlock text={entry.text} done={entry.done} title="思考过程" icon={<Brain size={13} strokeWidth={1.8} />} />;
     case 'tool':
       return <ToolEntry entry={entry} onDecide={onDecide} />;
     case 'question':
@@ -928,7 +929,6 @@ function ToolEntry({
   onDecide: (callId: string, allow: boolean) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const hasBody = !!(entry.result || (entry.artifacts && entry.artifacts.length > 0));
   const perm = entry.perm;
   // 写文件类工具展示完整内容，shell 展示完整命令，edit 展示新旧文本对照
@@ -951,7 +951,18 @@ function ToolEntry({
       ? extractPartialArgsPreview(entry.toolName, entry.argsStreaming)
       : undefined;
   const previewText = contentPreview ?? streamingPreview;
-  const previewLines = previewText ? previewText.split('\n').length : 0;
+  // 内容已完成 = args 已到齐（区别于流式生成中）；驱动 StreamBlock 自动收起
+  const previewDone = contentPreview !== undefined;
+  const previewTitle =
+    entry.toolName === 'write_file'
+      ? '写入内容'
+      : entry.toolName === 'read_file'
+        ? '文件内容'
+        : entry.toolName === 'edit_file'
+          ? '修改对照'
+          : entry.toolName === 'shell_execute'
+            ? '命令'
+            : '参数';
   return (
     <div className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}>
       <button
@@ -988,22 +999,13 @@ function ToolEntry({
         )}
       </button>
       {previewText && (
-        <div className="aentry__tool-body is-preview">
-          <pre className={`aentry__tool-content${previewLines > 12 && !expanded ? ' is-clamped' : ''}`}>{previewText}</pre>
-          {previewLines > 12 && (
-            <button
-              type="button"
-              className="aentry__tool-content-toggle"
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpanded((v) => !v);
-              }}
-            >
-              <ChevronDown size={12} strokeWidth={2} className={expanded ? 'rotated' : ''} />
-              {expanded ? '收起内容' : `查看全部内容（${previewLines} 行）`}
-            </button>
-            )}
-        </div>
+        <StreamBlock
+          variant="tool"
+          title={previewTitle}
+          icon={<FileText size={12} strokeWidth={1.8} />}
+          text={previewText}
+          done={previewDone}
+        />
       )}
       {/* Confirm 工具的批准/拒绝直接内嵌在卡片里 */}
       {perm?.state === 'pending' && (

@@ -465,56 +465,7 @@ body .content:has(.agent-root) {
     border-radius: 8px;
   }
 
-  // 工具参数内容预览（write_file 内容 / shell 完整命令），默认折叠限高
-  .aentry__tool-content {
-    margin: 0;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 11.5px;
-    line-height: 1.55;
-    color: var(--text-secondary);
-    white-space: pre-wrap;
-    word-break: break-word;
-    padding: 6px 8px;
-    background: var(--bg-surface-soft, var(--bg-surface));
-    border: 1px solid var(--divider, var(--border-color));
-    border-radius: 8px;
-
-    &.is-clamped {
-      max-height: 20.15em; // 约 12 行 + 渐隐提示
-      overflow: hidden;
-      mask-image: linear-gradient(to bottom, #000 80%, transparent);
-      -webkit-mask-image: linear-gradient(to bottom, #000 80%, transparent);
-    }
-  }
-
-  .aentry__tool-content-toggle {
-    align-self: flex-start;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 2px 6px;
-    font: inherit;
-    font-size: 11px;
-    color: var(--brand-600);
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: color 0.12s ease, background 0.12s ease;
-
-    svg {
-      transition: transform 0.15s ease;
-
-      &.rotated {
-        transform: rotate(180deg);
-      }
-    }
-
-    &:hover {
-      color: var(--brand-700);
-      background: var(--brand-50);
-    }
-  }
+  // 工具参数内容预览已改用 StreamBlock 组件（components/agent/StreamBlock）
 
   .aentry__perm-inline {
     margin-top: 8px;

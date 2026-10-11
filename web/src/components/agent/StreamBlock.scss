@@ -1,4 +1,4 @@
-.thinking-block {
+.stream-block {
   align-self: stretch;
   width: 100%;
   padding: 6px 12px;
@@ -48,5 +48,15 @@
     overflow-y: auto;
     padding: 6px 8px;
     border-left: 2px solid var(--divider, var(--border-color));
+  }
+
+  // 工具内容变体：正文更亮一点、左边线用品牌色，与思考块区分
+  &--tool {
+    background: var(--bg-surface);
+
+    .stream-block__body {
+      color: var(--text-secondary);
+      border-left-color: var(--brand-300);
+    }
   }
 }

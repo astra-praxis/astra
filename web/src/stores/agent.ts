@@ -52,6 +52,8 @@ export type Entry =
       /** 模型思考过程（reasoning），流式追加；参考 Zed 的 thinking 块 */
       kind: 'thinking';
       text: string;
+      /** 思考结束（后续事件到达即视为结束）；历史恢复的条目缺省视为已完成 */
+      done?: boolean;
     }
   | {
       kind: 'tool';
@@ -101,6 +103,21 @@ function parseAutoCompact(raw: string | null | undefined): number {
 
 /** Envelope → Entry 归并（纯函数，返回新数组） */
 export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
+  const next = applyEnvelopeInner(prev, env);
+  // 思考完成判定：任何非 thinking 增量到达，即标记末尾 thinking 条目已完成
+  //（UI 据此自动收起思考块）
+  if (env.type !== 'thinking_delta') {
+    const last = next[next.length - 1];
+    if (last && last.kind === 'thinking' && !last.done) {
+      const out = [...next];
+      out[out.length - 1] = { ...last, done: true };
+      return out;
+    }
+  }
+  return next;
+}
+
+function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
   switch (env.type) {
     case 'message_delta': {
       const text = env.text ?? '';

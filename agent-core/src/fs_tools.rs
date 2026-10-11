@@ -108,7 +108,7 @@ impl AgentTool for SearchFiles {
         "search_files"
     }
     fn description(&self) -> &str {
-        "在项目内按正则搜索文件内容，返回「路径:行号: 内容」。\
+        "在项目内按正则搜索文件内容，返回「路径:行号: 内容」。path 可传目录或单个文件；\
          大项目建议用 include 按文件名缩小范围（如 \"*.md\"）；超上限时缩小 pattern 或路径重搜"
     }
     fn parameters_schema(&self) -> Value {
@@ -141,8 +141,11 @@ impl AgentTool for SearchFiles {
         };
         let base = ensure_within_root(&self.root, &PathBuf::from(sub))?;
         let base = self.root.join(&base);
-        // 输出给模型的路径必须相对项目根（可直接拿去 read_file）；base == root 时不加前缀
-        let prefix = if base == self.root {
+        // path 允许指向单个文件（模型常见用法）：只搜该文件
+        let single_file = base.is_file();
+        // 输出给模型的路径必须相对项目根（可直接拿去 read_file）；base == root 时不加前缀。
+        // 单文件搜索时 rel 已相对项目根，前缀必须为空。
+        let prefix = if single_file || base == self.root {
             String::new()
         } else {
             format!(
@@ -154,21 +157,37 @@ impl AgentTool for SearchFiles {
         };
 
         // 阻塞任务里同步遍历 + 读文件，避免占用异步线程
+        let root = self.root.clone();
+        // 单文件时 rel 相对项目根（prefix 已带子目录），目录时 rel 相对 base
+        let file_base = if single_file {
+            root.clone()
+        } else {
+            base.clone()
+        };
         let matches = tokio::task::spawn_blocking(move || {
             let mut files: Vec<String> = Vec::new();
-            collect_files(
-                &base,
-                &mut |rel| {
-                    matcher
-                        .as_ref()
-                        .map(|m| m.matches_path(Path::new(rel)))
-                        .unwrap_or(true)
-                },
-                &mut files,
-            );
+            if single_file {
+                files.push(
+                    base.strip_prefix(&root)
+                        .unwrap_or(&base)
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            } else {
+                collect_files(
+                    &base,
+                    &mut |rel| {
+                        matcher
+                            .as_ref()
+                            .map(|m| m.matches_path(Path::new(rel)))
+                            .unwrap_or(true)
+                    },
+                    &mut files,
+                );
+            }
             let mut out = Vec::new();
             'files: for rel in files {
-                let Ok(bytes) = std::fs::read(base.join(&rel)) else {
+                let Ok(bytes) = std::fs::read(file_base.join(&rel)) else {
                     continue;
                 };
                 // 二进制检测：首个 NUL 即视为二进制（对齐 grep 惯例）
@@ -667,6 +686,41 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(text, "未找到匹配");
+    }
+
+    /// path 传单个文件时只搜该文件（此前传文件路径会静默返回「未找到匹配」，
+    /// 迫使模型退化成分块 read_file，轮数和上下文双暴涨）
+    #[tokio::test]
+    async fn search_files_accepts_single_file_path() {
+        let root = tmp_root("search_file");
+        std::fs::write(root.join("doc.md"), "# 第一章\n正文\n# 第二章").unwrap();
+        std::fs::write(root.join("other.md"), "# 第一章").unwrap();
+        let tool = SearchFiles { root: root.clone() };
+        let text = text_of(
+            tool.call(json!({"pattern": "^# 第", "path": "doc.md"}), &ctx())
+                .await
+                .unwrap(),
+        );
+        // 只命中 doc.md 的两行，other.md 不参与
+        assert_eq!(text, "doc.md:1: # 第一章\ndoc.md:3: # 第二章");
+    }
+
+    /// 子目录内文件的 path 也要返回可直接 read_file 的相对路径
+    #[tokio::test]
+    async fn search_files_single_file_in_subdir() {
+        let root = tmp_root("search_file_sub");
+        std::fs::create_dir_all(root.join("out")).unwrap();
+        std::fs::write(root.join("out/converted.md"), "招标要求：质量优先").unwrap();
+        let tool = SearchFiles { root: root.clone() };
+        let text = text_of(
+            tool.call(
+                json!({"pattern": "招标", "path": "out/converted.md"}),
+                &ctx(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(text, "out/converted.md:1: 招标要求：质量优先");
     }
 
     #[tokio::test]

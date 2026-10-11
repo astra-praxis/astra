@@ -325,7 +325,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       await invoke('agent_question_answer', { questionId, answer });
     } catch (e) {
+      // 提交失败必须可见：否则工具挂起等回答，用户看到的是「永远在分析」
       console.error('回答提交失败', e);
+      set((s) => ({
+        error: `回答提交失败：${String(e)}`,
+        entries: s.entries.map((en) =>
+          en.kind === 'question' && en.questionId === questionId
+            ? { ...en, answer: undefined, declined: undefined }
+            : en,
+        ),
+      }));
     }
   },
   startNewChat: () =>

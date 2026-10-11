@@ -45,9 +45,13 @@ fn log_event(app: &AppHandle, env: &Envelope) {
     else {
         return;
     };
-    if let Ok(line) = serde_json::to_string(env) {
-        use std::io::Write;
-        let _ = writeln!(f, "{line}");
+    if let Ok(mut line) = serde_json::to_value(env) {
+        // 时间戳便于离线量化每步耗时（事件流本身无时序信息）
+        line["logged_at"] = Value::String(chrono::Local::now().to_rfc3339());
+        if let Ok(s) = serde_json::to_string(&line) {
+            use std::io::Write;
+            let _ = writeln!(f, "{s}");
+        }
     }
 }
 

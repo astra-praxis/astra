@@ -14,7 +14,6 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import {
   ArrowRight,
-  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -49,6 +48,7 @@ import SlashPopup from './chat/SlashPopup';
 import SettingsSheet from './chat/SettingsSheet';
 import { parseSlashCommand, useSlash, type UserSkillLite } from '@/hooks/useSlash';
 import AgentHistoryPanel, { type AgentSessionMeta } from './AgentHistoryPanel';
+import { ThinkingBlock } from '@/components/agent/ThinkingBlock';
 import './AgentPage.scss';
 
 // 事件模型与条目类型见 stores/agent.ts（全局会话状态的唯一事实来源）
@@ -709,7 +709,7 @@ function EntryView({
         </div>
       );
     case 'thinking':
-      return <ThinkingEntry text={entry.text} done={entry.done} />;
+      return <ThinkingBlock text={entry.text} done={entry.done} />;
     case 'tool':
       return <ToolEntry entry={entry} onDecide={onDecide} />;
     case 'question':
@@ -764,35 +764,6 @@ function EntryView({
         </div>
       );
   }
-}
-
-// ===== 思考过程块（reasoning 流式追加；参考 Zed 的 thinking 折叠块） =====
-
-function ThinkingEntry({ text, done }: { text: string; done?: boolean }) {
-  const finished = done ?? false;
-  const [open, setOpen] = useState(!finished);
-  const [userToggled, setUserToggled] = useState(false);
-  // 思考完成后自动收起（用户手动展开过则尊重用户选择）
-  useEffect(() => {
-    if (finished && !userToggled) setOpen(false);
-  }, [finished, userToggled]);
-  return (
-    <div className="aentry aentry--thinking">
-      <button
-        type="button"
-        className="aentry__thinking-head"
-        onClick={() => {
-          setUserToggled(true);
-          setOpen((v) => !v);
-        }}
-      >
-        <Brain size={13} strokeWidth={1.8} />
-        <span>思考过程</span>
-        <ChevronDown size={12} strokeWidth={2} className={`aentry__thinking-chev${open ? ' rotated' : ''}`} />
-      </button>
-      {open && <pre className="aentry__thinking-body">{text}</pre>}
-    </div>
-  );
 }
 
 // ===== 提问卡（ask_user：选项按钮 + 自由文本；答案 verbatim 回传模型） =====

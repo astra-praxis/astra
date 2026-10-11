@@ -104,15 +104,19 @@ function parseAutoCompact(raw: string | null | undefined): number {
 /** Envelope → Entry 归并（纯函数，返回新数组） */
 export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
   const next = applyEnvelopeInner(prev, env);
-  // 思考完成判定：任何非 thinking 增量到达，即标记末尾 thinking 条目已完成
-  //（UI 据此自动收起思考块）
+  // 思考完成判定：任何非 thinking 增量到达，当前流式思考即已结束。
+  // 注意不能只看末尾条目——后到的事件会先在 thinking 后面插入新条目，
+  // 所以要扫描所有未完成的 thinking 条目（UI 据此自动收起思考块）
   if (env.type !== 'thinking_delta') {
-    const last = next[next.length - 1];
-    if (last && last.kind === 'thinking' && !last.done) {
-      const out = [...next];
-      out[out.length - 1] = { ...last, done: true };
-      return out;
-    }
+    let changed = false;
+    const out = next.map((e) => {
+      if (e.kind === 'thinking' && !e.done) {
+        changed = true;
+        return { ...e, done: true };
+      }
+      return e;
+    });
+    return changed ? out : next;
   }
   return next;
 }

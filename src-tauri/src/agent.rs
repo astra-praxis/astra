@@ -78,42 +78,15 @@ pub fn agent_recent_events(app: AppHandle, limit: Option<u32>) -> Result<Vec<Val
 #[derive(Default)]
 pub struct PermissionHub {
     pending: Mutex<HashMap<String, oneshot::Sender<Decision>>>,
-    /// 「一键允许项目内 shell」开关：开启后工作目录在项目内的 shell_execute 自动 Allow
-    auto_shell: std::sync::atomic::AtomicBool,
-    /// 自动允许的项目根（agent_start_run 时与当前项目同步）
-    auto_shell_root: Mutex<Option<PathBuf>>,
+    /// 「放权模式」：开启后所有 Confirm 类工具直接 Allow，不再弹确认卡。
+    /// Deny 类硬规则（未注册工具、提权命令、路径逃逸）不受影响，仍在执行层拦截
+    auto_all: std::sync::atomic::AtomicBool,
 }
 
 impl PermissionHub {
-    pub fn set_auto_shell(&self, enabled: bool, root: Option<PathBuf>) {
+    pub fn set_auto_all(&self, enabled: bool) {
         use std::sync::atomic::Ordering;
-        self.auto_shell.store(enabled, Ordering::Relaxed);
-        *self.auto_shell_root.lock().unwrap() = root;
-    }
-
-    /// 开关开启时同步项目根（切换项目 / 新 Run 保持一致）
-    pub fn sync_auto_shell_root(&self, root: Option<PathBuf>) {
-        use std::sync::atomic::Ordering;
-        if self.auto_shell.load(Ordering::Relaxed) {
-            *self.auto_shell_root.lock().unwrap() = root;
-        }
-    }
-
-    /// 命中自动放行策略：shell_execute + 开关开 + 项目已绑定 + 命令 confined 在项目内。
-    /// 提权/系统级命令由工具执行时的内置规则拦截，与是否自动放行无关。
-    fn auto_allow_shell(&self, tool_name: &str, arguments: &serde_json::Value) -> bool {
-        use std::sync::atomic::Ordering;
-        if tool_name != "shell_execute" || !self.auto_shell.load(Ordering::Relaxed) {
-            return false;
-        }
-        let root = self.auto_shell_root.lock().unwrap().clone();
-        let Some(root) = root else {
-            return false;
-        };
-        let Some(command) = arguments.get("command").and_then(|v| v.as_str()) else {
-            return false;
-        };
-        agent_core::shell_tool::shell_command_project_confined(&root, command)
+        self.auto_all.store(enabled, Ordering::Relaxed);
     }
 
     fn register(&self, tool_call_id: String) -> oneshot::Receiver<Decision> {
@@ -141,13 +114,14 @@ impl PermissionHub {
 
 /// PermissionBridge 宿主实现：注册 oneshot 并等待前端决定。
 /// 发送端被清理（重置会话）时返回 Deny，保证不会挂死运行循环。
-/// 开启「项目内 shell 自动允许」时，confined 命令直接 Allow 跳过弹窗。
+/// 开启「放权模式」时所有 Confirm 直接 Allow 跳过弹窗（Deny 不经此桥，不受影响）。
 struct HubBridge(Arc<PermissionHub>);
 
 #[async_trait::async_trait]
 impl PermissionBridge for HubBridge {
     async fn request(&self, req: PermissionRequest) -> Decision {
-        if self.0.auto_allow_shell(&req.tool_name, &req.arguments) {
+        use std::sync::atomic::Ordering;
+        if self.0.auto_all.load(Ordering::Relaxed) {
             return Decision::Allow;
         }
         // tool_call_id 由 run_loop 生成并已通过 PermissionRequested 事件告知前端
@@ -394,9 +368,6 @@ pub async fn agent_start_run(
     let session_id = req.session_id;
     let user_text = req.user_text;
 
-    // 「项目内 shell 自动允许」的项目根与当前 Run 的项目保持一致（未绑项目时清除）
-    state.hub.sync_auto_shell_root(project_root.clone());
-
     // 2.5 技能库：注册发现/读取工具 + system prompt 注入摘要（跨会话复用，建 Thread 时生效）
     let skills_dir = crate::user_skills::app_skills_dir(&app).ok();
     let skills_summary = skills_dir
@@ -541,16 +512,11 @@ pub fn agent_question_answer(
     state.questions.answer(&question_id, answer)
 }
 
-/// 一键允许项目内 shell：开启后工作目录为项目根、且命令 confined 在项目内的
-/// shell_execute 自动 Allow（跳过确认弹窗）；其他工具与逃逸命令行为不变。
+/// 放权模式：开启后所有 Confirm 类工具（写文件 / 编辑 / shell / fetch / build_docx 等）
+/// 直接 Allow，不再弹确认卡；Deny 类硬规则不受影响，仍在执行层拦截。
 #[tauri::command]
-pub fn agent_set_auto_shell(
-    state: State<'_, AgentState>,
-    enabled: bool,
-    project_root: Option<String>,
-) {
-    let root = project_root.map(PathBuf::from);
-    state.hub.set_auto_shell(enabled, root);
+pub fn agent_set_auto_all(state: State<'_, AgentState>, enabled: bool) {
+    state.hub.set_auto_all(enabled);
 }
 
 /// 丢弃会话上下文（新对话 / 切换项目时调用）：取消运行、清挂起权限、删 Thread

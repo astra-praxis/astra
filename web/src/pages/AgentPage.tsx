@@ -101,15 +101,12 @@ export default function AgentPage() {
     ensureAgentListeners();
   }, []);
 
-  // 项目切换/应用重启后同步「项目内 shell 自动允许」的项目根到后端
+  // 应用重启后同步「放权模式」开关到后端（开关切换时 setAutoApprove 已实时同步）
   useEffect(() => {
-    if (useAgentStore.getState().autoShell) {
-      invoke('agent_set_auto_shell', {
-        enabled: true,
-        projectRoot: projectPath || null,
-      }).catch(() => {});
+    if (useAgentStore.getState().autoApprove) {
+      invoke('agent_set_auto_all', { enabled: true }).catch(() => {});
     }
-  }, [projectPath]);
+  }, []);
 
   // ===== 项目选择（绑定在 store；顶部工具栏选择文件夹，@ 只负责引用文件） =====
   const projects = useWorkspaceStore((s) => s.projects);

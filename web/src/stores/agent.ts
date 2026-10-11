@@ -286,8 +286,8 @@ interface AgentState {
   projectPath: string;
   /** 历史会话列表（save/list/delete 后经 refreshSessions 刷新） */
   sessions: AgentSessionMeta[];
-  /** 一键允许项目内 shell（ confined 在项目根的 shell_execute 跳过确认） */
-  autoShell: boolean;
+  /** 放权模式：开启后所有确认类操作自动批准，不再弹确认卡 */
+  autoApprove: boolean;
   /** Agent 最大续轮数（防无限工具循环预算，默认 50） */
   maxTurns: number;
   /** 上下文自动压缩阈值（估算 token 数，默认 60000，0 = 关闭） */
@@ -296,8 +296,8 @@ interface AgentState {
   setInput: (v: string) => void;
   setError: (v: string) => void;
   setProjectPath: (v: string) => void;
-  /** 切换项目内 shell 自动允许（同步到后端 + localStorage 持久化） */
-  setAutoShell: (v: boolean) => void;
+  /** 切换放权模式（同步到后端 + localStorage 持久化） */
+  setAutoApprove: (v: boolean) => void;
   /** 设置最大续轮数（localStorage 持久化，新会话生效） */
   setMaxTurns: (v: number) => void;
   /** 设置自动压缩阈值（localStorage 持久化，0 = 关闭） */
@@ -327,7 +327,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   error: '',
   projectPath: '',
   sessions: [],
-  autoShell: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-autoshell') === '1',
+  autoApprove: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-autoapprove') === '1',
   maxTurns: Number(localStorage?.getItem('astra-agent-maxturns')) || 50,
   autoCompactTokens: parseAutoCompact(localStorage?.getItem('astra-agent-autocompact')),
 
@@ -344,14 +344,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
   setError: (v) => set({ error: v }),
   setProjectPath: (v) => set({ projectPath: v }),
-  setAutoShell: (v) => {
-    set({ autoShell: v });
-    localStorage.setItem('astra-agent-autoshell', v ? '1' : '0');
-    const { projectPath } = get();
-    invoke('agent_set_auto_shell', {
-      enabled: v,
-      projectRoot: v && projectPath ? projectPath : null,
-    }).catch(() => {
+  setAutoApprove: (v) => {
+    set({ autoApprove: v });
+    localStorage.setItem('astra-agent-autoapprove', v ? '1' : '0');
+    invoke('agent_set_auto_all', { enabled: v }).catch(() => {
       // Tauri 不可用（纯 web 调试）时仅保留前端状态
     });
   },

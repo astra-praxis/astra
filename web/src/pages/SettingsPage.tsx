@@ -57,9 +57,9 @@ export default function SettingsPage() {
   // 扫描深度状态
   const [scanDepth, setScanDepth] = useState(3);
 
-  // Agent 权限：项目内 Shell 自动允许（全局偏好，进 Agent 页后同步到后端）
-  const autoShell = useAgentStore((s) => s.autoShell);
-  const setAutoShell = useAgentStore((s) => s.setAutoShell);
+  // Agent 权限：放权模式（全局偏好，进 Agent 页后同步到后端）
+  const autoApprove = useAgentStore((s) => s.autoApprove);
+  const setAutoApprove = useAgentStore((s) => s.setAutoApprove);
   const maxTurns = useAgentStore((s) => s.maxTurns);
   const setMaxTurns = useAgentStore((s) => s.setMaxTurns);
   const autoCompactTokens = useAgentStore((s) => s.autoCompactTokens);
@@ -421,19 +421,19 @@ export default function SettingsPage() {
 
         <div className="agent-perm-row">
           <div className="agent-perm-text">
-            <span className="agent-perm-title">项目内 Shell 自动允许</span>
+            <span className="agent-perm-title">放权模式（自动批准所有操作）</span>
             <span className="agent-perm-desc">
-              开启后，Agent 执行限定在项目目录内的 Shell 命令时跳过确认直接运行；项目外的命令仍会弹窗请求批准。
-              在 Agent 页选择项目后生效。
+              开启后，Agent 的所有确认类操作（写文件、编辑、Shell 命令、网络请求、构建文档等）自动批准，不再弹窗等待点击。
+              未注册工具、提权命令、项目外路径逃逸仍会被硬规则拦截。
             </span>
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={autoShell}
-            className={`agent-perm-switch${autoShell ? ' is-on' : ''}`}
-            title={autoShell ? '已开启：项目内命令跳过确认，点击关闭' : '已关闭：点击开启'}
-            onClick={() => setAutoShell(!autoShell)}
+            aria-checked={autoApprove}
+            className={`agent-perm-switch${autoApprove ? ' is-on' : ''}`}
+            title={autoApprove ? '已开启：所有操作自动批准，点击关闭' : '已关闭：点击开启'}
+            onClick={() => setAutoApprove(!autoApprove)}
           >
             <span className="agent-perm-knob" />
           </button>

@@ -270,10 +270,10 @@ fn stream_state_machine(
                             .map(|call| Ok(Delta::ToolCalls { calls: vec![call] }))
                             .collect();
                         out.push_back(Ok(Delta::TurnEnd));
+                        // 首个 delta 直接返回，剩余入队下轮吐出。
+                        // 注意：不能丢弃首帧——单个工具调用时 ToolCalls 就是首帧。
                         if let Some(d) = out.pop_front() {
-                            queue = Queue(out);
-                            let _ = d;
-                            continue;
+                            return Some((d, (stream, buf, assembler, Queue(out))));
                         }
                     }
                     return None;
@@ -320,6 +320,125 @@ fn stream_state_machine(
             }
         },
     )
+}
+
+#[cfg(test)]
+mod state_machine_tests {
+    use super::*;
+    use futures::channel::mpsc as futures_mpsc;
+    use futures::{SinkExt, StreamExt};
+
+    /// 把 SSE data 行灌入 futures channel，再接 stream_state_machine。
+    /// 模拟 reqwest 字节流：一次 send 一个 chunk（可能含多行）。
+    async fn drive(sse_chunks: Vec<String>) -> Vec<Delta> {
+        let (mut tx, rx) = futures_mpsc::channel::<Result<bytes::Bytes>>(16);
+        let byte_stream = rx.map(|item| item.map(bytes::Bytes::from_owner));
+        let mut sm = Box::pin(stream_state_machine(byte_stream));
+
+        let sender = tokio::spawn(async move {
+            for c in sse_chunks {
+                tx.send(Ok(c.into())).await.unwrap();
+            }
+            // drop tx 结束流
+        });
+
+        let mut out = vec![];
+        while let Some(d) = sm.next().await {
+            out.push(d.expect("流中不应出现错误"));
+        }
+        sender.await.unwrap();
+        out
+    }
+
+    fn tool_call_chunk(id: &str, index: u32, name: Option<&str>, args: &str) -> String {
+        // 真实 SSE 格式：id 在 tool_call 层级，name 在 function 对象内部
+        let id_part = match id {
+            "" => String::new(),
+            i => format!(r#""id":"{i}","#),
+        };
+        let name_part = match name {
+            Some(n) => format!(r#""name":"{n}","#),
+            None => String::new(),
+        };
+        // arguments 的值是 JSON 字符串，内部引号必须转义（与真实 SSE 一致）
+        let escaped = args.replace('\\', "\\\\").replace('"', "\\\"");
+        format!(
+            r#"data: {{"choices":[{{"delta":{{"tool_calls":[{{"index":{index},{id_part}"function":{{{name_part}"arguments":"{escaped}"}}}}]}}}}]}}
+
+"#
+        )
+    }
+
+    /// 回归测试：flush 分支曾丢弃首个 delta，导致单工具调用时
+    /// run loop 只收到 TurnEnd、工具永远不执行（list_files 卡住）。
+    #[tokio::test]
+    async fn single_tool_call_flushed_at_stream_end() {
+        let chunks = vec![
+            tool_call_chunk("t1", 0, Some("list_files"), ""),
+            tool_call_chunk("t1", 0, None, "{\"path\": \".\"}"),
+        ];
+        let deltas = drive(chunks).await;
+        eprintln!("DELTAS: {deltas:?}");
+        let calls: Vec<_> = deltas
+            .iter()
+            .filter_map(|d| match d {
+                Delta::ToolCalls { calls } => Some(calls.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(calls.len(), 1, "单工具调用必须 flush 出恰好一组 ToolCalls");
+        assert_eq!(calls[0][0].id, "t1");
+        assert_eq!(calls[0][0].name, "list_files");
+        assert_eq!(calls[0][0].arguments["path"], ".");
+        // 且 TurnEnd 在 ToolCalls 之后
+        let last = deltas.last().unwrap();
+        assert!(matches!(last, Delta::TurnEnd));
+    }
+
+    #[tokio::test]
+    async fn multiple_tool_calls_all_flushed_at_stream_end() {
+        let chunks = vec![
+            tool_call_chunk("t1", 0, Some("read_file"), "{\"path\":\"a\"}"),
+            tool_call_chunk("t2", 1, Some("read_file"), "{\"path\":\"b\"}"),
+        ];
+        let deltas = drive(chunks).await;
+        let total: usize = deltas
+            .iter()
+            .map(|d| match d {
+                Delta::ToolCalls { calls } => calls.len(),
+                _ => 0,
+            })
+            .sum();
+        assert_eq!(total, 2, "两个工具调用都要 flush 出来，不能丢");
+    }
+
+    #[tokio::test]
+    async fn text_then_tool_call_both_delivered() {
+        let chunks = vec![
+            r#"data: {"choices":[{"delta":{"content":"我先看看"}}]}
+
+"#
+            .to_string(),
+            tool_call_chunk("t1", 0, Some("list_files"), "{}"),
+        ];
+        let deltas = drive(chunks).await;
+        assert!(deltas
+            .iter()
+            .any(|d| matches!(d, Delta::Text { text } if text == "我先看看")));
+        assert!(deltas.iter().any(|d| matches!(d, Delta::ToolCalls { .. })));
+    }
+
+    #[tokio::test]
+    async fn plain_text_stream_ends_with_turn_end() {
+        let chunks = vec![r#"data: {"choices":[{"delta":{"content":"你好"}}]}
+
+"#
+        .to_string()];
+        let deltas = drive(chunks).await;
+        assert_eq!(deltas.len(), 2);
+        assert!(matches!(deltas[0], Delta::Text { .. }));
+        assert!(matches!(deltas[1], Delta::TurnEnd));
+    }
 }
 
 #[cfg(test)]

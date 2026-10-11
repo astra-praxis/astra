@@ -278,8 +278,24 @@ async fn run_loop(
                     turn_text.push_str(&text);
                     emit!(RunEvent::MessageDelta { text });
                 }
-                crate::model::Delta::Reasoning { .. } => {
-                    // 按定稿：不作正式事件
+                crate::model::Delta::Reasoning { text } => {
+                    // 思考过程透出（参考 Zed 的 thinking 块）；无 reasoning 的模型不会产生此事件
+                    emit!(RunEvent::ThinkingDelta { text });
+                }
+                crate::model::Delta::ToolCallStart { id, name } => {
+                    // 参数开始生成（首片段带 id+name）；fragment 为空表示首帧
+                    emit!(RunEvent::ToolCallArgsDelta {
+                        tool_call_id: id,
+                        tool_name: name,
+                        fragment: String::new(),
+                    });
+                }
+                crate::model::Delta::ToolCallArgsDelta { id, name, fragment } => {
+                    emit!(RunEvent::ToolCallArgsDelta {
+                        tool_call_id: id,
+                        tool_name: name,
+                        fragment,
+                    });
                 }
                 crate::model::Delta::ToolCalls { calls } => {
                     pending_calls.extend(calls);

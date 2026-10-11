@@ -14,6 +14,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import {
   ArrowRight,
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -707,6 +708,8 @@ function EntryView({
           )}
         </div>
       );
+    case 'thinking':
+      return <ThinkingEntry text={entry.text} />;
     case 'tool':
       return <ToolEntry entry={entry} onDecide={onDecide} />;
     case 'question':
@@ -761,6 +764,26 @@ function EntryView({
         </div>
       );
   }
+}
+
+// ===== 思考过程块（reasoning 流式追加；参考 Zed 的 thinking 折叠块） =====
+
+function ThinkingEntry({ text }: { text: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="aentry aentry--thinking">
+      <button
+        type="button"
+        className="aentry__thinking-head"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Brain size={13} strokeWidth={1.8} />
+        <span>思考过程</span>
+        <ChevronDown size={12} strokeWidth={2} className={`aentry__thinking-chev${open ? ' rotated' : ''}`} />
+      </button>
+      {open && <pre className="aentry__thinking-body">{text}</pre>}
+    </div>
+  );
 }
 
 // ===== 提问卡（ask_user：选项按钮 + 自由文本；答案 verbatim 回传模型） =====
@@ -837,6 +860,86 @@ function QuestionEntry({
 
 // ===== 工具卡片（结果默认折叠，点击展开，避免大段文件/终端输出刷屏） =====
 
+/**
+ * 从不完整的参数 JSON 中宽松提取可预览文本（流式生成中 args 未到齐）。
+ * 逐字符扫描顶层 "key": "value" 对，容忍尾部被截断的字符串。
+ * 返回 undefined 表示暂无可展示内容（如 JSON 还没出现任何键）。
+ */
+export function extractPartialArgsPreview(
+  toolName: string,
+  raw: string,
+): string | undefined {
+  if (!raw) return undefined;
+  const pairs: Array<[string, string]> = [];
+  let i = 0;
+  const n = raw.length;
+  while (i < n) {
+    // 找下一个键的起始引号（跳过 { , 空白）
+    if (raw[i] !== '"') {
+      i += 1;
+      continue;
+    }
+    const keyStart = i + 1;
+    const keyEnd = raw.indexOf('"', keyStart);
+    if (keyEnd < 0) break;
+    const key = raw.slice(keyStart, keyEnd);
+    let j = keyEnd + 1;
+    while (j < n && raw[j] !== ':') j += 1;
+    j += 1; // 跳过冒号
+    while (j < n && raw[j] === ' ') j += 1;
+    if (j >= n) break;
+    if (raw[j] === '"') {
+      // 字符串值：可能未闭合（尾部截断）
+      let value = '';
+      let k = j + 1;
+      let closed = false;
+      while (k < n) {
+        const ch = raw[k];
+        if (ch === '\\' && k + 1 < n) {
+          // 转义：还原常见控制符，避免预览里出现 \n 字面量
+          const esc = raw[k + 1];
+          value += esc === 'n' ? '\n' : esc === 't' ? '\t' : esc;
+          k += 2;
+          continue;
+        }
+        if (ch === '"') {
+          closed = true;
+          break;
+        }
+        value += ch;
+        k += 1;
+      }
+      pairs.push([key, value]);
+      i = closed ? k + 1 : n; // 未闭合说明参数已截断，到此为止
+    } else {
+      // 非字符串值（数字/布尔）：取到逗号或结尾
+      let k = j;
+      while (k < n && raw[k] !== ',' && raw[k] !== '}') k += 1;
+      pairs.push([key, raw.slice(j, k).trim()]);
+      i = k;
+    }
+  }
+  if (pairs.length === 0) return undefined;
+  // 按工具形态组织预览：与 contentPreview 的约定一致
+  const get = (k: string) => pairs.find(([key]) => key === k)?.[1];
+  if (toolName === 'write_file' || toolName === 'read_file') {
+    const content = get('content');
+    return content !== undefined ? content : pairs.map(([k, v]) => `${k}: ${v}`).join('\n');
+  }
+  if (toolName === 'edit_file') {
+    const oldT = get('old_text');
+    const newT = get('new_text');
+    if (oldT !== undefined || newT !== undefined) {
+      return `- ${oldT ?? ''}\n+ ${newT ?? ''}`;
+    }
+  }
+  if (toolName === 'shell_execute') {
+    const cmd = get('command');
+    return cmd !== undefined ? cmd : undefined;
+  }
+  return pairs.map(([k, v]) => `${k}: ${v}`).join('\n');
+}
+
 function ToolEntry({
   entry,
   onDecide,
@@ -861,7 +964,14 @@ function ToolEntry({
         : entry.toolName === 'shell_execute' && entry.args && typeof entry.args.command === 'string'
           ? entry.args.command
           : undefined;
-  const previewLines = contentPreview ? contentPreview.split('\n').length : 0;
+  // 参数还在流式生成中（tool_call_started 未到）：宽松解析不完整 JSON 展示已生成部分。
+  // 同一工具卡：args 到齐后切 contentPreview，流式阶段展示 streamingPreview
+  const streamingPreview =
+    !contentPreview && entry.argsStreaming !== undefined
+      ? extractPartialArgsPreview(entry.toolName, entry.argsStreaming)
+      : undefined;
+  const previewText = contentPreview ?? streamingPreview;
+  const previewLines = previewText ? previewText.split('\n').length : 0;
   return (
     <div className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}>
       <button
@@ -897,9 +1007,9 @@ function ToolEntry({
           <ChevronDown size={12} strokeWidth={2} className={`aentry__tool-chev${open ? ' rotated' : ''}`} />
         )}
       </button>
-      {contentPreview && (
+      {previewText && (
         <div className="aentry__tool-body is-preview">
-          <pre className={`aentry__tool-content${previewLines > 12 && !expanded ? ' is-clamped' : ''}`}>{contentPreview}</pre>
+          <pre className={`aentry__tool-content${previewLines > 12 && !expanded ? ' is-clamped' : ''}`}>{previewText}</pre>
           {previewLines > 12 && (
             <button
               type="button"

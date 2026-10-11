@@ -37,6 +37,8 @@ export interface AgentEnvelope {
   final_text?: string;
   decision?: string;
   artifacts?: Array<{ path: string; kind: string }>;
+  /** 工具参数流式片段（tool_call_args_delta） */
+  fragment?: string;
 }
 
 export type ToolStatus = 'running' | 'completed' | 'failed' | 'denied';
@@ -46,6 +48,11 @@ export type PermState = 'pending' | 'allowed' | 'denied';
 export type Entry =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; streaming: boolean }
+  | {
+      /** 模型思考过程（reasoning），流式追加；参考 Zed 的 thinking 块 */
+      kind: 'thinking';
+      text: string;
+    }
   | {
       kind: 'tool';
       callId: string;
@@ -58,6 +65,8 @@ export type Entry =
       artifacts?: Array<{ path: string; kind: string }>;
       /** Confirm 工具的确认状态：内嵌在工具卡里，不再单出一张权限卡 */
       perm?: { state: PermState; summary: string };
+      /** 参数流式生成中的原始 JSON 累计（tool_call_args_delta 到来时更新） */
+      argsStreaming?: string;
     }
   | {
       kind: 'permission';
@@ -102,6 +111,42 @@ export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
         return next;
       }
       return [...prev, { kind: 'assistant', text, streaming: true }];
+    }
+    case 'thinking_delta': {
+      // 思考增量：追加到末尾的 thinking 条目（参考 Zed 的 thinking 块）
+      const text = env.text ?? '';
+      const last = prev[prev.length - 1];
+      if (last && last.kind === 'thinking') {
+        const next = [...prev];
+        next[next.length - 1] = { ...last, text: last.text + text };
+        return next;
+      }
+      return [...prev, { kind: 'thinking', text }];
+    }
+    case 'tool_call_args_delta': {
+      // 参数流式生成：fragment 为空 = 首帧（建卡），非空 = 追加原始 JSON 片段。
+      // 后续 tool_call_started（参数完整）会用 argsSummary/args 覆盖预览
+      const fragment = env.fragment ?? '';
+      const idx = prev.findIndex((e) => e.kind === 'tool' && e.callId === env.tool_call_id);
+      if (idx >= 0) {
+        const next = [...prev];
+        const e = next[idx];
+        if (e.kind === 'tool') {
+          next[idx] = { ...e, argsStreaming: (e.argsStreaming ?? '') + fragment };
+        }
+        return next;
+      }
+      return [
+        ...prev,
+        {
+          kind: 'tool' as const,
+          callId: env.tool_call_id!,
+          toolName: env.tool_name ?? '',
+          argsSummary: '',
+          status: 'running' as const,
+          argsStreaming: fragment,
+        },
+      ];
     }
     case 'tool_call_started': {
       const rest = prev.filter((e) => !(e.kind === 'tool' && e.callId === env.tool_call_id));

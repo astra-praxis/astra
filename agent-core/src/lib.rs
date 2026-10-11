@@ -20,6 +20,7 @@
 pub mod error;
 pub mod events;
 pub mod model;
+pub mod openai_sse;
 pub mod permissions;
 pub mod run;
 pub mod thread;

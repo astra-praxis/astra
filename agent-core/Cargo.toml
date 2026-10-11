@@ -5,7 +5,6 @@ edition = "2021"
 description = "星野 Agent Runtime 核心库：模型适配层 + Run 循环 + 工具系统 + 权限判定（参考 Zed agent 架构分层）"
 
 [dependencies]
-rig-core = "0.22"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
 tokio-util = "0.7"
 serde = { version = "1", features = ["derive"] }
@@ -19,9 +18,11 @@ regex = "1"
 glob = "0.3"
 
 # net_tools（fetch/search_web）用；reqwest 此前仅 dev-deps，现在正式进入主依赖
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 url = "2"
 percent-encoding = "2"
 htmd = "0.5"
+# openai_sse 流式响应用（reqwest 传递依赖，声明后零新增编译成本）
+bytes = "1"
 
 [dev-dependencies]

@@ -25,6 +25,18 @@ pub enum RunEvent {
     /// 正在生成的回复文本（增量）
     MessageDelta { text: String },
 
+    /// 模型思考过程增量（reasoning 模型的 reasoning_content）。
+    /// 前端渲染为可折叠的「思考过程」块（参考 Zed 的 thinking 块）。
+    ThinkingDelta { text: String },
+
+    /// 工具调用参数流式增量（写大文件时前端实时可见，参考 Zed 的流式 diff）。
+    /// fragment 是原始 JSON 参数片段；同一 tool_call_id 的片段拼接后即完整参数 JSON。
+    ToolCallArgsDelta {
+        tool_call_id: String,
+        tool_name: String,
+        fragment: String,
+    },
+
     /// 运行状态变化（ analyzing / executing_tool / awaiting_permission / ... ）
     StatusChanged { status: RunStatus },
 

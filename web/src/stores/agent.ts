@@ -294,18 +294,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   pushTerminal: (outcome, text) =>
     set((s) => ({ entries: [...s.entries, { kind: 'terminal', outcome, text }] })),
   pushQuestion: (q) =>
-    set((s) => ({
-      entries: [
-        ...s.entries,
-        {
-          kind: 'question',
-          questionId: q.question_id,
-          question: q.question,
-          options: q.options,
-          allowFreeText: q.allow_free_text,
-        },
-      ],
-    })),
+    set((s) =>
+      // 幂等防御：同一 questionId 只入列一次（防事件层重复投递）
+      s.entries.some((e) => e.kind === 'question' && e.questionId === q.question_id)
+        ? s
+        : {
+            entries: [
+              ...s.entries,
+              {
+                kind: 'question',
+                questionId: q.question_id,
+                question: q.question,
+                options: q.options,
+                allowFreeText: q.allow_free_text,
+              },
+            ],
+          },
+    ),
   answerQuestion: async (questionId, answer) => {
     // 本地先置态（回答/取消后卡片禁用），后端 oneshot 解析由 invoke 完成
     set((s) => ({
@@ -373,6 +378,15 @@ let listenersAttached = false;
 export function ensureAgentListeners(): void {
   if (listenersAttached) return;
   listenersAttached = true;
+
+  // ask_user 提问事件（独立于 Envelope 流，载荷自带 session_id 过滤旧会话）。
+  // 必须与 agent-event 同级注册一次，不能嵌套在回调里（否则每条事件都叠加一个监听器）。
+  listen<AgentQuestionPayload>('agent-question', (e) => {
+    const q = e.payload;
+    if (q.session_id !== useAgentStore.getState().sessionId) return;
+    useAgentStore.getState().pushQuestion(q);
+  }).catch(() => {});
+
   listen<AgentEnvelope>('agent-event', (e) => {
     const env = e.payload;
     const st = useAgentStore.getState();
@@ -382,13 +396,6 @@ export function ensureAgentListeners(): void {
       useAgentStore.setState({ status: env.status ?? null });
       return;
     }
-
-    // ask_user 提问事件（独立于 Envelope 流，载荷自带 session_id 过滤旧会话）
-    listen<AgentQuestionPayload>('agent-question', (e) => {
-      const q = e.payload;
-      if (q.session_id !== useAgentStore.getState().sessionId) return;
-      useAgentStore.getState().pushQuestion(q);
-    }).catch(() => {});
 
     if (
       env.type === 'run_completed' ||

@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+use crate::texts::TextPack;
 
 /// 静态判定结果
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,13 +96,19 @@ impl Default for ToolPolicy {
     }
 }
 
-/// 路径边界校验：canonicalize（符号链接在此拦截）后必须是 root 子路径。
+/// 路径边界校验（默认中文文案）。宿主需自定义文案时用 [`ensure_within_root_with`]。
+/// 规范：canonicalize（符号链接在此拦截）后必须是 root 子路径。
 /// 目标尚不存在时校验其最近存在祖先（覆盖 `mkdir -p` 式写入）。
 /// 相对路径先 join 到 root（canonicalize 是相对进程 cwd 解析的，不能直接用）。
 pub fn ensure_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
+    ensure_within_root_with(root, target, &TextPack::zh())
+}
+
+/// 同 [`ensure_within_root`]，文案来自注入的 [`TextPack`]。
+pub fn ensure_within_root_with(root: &Path, target: &Path, texts: &TextPack) -> Result<PathBuf> {
     let canonical_root = root
         .canonicalize()
-        .map_err(|e| Error::PathEscape(format!("项目根目录无效: {e}")))?;
+        .map_err(|e| Error::PathEscape(texts.invalid_project_root(&e.to_string())))?;
 
     // 绝对路径原样校验；相对路径基于项目根（并归一化掉 ./ 等分量）
     let joined: PathBuf = if target.is_absolute() {
@@ -126,11 +133,14 @@ pub fn ensure_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
                         .parent()
                         .unwrap_or(std::path::Path::new("/"))
                         .to_path_buf();
-                    let link_target = std::fs::read_link(&probe)
-                        .map_err(|e| Error::PathEscape(format!("{}: {e}", target.display())))?;
+                    let link_target = std::fs::read_link(&probe).map_err(|e| {
+                        Error::PathEscape(
+                            texts.read_link_failed(&target.display().to_string(), &e.to_string()),
+                        )
+                    })?;
                     // 递归校验链接目标（read_link 可能返回相对路径，join 统一处理；
                     // 绝对路径会被 join 替换）
-                    probe = ensure_within_root(root, &link_dir.join(link_target))?;
+                    probe = ensure_within_root_with(root, &link_dir.join(link_target), texts)?;
                     continue;
                 }
                 // 普通不存在路径：向上找最近的存在祖先
@@ -147,8 +157,14 @@ pub fn ensure_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
     Ok(joined)
 }
 
-/// 参数白名单校验：schema required 字段必须存在且类型正确（MVP 只查 required + string）
+/// 参数白名单校验（默认中文文案）：schema required 字段必须存在且类型正确
+/// （MVP 只查 required + string）。宿主自定义文案用 [`validate_args_with`]。
 pub fn validate_args(schema: &Value, args: &Value) -> Result<()> {
+    validate_args_with(schema, args, &TextPack::zh())
+}
+
+/// 同 [`validate_args`]，文案来自注入的 [`TextPack`]。
+pub fn validate_args_with(schema: &Value, args: &Value, texts: &TextPack) -> Result<()> {
     let required = schema
         .get("required")
         .and_then(|v| v.as_array())
@@ -159,7 +175,7 @@ pub fn validate_args(schema: &Value, args: &Value) -> Result<()> {
         if !present {
             return Err(Error::Tool {
                 tool: "validate_args".into(),
-                message: format!("缺少必填参数: {key}"),
+                message: texts.missing_required_arg(key),
             });
         }
     }

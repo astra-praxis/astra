@@ -122,10 +122,8 @@ impl AgentTool for ExtractDocument {
                 "已转换为 {out_md}（{} KB），请用 read_file 分段阅读",
                 md_meta.len() / 1024
             ),
-            vec![Artifact {
-                path: out_md,
-                kind: ArtifactKind::FileCreated,
-            }],
+            vec![Artifact::new(ArtifactKind::Document, out_md)
+                .with_metadata(json!({ "format": "markdown", "bytes": md_meta.len() }))],
         ))
     }
 }
@@ -170,18 +168,23 @@ impl AgentTool for BuildDocx {
 
         Ok(ToolOutput::with_artifacts(
             format!("已生成 {}", output.display()),
-            vec![Artifact {
-                path: output.to_string_lossy().into_owned(),
-                kind: ArtifactKind::FileCreated,
-            }],
+            vec![Artifact::new(
+                ArtifactKind::Document,
+                output.to_string_lossy().into_owned(),
+            )
+            .with_metadata(json!({ "format": "docx" }))],
         ))
     }
 }
 
 /// 注册 pandoc 文档工具（需要项目根）
-pub fn register(reg: crate::tool::ToolRegistry, root: &PathBuf) -> crate::tool::ToolRegistry {
-    reg.register(ExtractDocument { root: root.clone() })
-        .register(BuildDocx { root: root.clone() })
+pub fn register(reg: crate::tool::ToolRegistry, root: &Path) -> crate::tool::ToolRegistry {
+    reg.register(ExtractDocument {
+        root: root.to_path_buf(),
+    })
+    .register(BuildDocx {
+        root: root.to_path_buf(),
+    })
 }
 
 #[cfg(test)]

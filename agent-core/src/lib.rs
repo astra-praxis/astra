@@ -23,10 +23,12 @@ pub mod model;
 pub mod openai_sse;
 pub mod permissions;
 pub mod run;
+pub mod texts;
 pub mod thread;
 pub mod tool;
 
 pub mod ask_tool;
+pub mod diff;
 pub mod doc_tools;
 pub mod fs_basic;
 pub mod fs_tools;
@@ -37,15 +39,17 @@ pub mod skill_tools;
 pub(crate) mod test_support;
 
 pub use ask_tool::{AskUserTool, AutoAnswerBridge, UserQuestionBridge};
+pub use diff::{line_diff, LineDiff};
 pub use error::{Error, Result};
 pub use events::{Envelope, Plan, PlanStep, PlanStepState, RunEvent, RunStatus, Sequence};
 pub use model::{ChatMessage, Delta, MessageContent, ModelBackend, ModelRequest, RigBackend, Role};
 pub use net_tools::{FetchTool, SearchResult, WebSearchTool};
 pub use permissions::{
-    decide, ensure_within_root, validate_args, AutoBridge, Decision, PermissionBridge,
-    PermissionRequest, ToolPolicy,
+    decide, ensure_within_root, ensure_within_root_with, validate_args, validate_args_with,
+    AutoBridge, Decision, PermissionBridge, PermissionRequest, ToolPolicy,
 };
 pub use run::{execute, RunConfig, RunHandle, DEFAULT_AUTO_COMPACT_TOKENS, DEFAULT_MAX_TURNS};
+pub use texts::{SharedTextPack, TextPack};
 pub use thread::{Thread, ThreadConfig};
 pub use tool::{
     AgentTool, Artifact, ArtifactKind, ToolCall, ToolContext, ToolDefinition, ToolOutput,

@@ -380,12 +380,22 @@ impl AgentTool for EditFile {
             .await
             .map_err(|e| tool_error("edit_file", e.to_string()))?;
 
+        // Artifact carries the change stats (per occurrence) and a preview
+        // rendered from the first replacement region.
+        let diff = crate::diff::line_diff(old_text, new_text);
+        let mut artifact =
+            Artifact::new(ArtifactKind::FileChange, path.to_string()).with_metadata(json!({
+                "mode": "edit",
+                "insertions": diff.insertions * count,
+                "deletions": diff.deletions * count,
+            }));
+        if let Some(preview) = diff.preview {
+            artifact = artifact.with_preview(preview);
+        }
+
         Ok(ToolOutput::with_artifacts(
             format!("已替换 {count} 处（第 {first_line} 行起）"),
-            vec![Artifact {
-                path: path.to_string(),
-                kind: ArtifactKind::FileModified,
-            }],
+            vec![artifact],
         ))
     }
 }
@@ -437,10 +447,14 @@ impl AgentTool for CopyPath {
         copy_recursive(&src, &dst).await?;
         Ok(ToolOutput::with_artifacts(
             format!("已复制 {} → {}", from.display(), to.display()),
-            vec![Artifact {
-                path: dst_rel.to_string_lossy().to_string(),
-                kind: ArtifactKind::FileCreated,
-            }],
+            vec![Artifact::new(
+                ArtifactKind::FileChange,
+                dst_rel.to_string_lossy().into_owned(),
+            )
+            .with_metadata(json!({
+                "mode": "copy",
+                "from": from.to_string_lossy(),
+            }))],
         ))
     }
 }
@@ -539,10 +553,14 @@ impl AgentTool for MovePath {
             .map_err(|e| tool_error("move_path", e.to_string()))?;
         Ok(ToolOutput::with_artifacts(
             format!("已移动 {} → {}", from.display(), to.display()),
-            vec![Artifact {
-                path: dst_rel.to_string_lossy().to_string(),
-                kind: ArtifactKind::FileCreated,
-            }],
+            vec![Artifact::new(
+                ArtifactKind::FileChange,
+                dst_rel.to_string_lossy().into_owned(),
+            )
+            .with_metadata(json!({
+                "mode": "move",
+                "from": from.to_string_lossy(),
+            }))],
         ))
     }
 }
@@ -583,13 +601,14 @@ impl AgentTool for CreateDirectory {
 /// 把全部文件系统工具注册进注册表（有项目根时调用）。
 /// 权限：search_files / find_path 默认只读 Allow（ToolPolicy::default 已含 search_files）；
 /// edit_file / copy_path / move_path / create_directory 由宿主放入 confirm_tools。
-pub fn register(reg: crate::tool::ToolRegistry, root: &PathBuf) -> crate::tool::ToolRegistry {
+pub fn register(reg: crate::tool::ToolRegistry, root: &Path) -> crate::tool::ToolRegistry {
+    let root = root.to_path_buf();
     reg.register(SearchFiles { root: root.clone() })
         .register(FindPath { root: root.clone() })
         .register(EditFile { root: root.clone() })
         .register(CopyPath { root: root.clone() })
         .register(MovePath { root: root.clone() })
-        .register(CreateDirectory { root: root.clone() })
+        .register(CreateDirectory { root })
 }
 
 #[cfg(test)]
@@ -664,7 +683,7 @@ mod tests {
         let root = tmp_root("search2");
         std::fs::write(root.join("doc.md"), "关键词在这里").unwrap();
         std::fs::write(root.join("doc.txt"), "关键词在txt里").unwrap();
-        std::fs::write(root.join("bin.md"), b"\x00\x01binary".to_vec()).unwrap();
+        std::fs::write(root.join("bin.md"), b"\x00\x01binary").unwrap();
 
         let tool = SearchFiles { root: root.clone() };
         let text = text_of(
@@ -812,7 +831,19 @@ mod tests {
             std::fs::read_to_string(root.join("a.md")).unwrap(),
             "第一章\n新内容\n结尾"
         );
-        assert_eq!(out.artifacts[0].kind, ArtifactKind::FileModified);
+        assert_eq!(out.artifacts[0].kind, ArtifactKind::FileChange);
+        assert_eq!(out.artifacts[0].metadata["mode"], "edit");
+        assert_eq!(out.artifacts[0].metadata["insertions"], 1);
+        assert_eq!(out.artifacts[0].metadata["deletions"], 1);
+        let preview = out.artifacts[0].preview.clone().unwrap_or_default();
+        assert!(
+            preview.contains("- 旧内容"),
+            "preview 应含删除行: {preview}"
+        );
+        assert!(
+            preview.contains("+ 新内容"),
+            "preview 应含新增行: {preview}"
+        );
         assert!(text_of(out).contains("第 2 行"), "应含行号");
     }
 

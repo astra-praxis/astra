@@ -22,6 +22,7 @@ use crate::error::{Error, Result};
 use crate::events::{Envelope, RunEvent, RunStatus};
 use crate::model::{ChatMessage, MessageContent, ModelBackend, ModelRequest, Role};
 use crate::permissions::{decide, Decision, PermissionBridge, ToolPolicy};
+use crate::texts::{SharedTextPack, TextPack};
 use crate::tool::{ToolCall, ToolContext, ToolRegistry};
 
 /// 每轮流式增量间的空闲超时（非整轮预算；防模型端挂死）
@@ -43,6 +44,8 @@ pub struct RunConfig {
     /// 上下文自动压缩阈值（估算 token 数）；None = 关闭
     pub auto_compact_tokens: Option<u64>,
     pub policy: ToolPolicy,
+    /// 文案模板包（模型上下文与前端事件的可见文案；默认中文）
+    pub texts: SharedTextPack,
 }
 
 impl RunConfig {
@@ -56,6 +59,7 @@ impl RunConfig {
             max_turns: DEFAULT_MAX_TURNS,
             auto_compact_tokens: Some(DEFAULT_AUTO_COMPACT_TOKENS),
             policy: ToolPolicy::default(),
+            texts: Arc::new(TextPack::zh()),
         }
     }
 }
@@ -255,7 +259,7 @@ async fn run_loop(
                                 budget_secs: STREAM_IDLE_TIMEOUT.as_secs(),
                             };
                             emit!(RunEvent::RunFailed {
-                                error: e.to_string()
+                                error: config.texts.budget_exceeded(STREAM_IDLE_TIMEOUT.as_secs())
                             });
                             return Err(e);
                         }
@@ -346,7 +350,7 @@ async fn run_loop(
                 Some(t) => t,
                 None => {
                     // 未注册工具：错误回传模型，不中断 Run
-                    let msg = format!("未注册的工具: {}", call.name);
+                    let msg = config.texts.unregistered_tool(&call.name);
                     emit!(RunEvent::ToolCallFailed {
                         tool_call_id: call.id.clone(),
                         tool_name: call.name.clone(),
@@ -361,7 +365,7 @@ async fn run_loop(
                 tool_call_id: call.id.clone(),
                 tool_name: call.name.clone(),
                 args_summary: summarize_args(&call.arguments),
-                args: Some(cap_args(&call.arguments)),
+                args: Some(cap_args(&call.arguments, &config.texts)),
             });
 
             // 5.1 静态权限判定（纯函数）
@@ -410,9 +414,9 @@ async fn run_loop(
 
             if !approved {
                 let msg = if decision == Decision::Deny {
-                    format!("工具 '{}' 被安全策略拒绝执行", call.name)
+                    config.texts.policy_denied(&call.name)
                 } else {
-                    "用户拒绝了本次操作授权".to_string()
+                    config.texts.user_denied()
                 };
                 emit!(RunEvent::ToolCallFailed {
                     tool_call_id: call.id.clone(),
@@ -428,12 +432,14 @@ async fn run_loop(
                 status: RunStatus::ExecutingTool,
             });
 
-            let exec_result =
-                match crate::permissions::validate_args(&tool.parameters_schema(), &call.arguments)
-                {
-                    Err(e) => Err(e),
-                    Ok(()) => tool.call(call.arguments.clone(), ctx).await,
-                };
+            let exec_result = match crate::permissions::validate_args_with(
+                &tool.parameters_schema(),
+                &call.arguments,
+                &config.texts,
+            ) {
+                Err(e) => Err(e),
+                Ok(()) => tool.call(call.arguments.clone(), ctx).await,
+            };
 
             match exec_result {
                 Ok(output) => {
@@ -447,14 +453,7 @@ async fn run_loop(
                         tool_call_id: call.id.clone(),
                         tool_name: call.name.clone(),
                         result_summary: summarize_text(&output.content, 200),
-                        artifacts: output
-                            .artifacts
-                            .iter()
-                            .map(|a| crate::events::ArtifactRef {
-                                path: a.path.clone(),
-                                kind: a.kind,
-                            })
-                            .collect(),
+                        artifacts: output.artifacts,
                     });
                     push_tool_result(messages, &call.id, output.content, false);
                 }
@@ -486,7 +485,7 @@ async fn run_loop(
         max_turns: config.max_turns,
     };
     emit!(RunEvent::RunFailed {
-        error: e.to_string()
+        error: config.texts.max_turns_exceeded(config.max_turns)
     });
     Err(e)
 }
@@ -509,17 +508,7 @@ fn push_tool_result(
 
 // ===== 上下文自动压缩（参考 Zed agent thread.rs 的 compact 系列） =====
 
-/// 压缩提示词：让模型产出可直接交接的结构化摘要（Goal/State/Context/Next/Pitfalls）
-const COMPACTION_PROMPT: &str =
-    "你正在把这段对话压缩成一份交接文档，后续由你基于这份摘要继续任务。\
-     请包含：\n\
-     - 目标：用户最终想达成什么\n\
-     - 进展：已完成的部分、当前阻塞、已确定的决策\n\
-     - 关键上下文：约束、偏好、必需的数据/路径/示例\n\
-     - 下一步：剩余的具体步骤\n\
-     - 踩坑：尝试过但无效的做法\n\
-     要求：直接输出摘要正文，简洁、结构化，不寒暄。";
-
+/// 压缩提示词由 TextPack 提供（texts.compaction_prompt），可随宿主注入替换。
 /// 估算消息序列的 token 数：CJK 字符≈1 token/字，其他内容≈1 token/4 字节。
 /// 模型端 usage 不可靠（本地 llama.cpp 常缺失），故全链路用同一估算器，宁可可预测。
 fn estimate_tokens(messages: &[ChatMessage]) -> u64 {
@@ -654,7 +643,9 @@ async fn compact_context(
     let mut req_messages = request_view(messages);
     req_messages.push(ChatMessage {
         role: Role::User,
-        content: vec![MessageContent::text(COMPACTION_PROMPT)],
+        content: vec![MessageContent::text(
+            config.texts.compaction_prompt.as_str(),
+        )],
     });
     let request = ModelRequest {
         system: config.system_prompt.clone(),
@@ -689,7 +680,7 @@ async fn compact_context(
     }
 
     if summary.trim().is_empty() {
-        return Err(Error::CompactionFailed("摘要为空".into()));
+        return Err(Error::CompactionFailed(config.texts.compaction_empty()));
     }
     let len = summary.len();
     messages.push(ChatMessage {
@@ -703,7 +694,7 @@ async fn compact_context(
 const ARGS_VALUE_CAP: usize = 20_000;
 
 /// 完整参数快照：字符串值超长时截断。供前端渲染写文件内容 / 完整命令预览。
-fn cap_args(args: &serde_json::Value) -> serde_json::Value {
+fn cap_args(args: &serde_json::Value, texts: &TextPack) -> serde_json::Value {
     match args {
         serde_json::Value::Object(map) => {
             let mut out = serde_json::Map::new();
@@ -711,7 +702,7 @@ fn cap_args(args: &serde_json::Value) -> serde_json::Value {
                 let capped = match v {
                     serde_json::Value::String(s) if s.chars().count() > ARGS_VALUE_CAP => {
                         let t: String = s.chars().take(ARGS_VALUE_CAP).collect();
-                        serde_json::Value::String(format!("{t}\n…（内容过长已截断）"))
+                        serde_json::Value::String(format!("{t}{}", texts.arg_value_truncated()))
                     }
                     other => other.clone(),
                 };
@@ -784,6 +775,31 @@ mod tests {
                 allowed_readonly: vec![],
                 confirm_tools: vec![],
             }
+        }
+
+        #[tokio::test]
+        async fn sequence_starts_at_one_and_monotonically_increases() {
+            // Contract: sequence is 1-based, strictly increasing, no gaps,
+            // and event_id matches the derived format (docs/TESTS.md §2).
+            let backend = Arc::new(MockBackend::new(vec![text_turn("ok")]));
+            let (result, events) = run_execute(
+                backend,
+                R::new(),
+                text_config("s1", "", policy_all_deny()),
+                None,
+                deny_bridge(),
+                vec![user_msg("hi")],
+            )
+            .await;
+            assert!(result.is_ok());
+            assert!(!events.is_empty());
+            for (i, env) in events.iter().enumerate() {
+                assert_eq!(env.sequence, (i + 1) as u64, "sequence 必须 1 起严格递增");
+                assert_eq!(env.event_id, format!("evt_{}_{}", env.run_id, env.sequence));
+            }
+            let ids: std::collections::HashSet<_> =
+                events.iter().map(|e| e.event_id.clone()).collect();
+            assert_eq!(ids.len(), events.len(), "event_id 不得重复");
         }
 
         #[tokio::test]

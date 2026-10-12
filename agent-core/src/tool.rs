@@ -43,16 +43,79 @@ pub struct ToolOutput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
-    /// 相对项目根的路径
-    pub path: String,
+    /// Process-unique id (`art_{millis}_{seq}`); lets hosts reference a
+    /// specific artifact in later interactions (review, approve, reuse).
+    pub id: String,
     pub kind: ArtifactKind,
+    /// Where the artifact lives: a path relative to the project root for
+    /// file-based kinds (future kinds may use URIs).
+    pub location: String,
+    /// Kind-specific metadata. Conventions (see PLAN.md 3.1):
+    /// FileChange {mode, insertions, deletions, bytes},
+    /// Document {format, bytes}, Pdf {pages, size},
+    /// CommandOutput {command, exit_code}. Best-effort where applicable.
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+    /// Optional inline preview for hosts to render without re-reading the
+    /// location (e.g. line diff for edit_file).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    // NOTE: version/status lifecycle fields are deliberately deferred
+    // (see PLAN.md); when added they must be Option<T> + serde default.
 }
 
+impl Artifact {
+    /// Create an artifact with a generated process-unique id.
+    pub fn new(kind: ArtifactKind, location: impl Into<String>) -> Self {
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let seq = ARTIFACT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self {
+            id: format!("art_{millis}_{seq}"),
+            kind,
+            location: location.into(),
+            metadata: Value::Null,
+            preview: None,
+        }
+    }
+
+    /// Attach kind-specific metadata (builder style).
+    pub fn with_metadata(mut self, metadata: Value) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    /// Attach an inline preview (builder style).
+    pub fn with_preview(mut self, preview: impl Into<String>) -> Self {
+        self.preview = Some(preview.into());
+        self
+    }
+}
+
+/// Sequence counter backing `Artifact::new` id generation.
+static ARTIFACT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// What an artifact represents. Diff is not a kind — a file diff is a
+/// FileChange artifact whose preview holds the diff text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
-    FileCreated,
-    FileModified,
+    /// A file was created/modified/copied/moved (see metadata.mode)
+    FileChange,
+    /// A document (docx/md/...); metadata.format names it
+    Document,
+    /// A PDF file
+    Pdf,
+    /// An image file
+    Image,
+    /// Captured output of a command execution
+    CommandOutput,
+    /// Structured data (json/csv/...) not naturally a file
+    Data,
+    /// Anything not covered above
+    Generic,
 }
 
 impl From<String> for ToolOutput {
@@ -243,22 +306,47 @@ mod tests {
     #[test]
     fn tool_output_artifacts_roundtrip() {
         let output = ToolOutput::with_artifacts(
-            "已写入",
+            "written",
             vec![Artifact {
-                path: "out/a.md".into(),
-                kind: ArtifactKind::FileCreated,
+                id: "art_1".into(),
+                kind: ArtifactKind::FileChange,
+                location: "out/a.md".into(),
+                metadata: serde_json::json!({"mode": "create", "bytes": 42}),
+                preview: None,
             }],
         );
         let json = serde_json::to_string(&output).unwrap();
         let back: ToolOutput = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.artifacts[0].path, "out/a.md");
-        assert_eq!(back.artifacts[0].kind, ArtifactKind::FileCreated);
+        assert_eq!(back.artifacts[0].id, "art_1");
+        assert_eq!(back.artifacts[0].location, "out/a.md");
+        assert_eq!(back.artifacts[0].kind, ArtifactKind::FileChange);
+        assert_eq!(back.artifacts[0].metadata["mode"], "create");
     }
 
     #[test]
     fn artifact_kind_serializes_snake_case() {
-        let v = serde_json::to_value(ArtifactKind::FileModified).unwrap();
-        assert_eq!(v, "file_modified");
+        let v = serde_json::to_value(ArtifactKind::FileChange).unwrap();
+        assert_eq!(v, "file_change");
+    }
+
+    #[test]
+    fn artifact_new_generates_unique_ids() {
+        let a = Artifact::new(ArtifactKind::Document, "out/a.md");
+        let b = Artifact::new(ArtifactKind::Document, "out/b.md");
+        assert_ne!(a.id, b.id, "ids must be process-unique");
+        assert!(a.id.starts_with("art_"));
+        assert_eq!(a.location, "out/a.md");
+        assert!(a.metadata.is_null());
+        assert!(a.preview.is_none());
+    }
+
+    #[test]
+    fn artifact_builder_sets_metadata_and_preview() {
+        let a = Artifact::new(ArtifactKind::FileChange, "src/main.rs")
+            .with_metadata(serde_json::json!({"insertions": 20, "deletions": 5}))
+            .with_preview("- old\n+ new");
+        assert_eq!(a.metadata["insertions"], 20);
+        assert_eq!(a.preview.as_deref(), Some("- old\n+ new"));
     }
 
     // ===== ToolContext::request_permission =====

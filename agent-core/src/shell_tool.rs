@@ -292,8 +292,10 @@ impl AgentTool for ShellExecute {
 }
 
 /// 注册 shell 工具（需要项目根）
-pub fn register(reg: crate::tool::ToolRegistry, root: &PathBuf) -> crate::tool::ToolRegistry {
-    reg.register(ShellExecute { root: root.clone() })
+pub fn register(reg: crate::tool::ToolRegistry, root: &Path) -> crate::tool::ToolRegistry {
+    reg.register(ShellExecute {
+        root: root.to_path_buf(),
+    })
 }
 
 #[cfg(test)]

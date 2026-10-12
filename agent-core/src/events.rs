@@ -4,19 +4,26 @@
 //! - 去掉 reasoning_delta（模型私有推理不作正式事件，仅可选 status 提示）
 //! - 事件带 session_id / run_id / 递增 sequence，防错序、支持恢复
 //! - 工具状态拆 started/completed/failed，产物结构化
+//! - 1.2：Envelope 增加 schema_version；全部变体 JSON 形状由快照测试锁定
+//!   （`events_testdata/`，破坏性变更：版本 +1 → 重写快照 → 同步 docs/EVENTS.md）
+//!   事件契约文档：`docs/EVENTS.md`
+//! - 1.3：ToolCallCompleted 直接携带结构化 Artifact（id/kind/location/
+//!   metadata/preview），ArtifactRef 移除 → schema_version 2
+//! - 2 修订（additive，不 bump）：Envelope 增加 event_id（派生自
+//!   run_id+sequence，重放稳定）与 timestamp（毫秒）；未采纳项见 PLAN 决策记录
 
 use serde::{Deserialize, Serialize};
 
+/// 事件协议版本（Envelope.schema_version）。
+/// 破坏性 JSON 形状变更必须 +1，并重写快照（`write_event_snapshot`）+ 更新 docs/EVENTS.md。
+pub const EVENT_SCHEMA_VERSION: u32 = 2;
+
+fn default_schema_version() -> u32 {
+    EVENT_SCHEMA_VERSION
+}
+
 /// 全局递增序号（每个 Run 内从 1 开始）
 pub type Sequence = u64;
-
-/// 工具执行产物引用
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactRef {
-    pub path: String,
-    #[serde(rename = "kind")]
-    pub kind: crate::tool::ArtifactKind,
-}
 
 /// Run 级事件（跨轮）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +66,7 @@ pub enum RunEvent {
         tool_name: String,
         result_summary: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        artifacts: Vec<ArtifactRef>,
+        artifacts: Vec<crate::tool::Artifact>,
     },
 
     /// 工具执行失败（错误字符串同时回传模型）
@@ -97,7 +104,25 @@ pub enum RunEvent {
 
 impl RunEvent {
     pub fn with_meta(self, session_id: &str, run_id: &str, sequence: Sequence) -> Envelope {
+        self.with_meta_at(session_id, run_id, sequence, now_ms())
+    }
+
+    /// Same as `with_meta` but with an explicit timestamp — used by tests
+    /// (deterministic snapshots) and hosts that carry their own clock.
+    pub fn with_meta_at(
+        self,
+        session_id: &str,
+        run_id: &str,
+        sequence: Sequence,
+        timestamp_ms: u64,
+    ) -> Envelope {
+        // Derived composite id: stable under replay (same event → same id,
+        // unlike a counter), unique across runs by construction.
+        let event_id = format!("evt_{run_id}_{sequence}");
         Envelope {
+            schema_version: EVENT_SCHEMA_VERSION,
+            event_id,
+            timestamp: timestamp_ms,
             session_id: session_id.to_string(),
             run_id: run_id.to_string(),
             sequence,
@@ -106,12 +131,33 @@ impl RunEvent {
     }
 }
 
+/// Wall-clock milliseconds since UNIX epoch (0 if clock is before epoch).
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// 带元数据的事件信封（Tauri event payload）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Envelope {
+    /// 事件协议版本；缺省按当前版本处理（兼容旧载荷反序列化）
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+    /// 全局事件 ID（`evt_{run_id}_{sequence}`）：重放稳定、跨 Run 唯一，
+    /// 供 WebSocket 重连去重 / 日志追踪 / replay 定位
+    #[serde(default)]
+    pub event_id: String,
+    /// Runtime 侧产生时间（ms since epoch）；旧载荷缺省 0。性能分析、
+    /// Agent Trace 用，避免依赖消费方收到事件的时钟
+    #[serde(default)]
+    pub timestamp: u64,
     pub session_id: String,
     pub run_id: String,
     pub sequence: Sequence,
+    // NOTE: agent_id field slot reserved — add when multi-agent scheduling
+    // (Phase 5) actually introduces agent identity, not before.
     #[serde(flatten)]
     pub event: RunEvent,
 }
@@ -229,94 +275,239 @@ mod tests {
         let env = RunEvent::MessageDelta {
             text: "你好".into(),
         }
-        .with_meta("sess-1", "run-1", 3);
+        .with_meta_at("sess-1", "run-1", 3, 1_700_000_000_000);
+        assert_eq!(env.schema_version, EVENT_SCHEMA_VERSION);
         assert_eq!(env.session_id, "sess-1");
         assert_eq!(env.run_id, "run-1");
         assert_eq!(env.sequence, 3);
+        assert_eq!(env.timestamp, 1_700_000_000_000);
+        assert_eq!(env.event_id, "evt_run-1_3");
+    }
+
+    #[test]
+    fn envelope_event_id_is_replay_stable() {
+        // Same (run_id, sequence) must yield the same event_id — dedup on
+        // reconnect/replay depends on it.
+        let a = RunEvent::RunCancelled.with_meta_at("s", "run_x", 7, 1);
+        let b = RunEvent::RunFailed { error: "e".into() }.with_meta_at("s", "run_x", 7, 2);
+        assert_eq!(a.event_id, b.event_id);
+        assert_ne!(
+            a.event_id,
+            RunEvent::RunCancelled
+                .with_meta_at("s", "run_x", 8, 1)
+                .event_id
+        );
+    }
+
+    #[test]
+    fn envelope_tolerates_legacy_payload_without_v2_fields() {
+        // v1 payloads have no event_id/timestamp — must deserialize with
+        // defaults (contract for old hosts; see docs/TESTS.md §2).
+        let legacy = r#"{"schema_version":1,"session_id":"s","run_id":"r","sequence":2,"type":"run_cancelled"}"#;
+        let env: Envelope = serde_json::from_str(legacy).unwrap();
+        assert_eq!(env.schema_version, 1);
+        assert_eq!(env.sequence, 2);
+        assert_eq!(env.event_id, "");
+        assert_eq!(env.timestamp, 0);
+        assert!(matches!(env.event, RunEvent::RunCancelled));
+    }
+
+    #[test]
+    fn envelope_ignores_unknown_fields() {
+        // Forward compatibility: extra fields from future versions are
+        // silently ignored (locked as a contract here).
+        let future = r#"{
+            "schema_version": 2,
+            "event_id": "evt_r_1",
+            "timestamp": 42,
+            "session_id": "s",
+            "run_id": "r",
+            "sequence": 1,
+            "type": "message_delta",
+            "text": "hi",
+            "future_field": {"nested": true}
+        }"#;
+        let env: Envelope = serde_json::from_str(future).unwrap();
+        assert_eq!(env.sequence, 1);
+        assert!(matches!(env.event, RunEvent::MessageDelta { .. }));
     }
 
     #[test]
     fn envelope_serializes_with_snake_case_type_tag() {
-        // 前端依赖这个 JSON 形状：type 字段 + flatten 的事件载荷
-        let env = RunEvent::MessageDelta { text: "hi".into() }.with_meta("s", "r", 1);
+        // 前端依赖这个 JSON 形状：type 字段 + flatten 的事件载荷 + schema_version
+        let env = RunEvent::MessageDelta { text: "hi".into() }.with_meta_at("s", "r", 1, 42);
         let v = serde_json::to_value(&env).unwrap();
         assert_eq!(v["type"], "message_delta");
+        assert_eq!(v["schema_version"], EVENT_SCHEMA_VERSION);
+        assert_eq!(v["event_id"], "evt_r_1");
+        assert_eq!(v["timestamp"], 42);
         assert_eq!(v["text"], "hi");
         assert_eq!(v["session_id"], "s");
         assert_eq!(v["run_id"], "r");
         assert_eq!(v["sequence"], 1);
     }
 
-    #[test]
-    fn run_event_variants_serialize_with_expected_tags() {
-        let cases: Vec<(RunEvent, &str)> = vec![
-            (
-                RunEvent::StatusChanged {
-                    status: RunStatus::Analyzing,
-                },
-                "status_changed",
-            ),
-            (
-                RunEvent::ToolCallStarted {
-                    tool_call_id: "t".into(),
-                    tool_name: "read_file".into(),
-                    args_summary: "".into(),
-                    args: None,
-                },
-                "tool_call_started",
-            ),
-            (
-                RunEvent::ToolCallCompleted {
-                    tool_call_id: "t".into(),
-                    tool_name: "write_file".into(),
-                    result_summary: "".into(),
-                    artifacts: vec![],
-                },
-                "tool_call_completed",
-            ),
-            (
-                RunEvent::ToolCallFailed {
-                    tool_call_id: "t".into(),
-                    tool_name: "x".into(),
-                    error: "e".into(),
-                },
-                "tool_call_failed",
-            ),
-            (
-                RunEvent::PermissionRequested {
-                    tool_call_id: "t".into(),
-                    tool_name: "write_file".into(),
-                    summary: "s".into(),
-                },
-                "permission_requested",
-            ),
-            (
-                RunEvent::PermissionDecided {
-                    tool_call_id: "t".into(),
-                    decision: crate::permissions::Decision::Allow,
-                },
-                "permission_decided",
-            ),
-            (
-                RunEvent::RunCompleted {
-                    final_text: "f".into(),
-                },
-                "run_completed",
-            ),
-            (RunEvent::RunFailed { error: "e".into() }, "run_failed"),
-            (RunEvent::RunCancelled, "run_cancelled"),
-            (RunEvent::CompactionCompleted, "compaction_completed"),
-            (
-                RunEvent::PlanUpdated {
-                    plan: Plan::empty(),
-                },
-                "plan_updated",
-            ),
-        ];
-        for (event, expected_tag) in cases {
-            let v = serde_json::to_value(&event).unwrap();
-            assert_eq!(v["type"], expected_tag, "事件标签不符: {v}");
+    // ===== 快照契约（PLAN 1.2）：全部变体 JSON 形状锁定 =====
+
+    /// 穷尽映射：新增 RunEvent 变体时此处编译报错，
+    /// 提醒同步更新 all_events()、快照文件与 docs/EVENTS.md。
+    fn tag_of(ev: &RunEvent) -> &'static str {
+        match ev {
+            RunEvent::MessageDelta { .. } => "message_delta",
+            RunEvent::ThinkingDelta { .. } => "thinking_delta",
+            RunEvent::ToolCallArgsDelta { .. } => "tool_call_args_delta",
+            RunEvent::StatusChanged { .. } => "status_changed",
+            RunEvent::PlanUpdated { .. } => "plan_updated",
+            RunEvent::ToolCallStarted { .. } => "tool_call_started",
+            RunEvent::ToolCallCompleted { .. } => "tool_call_completed",
+            RunEvent::ToolCallFailed { .. } => "tool_call_failed",
+            RunEvent::PermissionRequested { .. } => "permission_requested",
+            RunEvent::PermissionDecided { .. } => "permission_decided",
+            RunEvent::RunCompleted { .. } => "run_completed",
+            RunEvent::CompactionCompleted => "compaction_completed",
+            RunEvent::RunFailed { .. } => "run_failed",
+            RunEvent::RunCancelled => "run_cancelled",
         }
+    }
+
+    const ALL_EVENT_TAGS: &[&str] = &[
+        "message_delta",
+        "thinking_delta",
+        "tool_call_args_delta",
+        "status_changed",
+        "plan_updated",
+        "tool_call_started",
+        "tool_call_completed",
+        "tool_call_failed",
+        "permission_requested",
+        "permission_decided",
+        "run_completed",
+        "compaction_completed",
+        "run_failed",
+        "run_cancelled",
+    ];
+
+    /// 快照样本：每个变体构造一次（含代表性载荷）。
+    /// 新增变体必须在此同步加入，否则 all_events_covers_every_variant 失败。
+    fn all_events() -> Vec<RunEvent> {
+        vec![
+            RunEvent::MessageDelta {
+                text: "增量文本".into(),
+            },
+            RunEvent::ThinkingDelta {
+                text: "思考增量".into(),
+            },
+            RunEvent::ToolCallArgsDelta {
+                tool_call_id: "tc1".into(),
+                tool_name: "write_file".into(),
+                fragment: "{\"path\":".into(),
+            },
+            RunEvent::StatusChanged {
+                status: RunStatus::Analyzing,
+            },
+            RunEvent::PlanUpdated {
+                plan: Plan {
+                    steps: vec![PlanStep {
+                        id: "s1".into(),
+                        title: "示例步骤".into(),
+                        state: PlanStepState::InProgress,
+                    }],
+                },
+            },
+            RunEvent::ToolCallStarted {
+                tool_call_id: "tc1".into(),
+                tool_name: "write_file".into(),
+                args_summary: "path=a.txt".into(),
+                args: Some(serde_json::json!({"path": "a.txt"})),
+            },
+            RunEvent::ToolCallCompleted {
+                tool_call_id: "tc1".into(),
+                tool_name: "write_file".into(),
+                result_summary: "已写入 a.txt".into(),
+                artifacts: vec![crate::tool::Artifact {
+                    id: "art_fix_1".into(),
+                    kind: crate::tool::ArtifactKind::FileChange,
+                    location: "a.txt".into(),
+                    metadata: serde_json::json!({"mode": "create", "bytes": 128}),
+                    preview: None,
+                }],
+            },
+            RunEvent::ToolCallFailed {
+                tool_call_id: "tc1".into(),
+                tool_name: "read_file".into(),
+                error: "文件不存在".into(),
+            },
+            RunEvent::PermissionRequested {
+                tool_call_id: "tc1".into(),
+                tool_name: "write_file".into(),
+                summary: "写入 a.txt".into(),
+            },
+            RunEvent::PermissionDecided {
+                tool_call_id: "tc1".into(),
+                decision: crate::permissions::Decision::Allow,
+            },
+            RunEvent::RunCompleted {
+                final_text: "任务完成".into(),
+            },
+            RunEvent::CompactionCompleted,
+            RunEvent::RunFailed {
+                error: "网关超时".into(),
+            },
+            RunEvent::RunCancelled,
+        ]
+    }
+
+    fn render_snapshot() -> String {
+        let envelopes: Vec<Envelope> = all_events()
+            .into_iter()
+            .enumerate()
+            .map(|(i, ev)| ev.with_meta_at("sess-1", "run-1", (i + 1) as u64, 1_700_000_000_000))
+            .collect();
+        let mut json = serde_json::to_string_pretty(&envelopes).unwrap();
+        json.push('\n');
+        json
+    }
+
+    #[test]
+    fn all_events_covers_every_variant() {
+        let tags: std::collections::HashSet<&str> = all_events().iter().map(tag_of).collect();
+        assert_eq!(
+            tags.len(),
+            ALL_EVENT_TAGS.len(),
+            "all_events() 未覆盖全部变体，新增变体必须加入快照构造"
+        );
+        for t in ALL_EVENT_TAGS {
+            assert!(tags.contains(t), "快照构造缺少事件 {t}");
+        }
+    }
+
+    #[test]
+    fn event_envelope_json_matches_schema_v2_snapshot() {
+        for ev in all_events() {
+            let _ = tag_of(&ev); // 编译期穷尽保证
+        }
+        let actual = render_snapshot();
+        let expected = include_str!("events_testdata/events_schema_v2.snapshot.json");
+        assert_eq!(
+            actual, expected,
+            "事件 JSON 形状发生变化——这是破坏性契约变更：\
+             schema_version +1 → cargo test -p agent-core write_event_snapshot -- --ignored \
+             重写快照 → 同步 docs/EVENTS.md 与前端消费方"
+        );
+    }
+
+    /// 破坏性变更后的快照再生成：
+    /// `cargo test -p agent-core write_event_snapshot -- --ignored`
+    #[test]
+    #[ignore]
+    fn write_event_snapshot() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("events_testdata");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("events_schema_v2.snapshot.json");
+        std::fs::write(&path, render_snapshot()).unwrap();
+        println!("已写入 {}", path.display());
     }
 
     #[test]
@@ -349,14 +540,18 @@ mod tests {
             tool_call_id: "t".into(),
             tool_name: "w".into(),
             result_summary: "".into(),
-            artifacts: vec![ArtifactRef {
-                path: "a.txt".into(),
-                kind: crate::tool::ArtifactKind::FileCreated,
+            artifacts: vec![crate::tool::Artifact {
+                id: "art_fix_2".into(),
+                kind: crate::tool::ArtifactKind::FileChange,
+                location: "a.txt".into(),
+                metadata: serde_json::Value::Null,
+                preview: None,
             }],
         })
         .unwrap();
         assert!(with["artifacts"].is_array());
-        assert_eq!(with["artifacts"][0]["path"], "a.txt");
+        assert_eq!(with["artifacts"][0]["location"], "a.txt");
+        assert_eq!(with["artifacts"][0]["kind"], "file_change");
 
         let without = serde_json::to_value(&RunEvent::ToolCallCompleted {
             tool_call_id: "t".into(),

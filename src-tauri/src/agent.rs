@@ -420,6 +420,7 @@ pub async fn agent_start_run(
                     .or(Some(DEFAULT_AUTO_COMPACT_TOKENS))
                     .filter(|&t| t > 0),
                 policy,
+                texts: std::sync::Arc::new(agent_core::TextPack::zh()),
             };
             let backend: Arc<dyn ModelBackend> =
                 Arc::new(RigBackend::new(base_url, api_key, model_name));

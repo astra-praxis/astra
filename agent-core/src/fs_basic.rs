@@ -9,7 +9,7 @@ use crate::permissions::ensure_within_root;
 use crate::tool::{AgentTool, Artifact, ArtifactKind, ToolContext, ToolOutput};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ===== list_files =====
 
@@ -176,6 +176,11 @@ impl AgentTool for WriteFile {
             .ok_or_else(|| Error::tool("write_file", "缺少 content"))?;
         let full = ensure_within_root(&self.root, &PathBuf::from(path))?;
         let target = self.root.join(&full);
+        let mode = if target.exists() {
+            "overwrite"
+        } else {
+            "create"
+        };
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -186,19 +191,23 @@ impl AgentTool for WriteFile {
             .map_err(|e| Error::tool("write_file", e.to_string()))?;
         Ok(ToolOutput::with_artifacts(
             format!("已写入 {path}（{} 字节）", content.len()),
-            vec![Artifact {
-                path: path.to_string(),
-                kind: ArtifactKind::FileCreated,
-            }],
+            vec![Artifact::new(ArtifactKind::FileChange, path.to_string())
+                .with_metadata(json!({ "mode": mode, "bytes": content.len() }))],
         ))
     }
 }
 
 /// 注册基础文件工具（需要项目根）
-pub fn register(reg: crate::tool::ToolRegistry, root: &PathBuf) -> crate::tool::ToolRegistry {
-    reg.register(ListFiles { root: root.clone() })
-        .register(ReadFile { root: root.clone() })
-        .register(WriteFile { root: root.clone() })
+pub fn register(reg: crate::tool::ToolRegistry, root: &Path) -> crate::tool::ToolRegistry {
+    reg.register(ListFiles {
+        root: root.to_path_buf(),
+    })
+    .register(ReadFile {
+        root: root.to_path_buf(),
+    })
+    .register(WriteFile {
+        root: root.to_path_buf(),
+    })
 }
 
 #[cfg(test)]
@@ -280,8 +289,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(out.artifacts[0].path, "docs/2026/report.md");
-        assert_eq!(out.artifacts[0].kind, ArtifactKind::FileCreated);
+        assert_eq!(out.artifacts[0].location, "docs/2026/report.md");
+        assert_eq!(out.artifacts[0].kind, ArtifactKind::FileChange);
+        assert_eq!(out.artifacts[0].metadata["mode"], "create");
+        assert_eq!(out.artifacts[0].metadata["bytes"], 2);
         assert_eq!(
             std::fs::read_to_string(root.join("docs/2026/report.md")).unwrap(),
             "hi"

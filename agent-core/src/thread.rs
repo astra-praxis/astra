@@ -17,6 +17,7 @@ use crate::events::Envelope;
 use crate::model::{ChatMessage, MessageContent, ModelBackend, Role};
 use crate::permissions::{PermissionBridge, ToolPolicy};
 use crate::run::{execute, RunConfig, RunHandle, DEFAULT_AUTO_COMPACT_TOKENS, DEFAULT_MAX_TURNS};
+use crate::texts::{SharedTextPack, TextPack};
 use crate::tool::ToolRegistry;
 
 pub struct ThreadConfig {
@@ -31,6 +32,8 @@ pub struct ThreadConfig {
     /// 上下文自动压缩阈值（估算 token 数）；None = 关闭
     pub auto_compact_tokens: Option<u64>,
     pub policy: ToolPolicy,
+    /// 文案模板包（默认中文；宿主可注入替换为其他语言/口吻）
+    pub texts: SharedTextPack,
 }
 
 impl ThreadConfig {
@@ -44,6 +47,7 @@ impl ThreadConfig {
             max_turns: DEFAULT_MAX_TURNS,
             auto_compact_tokens: Some(DEFAULT_AUTO_COMPACT_TOKENS),
             policy: ToolPolicy::default(),
+            texts: Arc::new(TextPack::zh()),
         }
     }
 }
@@ -107,6 +111,7 @@ impl Thread {
         config.max_turns = self.config.max_turns;
         config.auto_compact_tokens = self.config.auto_compact_tokens;
         config.policy = self.config.policy.clone();
+        config.texts = Arc::clone(&self.config.texts);
 
         let backend = Arc::clone(&self.backend);
         let registry = self.registry.clone();

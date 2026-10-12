@@ -114,10 +114,13 @@ impl AgentTool for WriteFile {
             })?;
         Ok(ToolOutput::with_artifacts(
             format!("已写入 {path}（{} 字节）", content.len()),
-            vec![agent_core::Artifact {
-                path: path.to_string(),
-                kind: agent_core::ArtifactKind::FileCreated,
-            }],
+            vec![
+                agent_core::Artifact::new(agent_core::ArtifactKind::FileChange, path)
+                    .with_metadata(serde_json::json!({
+                        "mode": "overwrite",
+                        "bytes": content.len(),
+                    })),
+            ],
         ))
     }
 }
@@ -127,6 +130,16 @@ impl AgentTool for WriteFile {
 fn print_event(seq: u64, ev: &RunEvent) {
     match ev {
         RunEvent::MessageDelta { text } => print!("{text}"),
+        RunEvent::ThinkingDelta { text } => print!("{text}"),
+        RunEvent::ToolCallArgsDelta {
+            tool_name,
+            fragment,
+            ..
+        } => {
+            if !fragment.is_empty() {
+                print!("[seq {seq}] {tool_name} 参数流: {fragment}")
+            }
+        }
         RunEvent::StatusChanged { status } => println!("\n[seq {seq}] 状态 → {status:?}"),
         RunEvent::ToolCallStarted {
             tool_name,
@@ -145,7 +158,10 @@ fn print_event(seq: u64, ev: &RunEvent) {
             } else {
                 format!(
                     " (产物: {:?})",
-                    artifacts.iter().map(|a| &a.path).collect::<Vec<_>>()
+                    artifacts
+                        .iter()
+                        .map(|a| format!("{} ({:?})", a.location, a.kind))
+                        .collect::<Vec<_>>()
                 )
             }
         ),

@@ -77,9 +77,6 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
-      rxjs:
-        specifier: ^7.8.2
-        version: 7.8.2
       zustand:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)
@@ -1520,9 +1517,6 @@ packages:
     resolution: {integrity: sha512-iIMWbptLYsZdGTJMH8ngApXdsCatE6bCMv2eqGIfGE1++kwh7TCWBdWKK0FKC0yx++196vGK5VdagzRXSLMa8A==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
-
-  rxjs@7.8.2:
-    resolution: {integrity: sha512-dhKf903U/PQZY6boNNtAGdWbG85WAbjT/1xYoZIC7FAY0yWapOBQVsVrDl58W86//e1VpMNBtRV4MaXfdMySFA==}
 
   sass@1.105.1:
     resolution: {integrity: sha512-1CnAWPyrrnVQzXGB/DUep1vYCKCm1CIBr+YxjjiW6wk9qtzemnGP4qicH56T2F9S4Hjtv/Ne3jDz8JqfdDU4oA==}
@@ -3251,10 +3245,6 @@ snapshots:
       '@rollup/rollup-win32-x64-gnu': 4.64.3
       '@rollup/rollup-win32-x64-msvc': 4.64.3
       fsevents: 2.3.3
-
-  rxjs@7.8.2:
-    dependencies:
-      tslib: 2.8.1
 
   sass@1.105.1:
     dependencies:

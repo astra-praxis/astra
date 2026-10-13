@@ -1,7 +1,6 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router';
 import AppLayout from './components/layout/AppLayout';
 import WorkspacePage from './pages/WorkspacePage';
-import ChatPage from './pages/chat/ChatPage';
 import AgentPage from './pages/AgentPage';
 import ToolsPage from './pages/ToolsPage';
 import DownloaderPage from './pages/DownloaderPage';
@@ -23,7 +22,6 @@ export default function App() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<WorkspacePage />} />
-          <Route path="/chat" element={<ChatPage />} />
           <Route path="/agent" element={<AgentPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tools/downloader" element={<DownloaderPage />} />

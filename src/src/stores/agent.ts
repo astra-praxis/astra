@@ -543,7 +543,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     localStorage.setItem('astra-agent-autocompact', String(n));
   },
   setError: (v) => set((s) => ({ error: v || persistenceMessage(s.persistenceErrors[s.sessionId]) })),
-  setProjectPath: (v) => set({ projectPath: v }),
+  setProjectPath: (v) => {
+    // 记录最近使用的项目文件夹（去重、最多 5 个；空 = 解绑不记录）
+    if (v) {
+      try {
+        const list: string[] = JSON.parse(localStorage.getItem('astra.recentProjects') ?? '[]');
+        const next = [v, ...list.filter((p) => p !== v)].slice(0, 5);
+        localStorage.setItem('astra.recentProjects', JSON.stringify(next));
+      } catch {
+        // localStorage 不可用时仅跳过记录
+      }
+    }
+    set({ projectPath: v });
+  },
   setAutoApprove: (v) => {
     set({ autoApprove: v });
     localStorage.setItem('astra-agent-autoapprove', v ? '1' : '0');

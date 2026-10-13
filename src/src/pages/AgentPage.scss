@@ -77,6 +77,11 @@ body .content:has(.agent-root) {
     }
   }
 
+  // 未选项目时的入口容器：锚定最近文件夹下拉菜单
+  &__pickwrap {
+    position: relative;
+  }
+
   // 项目切换菜单（锚在 chip 下方，Zed project picker 式）
   &__proj-menu {
     position: absolute;
@@ -169,34 +174,6 @@ body .content:has(.agent-root) {
     margin: 4px 2px;
     background: var(--border-color);
     flex-shrink: 0;
-  }
-
-  &__iconbtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 5px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.12s ease;
-
-    &:hover:not(:disabled) {
-      color: var(--brand-600);
-      background: var(--brand-100);
-    }
-
-    &:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    &.is-active {
-      color: var(--brand-600);
-      background: var(--brand-50);
-    }
   }
 
   // 未选项目时的「选择项目文件夹」按钮（编辑器式打开文件夹入口）

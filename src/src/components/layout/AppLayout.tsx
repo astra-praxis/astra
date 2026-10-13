@@ -8,7 +8,6 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   Bot,
   FolderOpen,
-  MessageSquare,
   Wrench,
   ScrollText,
   Settings,
@@ -24,7 +23,6 @@ import './layout.scss';
 
 const menuItems = [
   { id: 'workspace', label: '工作空间', path: '/', icon: FolderOpen },
-  { id: 'chat', label: '对话', path: '/chat', icon: MessageSquare },
   { id: 'agent', label: 'Agent', path: '/agent', icon: Bot },
   { id: 'tools', label: '工具箱', path: '/tools', icon: Wrench },
   { id: 'logs', label: '日志', path: '/logs', icon: ScrollText },
@@ -88,9 +86,9 @@ export default function AppLayout() {
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + '/');
 
-  // Agent / Chat 页：模型切换收进输入框、顶部功能移入标题栏（页面通过 portal 渲染到挂载点）
+  // Agent 页：模型切换收进输入框、顶部功能移入标题栏（页面通过 portal 渲染到挂载点）
   const isAgent = location.pathname.startsWith('/agent');
-  const pageTitlebarId = isAgent ? 'agent' : location.pathname.startsWith('/chat') ? 'chat' : null;
+  const pageTitlebarId = isAgent ? 'agent' : null;
 
   return (
     <div className={`app-layout${sidebarCollapsed ? ' collapsed' : ''}`}>

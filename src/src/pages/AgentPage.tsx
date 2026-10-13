@@ -25,12 +25,14 @@ import {
   CircleX,
   FileText,
   FolderOpen,
-  History,
-  Sparkles,
   HelpCircle,
+  History,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RotateCcw,
+  Sparkles,
   Square,
   Wrench,
   X,
@@ -691,23 +693,43 @@ export default function AgentPage() {
 
   // ===== 标题栏挂载点（AppLayout 在 /agent 路由下渲染的 portal 容器） =====
   const [tbLeft, setTbLeft] = useState<HTMLElement | null>(null);
-  const [tbRight, setTbRight] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setTbLeft(document.getElementById('agent-titlebar-left'));
-    setTbRight(document.getElementById('agent-titlebar-right'));
   }, []);
 
   // ===== 项目切换菜单（Zed 式：点项目名弹出最近项目 + 打开文件夹等操作） =====
   const [projMenuOpen, setProjMenuOpen] = useState(false);
   const projRootRef = useRef<HTMLDivElement | null>(null);
+  // 未选项目时的「选择项目文件夹」入口：同样支持最近使用文件夹下拉（Zed 式）
+  const [pickMenuOpen, setPickMenuOpen] = useState(false);
+  const [recentPicks, setRecentPicks] = useState<{ name: string; path: string }[]>([]);
+  const pickRootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!projMenuOpen) return;
+    if (!projMenuOpen && !pickMenuOpen) return;
     function onDown(e: MouseEvent) {
       if (!projRootRef.current?.contains(e.target as Node)) setProjMenuOpen(false);
+      if (!pickRootRef.current?.contains(e.target as Node)) setPickMenuOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
-  }, [projMenuOpen]);
+  }, [projMenuOpen, pickMenuOpen]);
+
+  /** 未选项目入口：合并工作空间已知项目 + 最近使用记录，总是弹菜单（无记录时仅剩「选择其他文件夹…」） */
+  const openPickMenu = useCallback(() => {
+    const known = projects.map((p) => ({ name: p.name, path: p.path }));
+    let recents: string[] = [];
+    try {
+      recents = JSON.parse(localStorage.getItem('astra.recentProjects') ?? '[]');
+    } catch {
+      recents = [];
+    }
+    const seen = new Set(known.map((p) => p.path));
+    const extras = (Array.isArray(recents) ? recents : [])
+      .filter((p) => typeof p === 'string' && p && !seen.has(p))
+      .map((p) => ({ name: p.split('/').pop() || p, path: p }));
+    setRecentPicks([...known, ...extras]);
+    setPickMenuOpen(true);
+  }, [projects]);
 
   /** 新建会话标签：当前会话驻留内存，切回零重建 */
   const newTab = useCallback(() => {
@@ -836,28 +858,53 @@ export default function AgentPage() {
               )}
             </div>
           ) : (
-            <>
-              <button type="button" className="agent-tb__pick" onClick={() => void pickProjectFolder()}>
+            <div className="agent-tb__pickwrap" ref={pickRootRef}>
+              <button type="button" className="agent-tb__pick" onClick={openPickMenu}>
                 <FolderOpen size={14} strokeWidth={1.8} />
                 选择项目文件夹
               </button>
-            </>
+              {pickMenuOpen && (
+                <div className="agent-tb__proj-menu" role="menu">
+                  {recentPicks.length > 0 && (
+                    <>
+                      <div className="agent-tb__proj-list">
+                        {recentPicks.map((p) => (
+                          <button
+                            key={p.path}
+                            type="button"
+                            role="menuitem"
+                            className="agent-tb__proj-item"
+                            title={p.path}
+                            onClick={() => {
+                              setProjectPath(p.path);
+                              setError('');
+                              setPickMenuOpen(false);
+                            }}
+                          >
+                            <span className="agent-tb__proj-item-name">{p.name}</span>
+                            <span className="agent-tb__proj-item-path">{p.path}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="agent-tb__proj-sep" />
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-tb__proj-item"
+                    onClick={() => {
+                      setPickMenuOpen(false);
+                      void pickProjectFolder();
+                    }}
+                  >
+                    选择其他文件夹…
+                  </button>
+                </div>
+              )}
+            </div>
           ),
           tbLeft,
-        )}
-      {tbRight &&
-        createPortal(
-          <>
-            <button
-              type="button"
-              className={`agent-tb__iconbtn${historyOpen ? ' is-active' : ''}`}
-              onClick={toggleHistory}
-              title={historyOpen ? '隐藏历史面板' : '显示历史面板'}
-            >
-              <History size={15} strokeWidth={1.8} />
-            </button>
-          </>,
-          tbRight,
         )}
 
       {/* 历史面板：全高左侧栏（Zed 式），与右列并排；开合时右列整体（tab + 对话）一起右移/左移 */}
@@ -989,6 +1036,20 @@ export default function AgentPage() {
               {/* 底栏（Zed thread_view 式 justify-between 两组）：左 = 上下文/思考模式，右 = 用量 + 模型 + 发送 */}
               <div className="agent-dock__bar">
                 <div className="agent-dock__bar-left">
+                  {/* 历史面板开关（Zed 式推拉门）：从标题栏移入对话框底栏最左 */}
+                  <button
+                    type="button"
+                    className={`agent-dock__iconbtn${historyOpen ? ' is-active' : ''}`}
+                    onClick={toggleHistory}
+                    title={historyOpen ? '隐藏历史面板' : '显示历史面板'}
+                    aria-label={historyOpen ? '隐藏历史面板' : '显示历史面板'}
+                  >
+                    {historyOpen ? (
+                      <PanelLeftClose size={15} strokeWidth={1.8} />
+                    ) : (
+                      <PanelLeftOpen size={15} strokeWidth={1.8} />
+                    )}
+                  </button>
                   {projectPath && (
                     <button
                       type="button"

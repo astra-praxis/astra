@@ -31,6 +31,7 @@ import {
   HelpCircle,
   Loader2,
   Plus,
+  RotateCcw,
   Square,
   Wrench,
   X,
@@ -96,6 +97,195 @@ function humanizeTokens(n: number): string {
     return `${Number.isInteger(v) ? v : v.toFixed(1)}k`;
   }
   return String(n);
+}
+
+// ===== Checkpoint（Phase 11.6，CHECKPOINT_SPEC）=====
+
+/** agent_checkpoint_list 的条目（后端 AgentCheckpointInfo） */
+interface CheckpointInfo {
+  id: string;
+  kind: string;
+  state: string;
+  thread_seq: number;
+  created_at: number;
+  parent_id: string | null;
+  has_workspace: boolean;
+}
+
+const CHECKPOINT_KIND_LABEL: Record<string, string> = {
+  manual: '手动',
+  before_turn: '对话前',
+  stage: '阶段',
+};
+
+const CHECKPOINT_STATE_LABEL: Record<string, string> = {
+  created: '未恢复',
+  restoring: '恢复中',
+  restored: '已恢复',
+  failed: '恢复失败',
+};
+
+/** 后端 ChatMessage JSON → 前端条目（checkpoint 回退后的历史只含 user/assistant 文本） */
+function chatMessageToEntries(messages: Array<Record<string, unknown>>): Entry[] {
+  const entries: Entry[] = [];
+  for (const message of messages) {
+    const role = message['role'];
+    const content = message['content'];
+    if (!Array.isArray(content)) continue;
+    const text = content
+      .map((block) =>
+        block && typeof block === 'object' && typeof (block as Record<string, unknown>)['text'] === 'string'
+          ? ((block as Record<string, unknown>)['text'] as string)
+          : '',
+      )
+      .filter(Boolean)
+      .join('');
+    if (!text) continue;
+    if (role === 'user') entries.push({ kind: 'user', text });
+    else if (role === 'assistant') entries.push({ kind: 'assistant', text, streaming: false });
+  }
+  return entries;
+}
+
+/**
+ * 检查点菜单（Zed 式）：时钟图标打开浮层；顶部「标记当前节点」创建 checkpoint，
+ * 下方列出已有节点（时间 + 游标 + 状态），点击确认后恢复。
+ */
+function CheckpointButton(props: {
+  disabled: boolean;
+  sessionId: string;
+  onRestored: (sessionId: string, checkpointId: string, entries: Entry[]) => void;
+  onError: (message: string) => void;
+}) {
+  const { disabled, sessionId, onRestored, onError } = props;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [items, setItems] = useState<CheckpointInfo[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [menuOpen]);
+
+  const openMenu = useCallback(() => {
+    setMenuOpen(true);
+    setLoading(true);
+    invoke<CheckpointInfo[]>('agent_checkpoint_list', { sessionId })
+      .then((list) => setItems(list))
+      .catch((e) => {
+        onError(`读取检查点失败：${String(e)}`);
+        setItems([]);
+      })
+      .finally(() => setLoading(false));
+  }, [sessionId, onError]);
+
+  const handleCreate = useCallback(async () => {
+    try {
+      await invoke('agent_checkpoint_create', { sessionId, kind: 'manual' });
+      openMenu(); // 重新拉取列表
+    } catch (e) {
+      onError(`创建检查点失败：${String(e)}`);
+    }
+  }, [sessionId, openMenu, onError]);
+
+  const handleRestore = useCallback(
+    async (checkpointId: string) => {
+      // 工作区恢复会覆盖项目内文件，必须二次确认
+      const target = items?.find((c) => c.id === checkpointId);
+      const when = target ? new Date(target.created_at).toLocaleString() : '';
+      const confirmed = window.confirm(
+        `恢复到检查点 ${when}？\n\n对话将回退到该节点，项目内文件将被还原为该时刻的内容（新建文件不会被删除）。此操作不可撤销。`,
+      );
+      if (!confirmed) return;
+      setBusyId(checkpointId);
+      try {
+        const result = await invoke<{
+          checkpoint_id: string;
+          thread_seq: number;
+          workspace_restored: boolean;
+          messages: Array<Record<string, unknown>>;
+        }>('agent_checkpoint_restore', { sessionId, checkpointId });
+        const entries = chatMessageToEntries(result.messages);
+        entries.push({
+          kind: 'notice',
+          text: `已恢复到检查点（对话游标 ${result.thread_seq}${result.workspace_restored ? '，工作区已还原' : ''}）`,
+        });
+        onRestored(sessionId, result.checkpoint_id, entries);
+        setMenuOpen(false);
+      } catch (e) {
+        onError(`恢复失败：${String(e)}`);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [items, sessionId, onRestored, onError],
+  );
+
+  return (
+    <div ref={rootRef} className="agent-dock__checkpoint">
+      <button
+        type="button"
+        className="agent-dock__iconbtn"
+        disabled={disabled}
+        onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label="检查点"
+        title="检查点：标记当前进度，可随时回退对话与文件"
+      >
+        <History size={15} strokeWidth={1.8} />
+      </button>
+      {menuOpen && (
+        <div className="agent-dock__checkpoint-menu" role="menu">
+          <button type="button" role="menuitem" disabled={disabled || busyId != null} onClick={() => void handleCreate()}>
+            <span>标记当前节点</span>
+            <Plus size={13} strokeWidth={2} />
+          </button>
+          <div className="agent-dock__checkpoint-divider" />
+          {loading ? (
+            <div className="agent-dock__checkpoint-empty">
+              <Loader2 size={13} className="agent-dock__checkpoint-spin" /> 读取中…
+            </div>
+          ) : !items?.length ? (
+            <div className="agent-dock__checkpoint-empty">还没有检查点</div>
+          ) : (
+            [...items]
+              .reverse()
+              .map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={disabled || busyId != null}
+                  onClick={() => void handleRestore(item.id)}
+                >
+                  <span className="agent-dock__checkpoint-meta">
+                    <span className="agent-dock__checkpoint-time">
+                      {new Date(item.created_at).toLocaleString()}
+                    </span>
+                    <span className="agent-dock__checkpoint-tags">
+                      {CHECKPOINT_KIND_LABEL[item.kind] ?? item.kind} · 游标 {item.thread_seq}
+                      {item.state !== 'created' ? ` · ${CHECKPOINT_STATE_LABEL[item.state] ?? item.state}` : ''}
+                    </span>
+                  </span>
+                  {busyId === item.id ? (
+                    <Loader2 size={13} className="agent-dock__checkpoint-spin" />
+                  ) : (
+                    <RotateCcw size={13} strokeWidth={1.8} />
+                  )}
+                </button>
+              ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const EFFORT_LABEL: Record<ThinkingEffort, string> = {
@@ -734,6 +924,15 @@ export default function AgentPage() {
                     effort={thinkingEffort}
                     onToggle={() => setThinkingEnabled(!thinkingEnabled)}
                     onEffortChange={setThinkingEffort}
+                  />
+                  <CheckpointButton
+                    disabled={running}
+                    sessionId={sessionId}
+                    onRestored={(sid, _checkpointId, restoredEntries) => {
+                      useAgentStore.getState().restoreEntries(sid, restoredEntries);
+                      void useAgentStore.getState().saveSession(sid);
+                    }}
+                    onError={setError}
                   />
                 </div>
                 <div className="agent-dock__bar-right">

@@ -6,8 +6,9 @@ use std::{
 };
 
 use agent_core::{
-    astra_store_sqlite::SqliteThreadStore, ChatMessage, MessageRecord, ModelBackend,
-    PermissionBridge, Thread, ThreadConfig, ThreadQuery, ThreadRecord, ThreadStore, ToolRegistry,
+    astra_store_sqlite::{SqliteCheckpointStore, SqliteThreadStore},
+    ChatMessage, CheckpointStore, MessageRecord, ModelBackend, PermissionBridge, Thread,
+    ThreadConfig, ThreadQuery, ThreadRecord, ThreadStore, ToolRegistry,
 };
 
 pub type PersistenceErrors = Arc<Mutex<HashMap<String, String>>>;
@@ -70,6 +71,9 @@ impl ThreadStore for ReportingStore {
 #[derive(Default)]
 pub struct AgentThreads {
     store: Option<Arc<dyn ThreadStore>>,
+    /// Checkpoint persistence shares the same sqlite file as `store`
+    /// (CHECKPOINT_SPEC §9: separate trait, separate tables, no cascade).
+    checkpoints: Option<Arc<dyn CheckpointStore>>,
     pub threads: HashMap<String, Thread>,
     /// Terminal admission markers, including deletions whose cleanup must be retried.
     deleted: HashSet<String>,
@@ -85,15 +89,28 @@ impl AgentThreads {
             tokio::fs::create_dir_all(directory)
                 .await
                 .map_err(|e| e.to_string())?;
-            let inner = SqliteThreadStore::open(&directory.join("agent_threads.sqlite3"))
+            let path = directory.join("agent_threads.sqlite3");
+            let inner = SqliteThreadStore::open(&path)
                 .await
                 .map_err(|e| e.to_string())?;
             self.store = Some(Arc::new(ReportingStore {
                 inner: Arc::new(inner),
                 errors,
             }));
+            // Same database file, separate tables (spec §9). Opened once per
+            // process; a failure here is fatal for checkpoint features.
+            let checkpoints = SqliteCheckpointStore::open(&path)
+                .await
+                .map_err(|e| e.to_string())?;
+            self.checkpoints = Some(Arc::new(checkpoints));
         }
         Ok(())
+    }
+
+    pub fn checkpoints(&self) -> Result<Arc<dyn CheckpointStore>, String> {
+        self.checkpoints
+            .clone()
+            .ok_or_else(|| "Agent thread store is not open".into())
     }
 
     fn store(&self) -> Result<Arc<dyn ThreadStore>, String> {
@@ -215,6 +232,14 @@ impl AgentThreads {
                 .delete(&id.to_owned())
                 .await
                 .map_err(|e| e.to_string())?;
+        }
+        // Checkpoints are NOT cascaded from ThreadStore (spec §1.3/§9): the
+        // teardown flow calls delete_thread explicitly. Best-effort — a failed
+        // cleanup leaves soft-deleted rows for retention, never blocks removal.
+        if let Some(checkpoints) = &self.checkpoints {
+            if let Err(error) = checkpoints.delete_thread(&id.to_owned()).await {
+                eprintln!("agent checkpoint cleanup failed on session delete: {error}");
+            }
         }
         self.threads.remove(id);
         Ok(())

@@ -97,6 +97,7 @@ dependencies = [
  "astra-config",
  "astra-core",
  "astra-store-sqlite",
+ "astra-workspace",
 ]
 
 [[package]]
@@ -199,6 +200,7 @@ dependencies = [
  "astra-events",
  "astra-model",
  "async-trait",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",
@@ -228,6 +230,17 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "astra-workspace"
+version = "1.0.0-rc.1"
+dependencies = [
+ "astra-core",
+ "astra-error",
+ "async-trait",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

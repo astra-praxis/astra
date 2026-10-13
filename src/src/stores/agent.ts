@@ -408,6 +408,8 @@ interface AgentState extends RunWindow {
   setAutoCompactTokens: (v: number) => void;
   setRunState: (running: boolean, status: string | null) => void;
   pushUser: (text: string) => void;
+  /** checkpoint 恢复后用后端回传的历史重建条目（仅当会话一致且无运行中任务） */
+  restoreEntries: (sessionId: string, entries: Entry[]) => void;
   pushTerminal: (outcome: 'completed' | 'failed' | 'cancelled', text?: string) => void;
   /** 收到 ask_user 提问事件（追加问题卡条目） */
   pushQuestion: (q: AgentQuestionPayload) => void;
@@ -481,6 +483,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
   setRunState: (running, status) => set((s) => ({ ...transitionRun(s, running, status), settling: false })),
   pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }] })),
+  /** checkpoint 恢复：后端已回退，前端用回退后的消息序列重建会话视图（不计入当前 Run） */
+  restoreEntries: (sessionId, entries) =>
+    set((s) =>
+      s.running || s.sessionBusy || s.sessionId !== sessionId
+        ? s
+        : ({
+            ...transitionRun(s, false, null),
+            settling: false,
+            entries,
+            usage: null,
+            status: null,
+          }),
+    ),
   pushTerminal: (outcome, text) =>
     set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), { kind: 'terminal', outcome, text }] })),
   pushQuestion: (q) =>

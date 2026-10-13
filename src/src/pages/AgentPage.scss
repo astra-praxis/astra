@@ -1002,6 +1002,96 @@ body .content:has(.agent-root) {
     }
   }
 
+  // 检查点菜单：复用 effort-menu 浮层模式（CHECKPOINT_SPEC §11.6）
+  &__checkpoint {
+    position: relative;
+    display: flex;
+  }
+
+  &__checkpoint-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    min-width: 240px;
+    max-width: 320px;
+    padding: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px var(--shadow-md);
+    animation: agent-fade-in 0.12s ease;
+
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 6px 10px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.12s ease;
+
+      &:hover:not(:disabled) {
+        color: var(--brand-600);
+        background: var(--brand-50);
+      }
+
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      svg {
+        color: var(--brand-600);
+        flex-shrink: 0;
+      }
+    }
+  }
+
+  &__checkpoint-divider {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--border-color);
+  }
+
+  &__checkpoint-empty {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  &__checkpoint-spin {
+    animation: agent-spin 1s linear infinite;
+  }
+
+  &__checkpoint-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__checkpoint-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  &__checkpoint-tags {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
   // 上下文用量：环形进度（SVG）或 token 缩写
   &__usage {
     display: inline-flex;

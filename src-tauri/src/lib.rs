@@ -1521,6 +1521,10 @@ pub fn run() {
             agent::agent_reset_session,
             agent::agent_status,
             agent::agent_recent_events,
+            // Agent Checkpoints
+            agent::agent_checkpoint_list,
+            agent::agent_checkpoint_create,
+            agent::agent_checkpoint_restore,
             // Agent Sessions
             agent_sessions::list_agent_sessions,
             agent_sessions::save_agent_session,

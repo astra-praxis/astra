@@ -353,6 +353,175 @@
   }
 }
 
+/* ============================================================
+   Mermaid 图块（缩放查看器：内联 + 全屏 + 工具条 + 源码回退 + 错误提示）
+   注意：全屏实例经 portal 挂在 body 下，不在 .md-content 内，
+   因此这里全部用独立类名，不能写成 .md-content .md-mermaid
+   ============================================================ */
+
+.md-mermaid {
+  position: relative;
+  margin: 10px 0;
+  max-height: 520px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 10px;
+
+  // 全屏态：铺满视口（容器样式被 portal 复用）
+  &.is-full {
+    width: 92vw;
+    height: 92vh;
+    max-height: none;
+    margin: 0;
+    box-shadow: 0 24px 64px rgb(0 0 0 / 40%);
+  }
+}
+
+// 视口裁剪层：未缩放时自然滚动（长图），缩放后隐藏滚动条改用拖拽平移
+.md-mermaid-clip {
+  border-radius: inherit;
+  max-height: inherit;
+
+  .is-full & {
+    max-height: none;
+    height: 100%;
+  }
+}
+
+// 画布：缩放 + 平移作用在这一层
+.md-mermaid-canvas {
+  padding: 14px;
+  user-select: none;
+
+  &.is-pannable {
+    cursor: grab;
+  }
+
+  &.is-dragging {
+    cursor: grabbing;
+  }
+}
+
+.md-mermaid-svg {
+  display: flex;
+  justify-content: center;
+
+  svg {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+// 工具条：右上角悬浮，hover 图块时全亮
+.md-mermaid-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 5px;
+  background: color-mix(in srgb, var(--code-bg) 88%, transparent);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+
+  .md-mermaid:hover & {
+    opacity: 1;
+  }
+}
+
+.md-mermaid-tbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--code-text);
+  cursor: pointer;
+  transition: background 0.1s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--code-text) 12%, transparent);
+  }
+}
+
+.md-mermaid-zoom {
+  min-width: 40px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--code-text);
+  opacity: 0.8;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--code-text) 12%, transparent);
+    opacity: 1;
+  }
+}
+
+// 全屏遮罩（portal 到 body）
+.md-mermaid-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 62%);
+  backdrop-filter: blur(2px);
+}
+
+// 源码回退态（渲染中 / 失败）：给足最小高度，避免塌缩跳动
+.md-mermaid-src {
+  min-height: 160px;
+}
+
+.md-content .md-mermaid-src {
+  margin: 10px 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--code-bg);
+  position: relative;
+  max-width: 100%;
+
+  code {
+    display: block;
+    padding: 14px 16px;
+    background: transparent;
+    font-size: 13px;
+    line-height: 1.55;
+    overflow-x: auto;
+    max-width: 100%;
+    color: var(--code-text);
+    font-family: ui-monospace, 'SF Mono', Monaco, monospace;
+    white-space: pre;
+    tab-size: 2;
+  }
+}
+
+.md-content .md-mermaid-error {
+  margin: -4px 0 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--danger-500, #ef4444);
+  background: color-mix(in srgb, var(--danger-500, #ef4444) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger-500, #ef4444) 25%, transparent);
+  border-radius: 6px;
+}
+
 @keyframes md-slide-down {
   from {
     opacity: 0;

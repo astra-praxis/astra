@@ -25,6 +25,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Copy, Play } from 'lucide-react';
 import { parseActionHref, executeAction } from './action-links';
+import MermaidBlock from './MermaidBlock';
 import { useStreamingText } from '@/hooks/useStreamingText';
 import './MarkdownMessage.scss';
 import 'highlight.js/styles/github-dark.css';
@@ -36,9 +37,10 @@ import 'highlight.js/styles/github-dark.css';
 interface MdContextValue {
   workspacePath: string;
   isFresh: boolean;
+  streaming: boolean;
 }
 
-const MdContext = createContext<MdContextValue>({ workspacePath: '', isFresh: false });
+const MdContext = createContext<MdContextValue>({ workspacePath: '', isFresh: false, streaming: false });
 
 interface MarkdownMessageProps {
   content?: string;
@@ -55,7 +57,7 @@ const MarkdownMessage = memo(function MarkdownMessage({
   streaming = false,
 }: MarkdownMessageProps) {
   const renderedContent = useStreamingText(content, streaming);
-  const context = useMemo(() => ({ workspacePath, isFresh }), [workspacePath, isFresh]);
+  const context = useMemo(() => ({ workspacePath, isFresh, streaming }), [workspacePath, isFresh, streaming]);
   const markdown = useMemo(() => renderedContent ? (
     <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={mdComponents}>
       {renderedContent}
@@ -164,9 +166,12 @@ interface ExecState {
 }
 
 function CodeBlock({ className, rawText, children }: { className: string; rawText: string; children?: ReactNode }) {
-  const { workspacePath } = useContext(MdContext);
+  const { workspacePath, streaming } = useContext(MdContext);
   const lang = /language-([\w-]+)/.exec(className)?.[1] ?? '';
   const isShell = ['bash', 'sh', 'shell'].includes(lang);
+
+  // mermaid 块：渲染成图（失败回退源码），不走通用代码块 UI
+  if (lang === 'mermaid') return <MermaidBlock code={rawText} streaming={streaming} />;
 
   const [copied, setCopied] = useState(false);
   const [exec, setExec] = useState<ExecState | null>(null);

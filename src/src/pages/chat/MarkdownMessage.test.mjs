@@ -26,12 +26,14 @@ async function load(path, overrides = {}) {
 }
 const latest = await load('../../hooks/latestValue.ts');
 const hook = await load('../../hooks/useStreamingText.ts', { './latestValue': latest });
+let mermaidProps = null;
 const { default: MarkdownMessage } = await load('./MarkdownMessage.tsx', {
   'react-markdown': { default: ReactMarkdown },
   'remark-gfm': { default: remarkGfm },
   'rehype-highlight': { default: rehypeHighlight },
   '@/hooks/useStreamingText': hook,
   './action-links': { parseActionHref: () => null, executeAction: () => { throw Error('unexpected action'); } },
+  './MermaidBlock': { default: (props) => { mermaidProps = props; return null; } },
   '@tauri-apps/api/core': { invoke: () => { throw Error('unexpected IPC'); } },
   '@tauri-apps/api/event': { listen: () => { throw Error('unexpected subscription in SSR'); } },
 });
@@ -55,4 +57,11 @@ test('unknown language, malformed markdown and raw HTML do not crash or inject e
   const html = render('```unknown-language\nx < y\n```\n\n[unfinished](\n\n<script>alert(1)</script>');
   assert.match(html, /x &lt; y/);
   assert.doesNotMatch(html, /<script>/);
+});
+test('mermaid code blocks route to MermaidBlock with raw source and streaming flag', () => {
+  mermaidProps = null;
+  render('```mermaid\ngraph TD; A-->B;\n```', { streaming: true });
+  assert.ok(mermaidProps, 'mermaid block should render via MermaidBlock');
+  assert.equal(mermaidProps.code, 'graph TD; A-->B;\n');
+  assert.equal(mermaidProps.streaming, true);
 });

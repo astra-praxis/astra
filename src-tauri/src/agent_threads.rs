@@ -20,7 +20,7 @@ pub struct ReportingStore {
 }
 
 impl ReportingStore {
-    fn observe<T>(&self, id: &str, result: agent_core::Result<T>) -> agent_core::Result<T> {
+    fn observe_write<T>(&self, id: &str, result: agent_core::Result<T>) -> agent_core::Result<T> {
         if let Err(error) = &result {
             self.errors
                 .lock()
@@ -37,24 +37,30 @@ impl ThreadStore for ReportingStore {
         self.inner.create(record).await
     }
     async fn get(&self, id: &String) -> agent_core::Result<Option<ThreadRecord>> {
-        self.observe(id, self.inner.get(id).await)
+        self.inner.get(id).await
     }
     async fn update(&self, record: ThreadRecord) -> agent_core::Result<()> {
         let id = record.id.clone();
-        self.observe(&id, self.inner.update(record).await)
+        self.observe_write(&id, self.inner.update(record).await)
     }
     async fn append_message(
         &self,
         id: &String,
         message: ChatMessage,
     ) -> agent_core::Result<MessageRecord> {
-        self.observe(id, self.inner.append_message(id, message).await)
+        self.observe_write(id, self.inner.append_message(id, message).await)
     }
     async fn messages(&self, id: &String) -> agent_core::Result<Vec<MessageRecord>> {
-        self.observe(id, self.inner.messages(id).await)
+        self.inner.messages(id).await
+    }
+    async fn rewind_messages_to(&self, id: &String, seq: u64) -> agent_core::Result<()> {
+        // Write operation: observe for persistence-error accounting so the
+        // host gate treats a failed rewind like any other failed write
+        // (CHECKPOINT_SPEC §7 restore coordinator relies on this).
+        self.observe_write(id, self.inner.rewind_messages_to(id, seq).await)
     }
     async fn delete(&self, id: &String) -> agent_core::Result<()> {
-        self.inner.delete(id).await
+        self.observe_write(id, self.inner.delete(id).await)
     }
     async fn list(&self, query: ThreadQuery) -> agent_core::Result<Vec<ThreadRecord>> {
         self.inner.list(query).await
@@ -65,6 +71,7 @@ impl ThreadStore for ReportingStore {
 pub struct AgentThreads {
     store: Option<Arc<dyn ThreadStore>>,
     pub threads: HashMap<String, Thread>,
+    /// Terminal admission markers, including deletions whose cleanup must be retried.
     deleted: HashSet<String>,
 }
 
@@ -185,6 +192,9 @@ impl AgentThreads {
     }
 
     pub fn unload(&mut self, id: &str, errors: &PersistenceErrors) -> Result<(), String> {
+        if self.deleted.contains(id) && self.threads.contains_key(id) {
+            return Err("Cannot unload agent session with pending deletion; retry deletion".into());
+        }
         if let Some(error) = errors.lock().unwrap_or_else(|e| e.into_inner()).get(id) {
             return Err(format!("Cannot unload unsaved agent session: {error}"));
         }
@@ -194,16 +204,19 @@ impl AgentThreads {
 
     /// Caller holds the lifecycle gate, so no Run or write-through can race deletion.
     pub async fn delete(&mut self, id: &str) -> Result<(), String> {
+        let store = self.store()?;
+        // Match the SDK's terminal admission gate even if cleanup fails or is interrupted.
+        // Keep the cached Thread until success so retries retain its artifact registry.
+        self.deleted.insert(id.to_owned());
         if let Some(thread) = self.threads.get(id) {
             thread.delete().await.map_err(|e| e.to_string())?;
         } else {
-            self.store()?
+            store
                 .delete(&id.to_owned())
                 .await
                 .map_err(|e| e.to_string())?;
         }
         self.threads.remove(id);
-        self.deleted.insert(id.to_owned());
         Ok(())
     }
 }

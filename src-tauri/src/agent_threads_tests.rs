@@ -99,6 +99,169 @@ fn errors() -> PersistenceErrors {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
+struct FaultStore {
+    inner: Arc<dyn ThreadStore>,
+    fail_reads: std::sync::atomic::AtomicBool,
+    fail_delete: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl ThreadStore for FaultStore {
+    async fn create(&self, record: ThreadRecord) -> agent_core::Result<ThreadRecord> {
+        self.inner.create(record).await
+    }
+
+    async fn get(&self, id: &String) -> agent_core::Result<Option<ThreadRecord>> {
+        if self.fail_reads.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(agent_core::Error::Other("injected read failure".into()));
+        }
+        self.inner.get(id).await
+    }
+
+    async fn update(&self, record: ThreadRecord) -> agent_core::Result<()> {
+        self.inner.update(record).await
+    }
+
+    async fn append_message(
+        &self,
+        id: &String,
+        message: ChatMessage,
+    ) -> agent_core::Result<MessageRecord> {
+        self.inner.append_message(id, message).await
+    }
+
+    async fn messages(&self, id: &String) -> agent_core::Result<Vec<MessageRecord>> {
+        if self.fail_reads.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(agent_core::Error::Other("injected read failure".into()));
+        }
+        self.inner.messages(id).await
+    }
+
+    async fn rewind_messages_to(&self, id: &String, seq: u64) -> agent_core::Result<()> {
+        self.inner.rewind_messages_to(id, seq).await
+    }
+
+    async fn delete(&self, id: &String) -> agent_core::Result<()> {
+        if self.fail_delete.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(agent_core::Error::Other("injected delete failure".into()));
+        }
+        self.inner.delete(id).await
+    }
+
+    async fn list(&self, query: ThreadQuery) -> agent_core::Result<Vec<ThreadRecord>> {
+        self.inner.list(query).await
+    }
+}
+
+fn inject_faults(host: &mut AgentThreads, errors: &PersistenceErrors) -> Arc<FaultStore> {
+    let faults = Arc::new(FaultStore {
+        inner: host.store().unwrap(),
+        fail_reads: std::sync::atomic::AtomicBool::new(false),
+        fail_delete: std::sync::atomic::AtomicBool::new(false),
+    });
+    host.store = Some(Arc::new(ReportingStore {
+        inner: faults.clone(),
+        errors: errors.clone(),
+    }));
+    faults
+}
+
+#[tokio::test]
+async fn failed_delete_is_terminal_and_retryable_with_or_without_cached_thread() {
+    use std::sync::atomic::Ordering::SeqCst;
+
+    for cached in [true, false] {
+        let database = Database::new();
+        let errors = errors();
+        let mut host = AgentThreads::default();
+        host.open(&database.0, errors.clone()).await.unwrap();
+        let faults = inject_faults(&mut host, &errors);
+        let id = "delete-retry".to_owned();
+        load(&mut host, &id, Arc::new(Backend::default()))
+            .await
+            .unwrap();
+        if !cached {
+            host.unload(&id, &errors).unwrap();
+        }
+
+        faults.fail_delete.store(true, SeqCst);
+        assert!(host.delete(&id).await.is_err());
+        assert!(host.deleted.contains(&id));
+        assert_eq!(host.threads.contains_key(&id), cached);
+        assert!(host.store().unwrap().get(&id).await.unwrap().is_some());
+        let write_error = errors.lock().unwrap()[&id].clone();
+        assert!(write_error.contains("injected delete failure"));
+
+        // Neither failed nor successful reads may replace or acknowledge a write failure.
+        faults.fail_reads.store(true, SeqCst);
+        assert!(host.store().unwrap().get(&id).await.is_err());
+        assert!(host.store().unwrap().messages(&id).await.is_err());
+        faults.fail_reads.store(false, SeqCst);
+        assert!(host.store().unwrap().get(&id).await.unwrap().is_some());
+        assert!(host.store().unwrap().messages(&id).await.is_ok());
+        assert_eq!(errors.lock().unwrap()[&id], write_error);
+
+        // Admission and cleanup retention must not depend on the diagnostic map.
+        errors.lock().unwrap().clear();
+        if cached {
+            assert!(host.unload(&id, &errors).is_err());
+            assert!(host.threads.contains_key(&id));
+            let (tx, _rx) = tokio::sync::mpsc::channel::<Envelope>(1);
+            assert!(host.threads[&id].try_send("must reject", tx).is_err());
+        } else {
+            host.unload(&id, &errors).unwrap();
+        }
+        assert!(load(&mut host, &id, Arc::new(Backend::default()))
+            .await
+            .is_err());
+        assert!(host
+            .bind_image_config(&id, false, "https://gateway/v1", "test")
+            .await
+            .is_err());
+
+        faults.fail_delete.store(false, SeqCst);
+        host.delete(&id).await.unwrap();
+        host.delete(&id).await.unwrap();
+        assert!(!host.threads.contains_key(&id));
+        assert!(host.store().unwrap().get(&id).await.unwrap().is_none());
+        assert!(load(&mut host, &id, Arc::new(Backend::default()))
+            .await
+            .is_err());
+    }
+}
+
+#[tokio::test]
+async fn read_failures_do_not_mark_clean_history_dirty_or_prevent_unload() {
+    use std::sync::atomic::Ordering::SeqCst;
+
+    let database = Database::new();
+    let errors = errors();
+    let mut host = AgentThreads::default();
+    host.open(&database.0, errors.clone()).await.unwrap();
+    let faults = inject_faults(&mut host, &errors);
+    let id = "read-failure".to_owned();
+    load(&mut host, &id, Arc::new(Backend::default()))
+        .await
+        .unwrap();
+    drain(&host.threads[&id]).await;
+    let history = json!(host.threads[&id].messages());
+
+    faults.fail_reads.store(true, SeqCst);
+    assert!(host
+        .bind_image_config(&id, false, "https://gateway/v1", "test")
+        .await
+        .is_err());
+    assert!(host.store().unwrap().messages(&id).await.is_err());
+    assert!(errors.lock().unwrap().is_empty());
+    host.unload(&id, &errors).unwrap();
+
+    faults.fail_reads.store(false, SeqCst);
+    load(&mut host, &id, Arc::new(Backend::default()))
+        .await
+        .unwrap();
+    assert_eq!(json!(host.threads[&id].messages()), history);
+}
+
 #[tokio::test]
 async fn project_image_read_reaches_model_and_sqlite_without_event_payloads() {
     // Locally generated SDK PNG fixture, not a remote image.

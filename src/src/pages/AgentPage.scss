@@ -1076,6 +1076,22 @@ body .content:has(.agent-root) {
   animation: agent-spin 0.9s linear infinite;
 }
 
+// 状态文案切换时淡入上浮（key=label 重触发）
+.agent-statusline__label {
+  animation: agent-status-fade 0.28s ease;
+}
+
+@keyframes agent-status-fade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ===== 输入区 ===== */
 
 // 对齐 chat 页 Composer：竖排（textarea 在上，提示+按钮在下），胶囊圆角 + 聚焦光环

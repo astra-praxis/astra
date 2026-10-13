@@ -75,6 +75,30 @@ const STATUS_LABEL: Record<string, string> = {
   persisting: '保存上下文',
 };
 
+// 「分析中」阶段往往持续很久，固定一个文案很呆 —— 轮换一组短语（对齐 Claude Code 风格）
+const ANALYZING_QUIPS = [
+  '思考中…',
+  '分析上下文…',
+  '组织思路…',
+  '翻阅资料…',
+  '构思回复…',
+  '整理要点…',
+  '斟酌措辞…',
+  '检查细节…',
+];
+
+/** 运行期间每隔几秒换一个短语；active 变化时从头开始 */
+function useRunningQuip(active: boolean): string {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    setIdx(0);
+    const timer = setInterval(() => setIdx((i) => i + 1), 3200);
+    return () => clearInterval(timer);
+  }, [active]);
+  return ANALYZING_QUIPS[idx % ANALYZING_QUIPS.length];
+}
+
 // 权限确认卡文案按工具区分（未收录的工具用兜底文案）
 const PERM_ACTION_LABEL: Record<string, string> = {
   write_file: '请求写入文件',
@@ -1013,15 +1037,7 @@ export default function AgentPage() {
               />
             ))}
 
-            {running && (
-              <div className="agent-statusline">
-                <Loader2 size={13} strokeWidth={2} className="agent-statusline__spin" />
-                {STATUS_LABEL[status ?? ''] ?? '运行中'}
-                <button type="button" disabled={settling} onClick={() => void handleStop()}>
-                  停止
-                </button>
-              </div>
-            )}
+            {running && <StatusLine status={status} settling={settling} onStop={handleStop} />}
           </div>
 
           </div>
@@ -1265,6 +1281,27 @@ function AssistantCopyFooter({ text }: { text: string }) {
       >
         {copied ? <Check size={12} strokeWidth={2.2} /> : <Copy size={12} strokeWidth={1.8} />}
         {copied ? '已复制' : '复制'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * 运行中状态条：
+ * - 分析中/未知状态 → 轮换短语（否则一个“分析中”挂几十秒太呆）
+ * - 其它状态（执行工具/等待确认/压缩上下文…）信息量高，固定显示
+ * - 文案切换时淡入，避免硬蹦
+ */
+function StatusLine({ status, settling, onStop }: { status: string | null; settling: boolean; onStop: () => Promise<void> | void }) {
+  const quipActive = !status || status === 'analyzing';
+  const quip = useRunningQuip(quipActive);
+  const label = quipActive ? quip : (STATUS_LABEL[status] ?? '运行中');
+  return (
+    <div className="agent-statusline">
+      <Loader2 size={13} strokeWidth={2} className="agent-statusline__spin" />
+      <span key={label} className="agent-statusline__label">{label}</span>
+      <button type="button" disabled={settling} onClick={() => void onStop()}>
+        停止
       </button>
     </div>
   );

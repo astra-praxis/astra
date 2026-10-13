@@ -500,10 +500,13 @@ pub async fn agent_start_run(
         .threads
         .get(&session_id)
         .ok_or_else(|| "Agent thread is unavailable".to_string())?;
-    // Mid-session thinking switch (Zed pattern): applies to the cached thread
-    // immediately, including runs after restore. Persisted via write-through.
+    // Apply explicit request settings after restore, before admitting the Run.
+    // Await persistence and preserve the error instead of starting with stale settings.
     if req.thinking_enabled.is_some() || req.thinking_effort.is_some() {
-        thread.set_thinking(req.thinking_enabled, req.thinking_effort);
+        thread
+            .set_thinking(req.thinking_enabled, req.thinking_effort)
+            .await
+            .map_err(|error| error.to_string())?;
     }
     let previous_error = state
         .persistence_errors

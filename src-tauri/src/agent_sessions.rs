@@ -63,6 +63,15 @@ pub async fn save_agent_session(
 
     let now = session_store::unix_timestamp();
     if let Some(session) = sessions.iter_mut().find(|s| s.id == id) {
+        // 内容未变时不刷新 updated_at：切换会话/驻留存档会反复落库，
+        // 若无条件更新时间戳，历史列表（按 updated_at 倒序）顺序会跳变
+        if session.project_path == project_path
+            && session.project_name == project_name
+            && session.title == title
+            && session.entries == entries
+        {
+            return Ok(session.clone());
+        }
         session.project_path = project_path;
         session.project_name = project_name;
         session.title = title;

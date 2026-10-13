@@ -245,6 +245,7 @@ body .content:has(.agent-root) {
 }
 
 .agent-main {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -253,6 +254,83 @@ body .content:has(.agent-root) {
   // 水平不留 padding：让 entries 的滚动条贴到面板右缘（与 chat 页一致），
   // 侧边距由 entries 左 padding 和 dock 自身 margin 承担
   padding: 0 0 16px;
+}
+
+// 右侧圆点导轨：每条用户提问一颗，点击快速定位
+.agent-rail {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  max-height: 70%;
+  overflow-y: auto;
+  padding: 4px 3px;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.agent-rail__slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.agent-rail__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--border-color);
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
+
+  &:hover {
+    background: var(--brand-400);
+    transform: scale(1.35);
+  }
+
+  &.is-active {
+    background: var(--brand-500);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-500) 20%, transparent);
+  }
+}
+
+// 悬停预览：圆点左侧浮出原文摘要
+.agent-rail__tip {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+  max-width: 260px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.agent-rail__slot:hover .agent-rail__tip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
 }
 
 // @ 提及弹层的定位锚点（弹层吸在输入框上方，对齐 chat 页 .dock 结构）
@@ -311,24 +389,73 @@ body .content:has(.agent-root) {
   gap: 6px;
   animation: agent-fade-in 0.18s ease;
 
+  // 消息级复制按钮（用户气泡右上角，hover 浮现）
+  .aentry__copy {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-surface-soft, var(--bg-surface));
+    }
+
+    &.is-copied {
+      color: var(--success-600);
+      opacity: 1;
+    }
+  }
+
+  &:hover .aentry__copy {
+    opacity: 1;
+  }
+
   &--user {
     // 对齐 chat 页用户消息：全宽深色卡片，不再右对齐气泡
     align-items: stretch;
     width: 100%;
 
     .aentry__bubble {
+      position: relative;
       width: 100%;
       padding: 10px 16px;
       font-size: 13.5px;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
-      // 深绿底上必须用侧边栏体系的浅色，--text-primary 在浅色主题下是深色，看不清
-      color: var(--sidebar-text-hover);
-      background: var(--sidebar-bg);
-      border: 1px solid var(--sidebar-border);
+      // 用户气泡专用配色：亮暗主题下都与助手消息拉开区分度
+      color: var(--user-bubble-text);
+      background: var(--user-bubble-bg);
+      border: 1px solid var(--user-bubble-border);
       border-radius: 10px;
       box-shadow: inset 0 1px 4px var(--shadow-md);
+
+      // 气泡上的复制按钮：跟随气泡配色，不随全局 surface
+      .aentry__copy {
+        color: var(--user-bubble-text);
+        background: color-mix(in srgb, var(--user-bubble-bg) 60%, transparent);
+        border-color: var(--user-bubble-border);
+        backdrop-filter: blur(4px);
+
+        &:hover {
+          color: var(--user-bubble-text);
+          background: color-mix(in srgb, var(--user-bubble-bg) 30%, transparent);
+        }
+      }
     }
 
     // 消息里的 /技能 与 @文件 引用 chip（浅色底深字，在深色气泡上自然突出）
@@ -373,6 +500,7 @@ body .content:has(.agent-root) {
 
   &--assistant {
     // 对齐 chat 页：助手消息不套气泡，Markdown 全宽展开
+    position: relative;
     align-items: stretch;
     width: 100%;
     padding: 4px 0;
@@ -382,6 +510,35 @@ body .content:has(.agent-root) {
       min-width: 0;
       overflow-wrap: break-word;
       word-break: break-word;
+    }
+  }
+
+  // 助手消息底部操作行：常驻复制全文
+  &__foot {
+    display: flex;
+    margin-top: 2px;
+  }
+
+  &__foot-copy {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    padding: 3px 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.12s ease, background 0.12s ease;
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-surface-soft, var(--bg-surface));
+    }
+
+    &.is-copied {
+      color: var(--success-600);
     }
   }
 

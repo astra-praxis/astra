@@ -32,6 +32,7 @@ import {
   PanelLeftOpen,
   Plus,
   RotateCcw,
+  Copy,
   Sparkles,
   Square,
   Wrench,
@@ -416,7 +417,7 @@ export default function AgentPage() {
   const error = useAgentStore((s) => s.error);
   const setError = useAgentStore((s) => s.setError);
   const projectPath = useAgentStore((s) => s.projectPath);
-  const setProjectPath = useAgentStore((s) => s.setProjectPath);
+  const openDraftForProject = useAgentStore((s) => s.openDraftForProject);
   const sessions = useAgentStore((s) => s.sessions);
   const refreshSessions = useAgentStore((s) => s.refreshSessions);
   const usage = useAgentStore((s) => s.usage);
@@ -531,6 +532,44 @@ export default function AgentPage() {
 
   // ===== 动作 =====
   const { viewportRef, contentRef, controller: outputScroll } = useOutputScroll(sessionId);
+
+  // ===== 右侧圆点导轨：用户消息快速定位 =====
+  const userMsgIdx = useMemo(
+    () => entries.map((e, i) => (e.kind === 'user' ? i : -1)).filter((i) => i >= 0),
+    [entries],
+  );
+  const [activeDot, setActiveDot] = useState(-1);
+
+  /** 滚动时计算当前视口顶部所在的用户提问序号（未过任何提问时为 -1） */
+  const updateActiveDot = useCallback(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    const top = viewport.scrollTop + 80; // 视口顶部附近即视为“当前”
+    let active = -1;
+    for (let n = 0; n < userMsgIdx.length; n++) {
+      const el = content.querySelector<HTMLElement>(`[data-idx="${userMsgIdx[n]}"]`);
+      if (el && el.offsetTop <= top) active = n;
+      else break;
+    }
+    setActiveDot(active);
+  }, [userMsgIdx, viewportRef, contentRef]);
+
+  /** 点击圆点：暂停自动跟随滚动并定位到对应用户消息 */
+  const jumpToEntry = useCallback(
+    (idx: number) => {
+      const el = contentRef.current?.querySelector<HTMLElement>(`[data-idx="${idx}"]`);
+      if (!el) return;
+      outputScroll.pause();
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    [contentRef, outputScroll],
+  );
+
+  // 会话切换或条目变化后重算当前定位（新提问入列时游标跟上）
+  useEffect(() => {
+    updateActiveDot();
+  }, [sessionId, entries.length, updateActiveDot]);
 
   const handleSend = useCallback(async () => {
     const raw = input.trim();
@@ -683,7 +722,7 @@ export default function AgentPage() {
         title: '选择项目文件夹',
       });
       if (picked) {
-        setProjectPath(picked);
+        openDraftForProject(picked);
         setError('');
       }
     } catch (e) {
@@ -797,7 +836,7 @@ export default function AgentPage() {
                         disabled={running}
                         title={p.path}
                         onClick={() => {
-                          setProjectPath(p.path);
+                          openDraftForProject(p.path);
                           setError('');
                           setProjMenuOpen(false);
                         }}
@@ -849,7 +888,7 @@ export default function AgentPage() {
                     disabled={running}
                     onClick={() => {
                       setProjMenuOpen(false);
-                      setProjectPath('');
+                      openDraftForProject('');
                     }}
                   >
                     解绑项目（转为纯聊天）
@@ -876,7 +915,7 @@ export default function AgentPage() {
                             className="agent-tb__proj-item"
                             title={p.path}
                             onClick={() => {
-                              setProjectPath(p.path);
+                              openDraftForProject(p.path);
                               setError('');
                               setPickMenuOpen(false);
                             }}
@@ -936,7 +975,10 @@ export default function AgentPage() {
 
         <div className="agent-main">
           <div className="agent-entries" ref={viewportRef}
-            onScroll={() => outputScroll.onScroll()}
+            onScroll={() => {
+              outputScroll.onScroll();
+              updateActiveDot();
+            }}
             onWheel={(event) => { if (event.deltaY < 0) outputScroll.pause(); }}
             onTouchMove={() => outputScroll.pause()}
             onKeyDown={(event) => {
@@ -963,6 +1005,7 @@ export default function AgentPage() {
               <EntryView
                 key={i}
                 entry={e}
+                index={i}
                 onDecide={handleDecide}
                 onAnswer={handleAnswer}
                 skills={skills}
@@ -982,6 +1025,24 @@ export default function AgentPage() {
           </div>
 
           </div>
+
+          {/* 右侧圆点导轨：每个用户消息一颗，点击快速定位（悬停预览原文） */}
+          {userMsgIdx.length > 0 && (
+            <div className="agent-rail" role="navigation" aria-label="用户消息导航">
+              {userMsgIdx.map((idx, n) => (
+                <div key={idx} className="agent-rail__slot">
+                  <span className="agent-rail__tip">{userMsgPreview(entries[idx]?.kind === 'user' ? entries[idx].text : undefined)}</span>
+                  <button
+                    type="button"
+                    className={`agent-rail__dot${activeDot === n ? ' is-active' : ''}`}
+                    title={`第 ${n + 1} 条提问`}
+                    aria-label={`定位到第 ${n + 1} 条提问`}
+                    onClick={() => jumpToEntry(idx)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* 参数设置面板（悬浮在输入区上方）；图片识别开关在全局设置页 */}
           {showSettings && (
@@ -1152,14 +1213,74 @@ function parseUserRefs(
   return { refs, body: body.trim() };
 }
 
+/** 圆点悬停预览：压成单行、限 60 字符 */
+function userMsgPreview(text: string | undefined): string {
+  if (!text) return '';
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
+}
+
+/** 消息级复制按钮（用户气泡 / 助手消息右上角，hover 浮现） */
+function MessageCopyButton({ text, className = '' }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`aentry__copy${copied ? ' is-copied' : ''}${className ? ` ${className}` : ''}`}
+      title={copied ? '已复制' : '复制原文'}
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        } catch {
+          // 剪贴板不可用时忽略
+        }
+      }}
+    >
+      {copied ? <Check size={12} strokeWidth={2.2} /> : <Copy size={12} strokeWidth={1.8} />}
+    </button>
+  );
+}
+
+// 助手消息底部的常驻复制（区别于用户气泡右上角的悬浮复制）：非流式时才出现
+function AssistantCopyFooter({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="aentry__foot">
+      <button
+        type="button"
+        className={`aentry__foot-copy${copied ? ' is-copied' : ''}`}
+        title={copied ? '已复制' : '复制全文'}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1600);
+          } catch {
+            // 剪贴板不可用时忽略
+          }
+        }}
+      >
+        {copied ? <Check size={12} strokeWidth={2.2} /> : <Copy size={12} strokeWidth={1.8} />}
+        {copied ? '已复制' : '复制'}
+      </button>
+    </div>
+  );
+}
+
 const EntryView = memo(function EntryView({
   entry,
+  index,
   onDecide,
   onAnswer,
   skills,
   fileSet,
 }: {
   entry: Entry;
+  /** 条目在会话流中的序号：写入 data-idx，供右侧圆点导轨快速定位 */
+  index: number;
   onDecide: (callId: string, allow: boolean) => Promise<void>;
   onAnswer: (questionId: string, answer: string | null) => void;
   skills: UserSkillLite[];
@@ -1169,8 +1290,9 @@ const EntryView = memo(function EntryView({
     case 'user': {
       const { refs, body } = parseUserRefs(entry.text, skills, fileSet);
       return (
-        <div className="aentry aentry--user">
+        <div className="aentry aentry--user" data-idx={index}>
           <div className="aentry__bubble">
+            <MessageCopyButton text={entry.text} />
             {refs.length > 0 && (
               <div className="aentry__refs">
                 {refs.map((r, i) =>
@@ -1196,11 +1318,14 @@ const EntryView = memo(function EntryView({
       // 不渲染独立光标 span：markdown 最后一块是块级元素（p/ul/pre），
       // 光标会掉到下一行而非紧跟文字；chat 页同样只在空文本时显示 typing
       return (
-        <div className={`aentry aentry--assistant${entry.streaming ? ' is-streaming' : ''}`}>
+        <div className={`aentry aentry--assistant${entry.streaming ? ' is-streaming' : ''}`} data-idx={index}>
           {entry.text ? (
-            <div className="aentry__md">
-              <MarkdownMessage content={entry.text} streaming={entry.streaming} />
-            </div>
+            <>
+              <div className="aentry__md">
+                <MarkdownMessage content={entry.text} streaming={entry.streaming} />
+              </div>
+              {!entry.streaming && <AssistantCopyFooter text={entry.text} />}
+            </>
           ) : (
             <div className="aentry__typing">
               <span />

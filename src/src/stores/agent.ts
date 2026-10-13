@@ -544,16 +544,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
   setError: (v) => set((s) => ({ error: v || persistenceMessage(s.persistenceErrors[s.sessionId]) })),
   setProjectPath: (v) => {
-    // 记录最近使用的项目文件夹（去重、最多 5 个；空 = 解绑不记录）
-    if (v) {
-      try {
-        const list: string[] = JSON.parse(localStorage.getItem('astra.recentProjects') ?? '[]');
-        const next = [v, ...list.filter((p) => p !== v)].slice(0, 5);
-        localStorage.setItem('astra.recentProjects', JSON.stringify(next));
-      } catch {
-        // localStorage 不可用时仅跳过记录
-      }
-    }
+    recordRecentProject(v);
     set({ projectPath: v });
   },
   setAutoApprove: (v) => {
@@ -878,16 +869,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   openDraftForProject: (path) => {
     const st = get();
-    if (st.sessionBusy) return;
+    if (st.sessionBusy || path === st.projectPath) return;
+    // 后端 Thread 的 project_root / 文件工具在首次 run 时创建后不可变，
+    // 切换项目必须落到新会话（空草稿可原地改绑），否则工具仍锚在旧目录
     if (st.entries.length === 0 && !st.running) {
       // 当前已是空草稿：直接改绑项目（无 tab 时保持隐式，不提前出 tab）
+      recordRecentProject(path);
       set({ projectPath: path });
       return;
     }
     get().newTab();
+    recordRecentProject(path);
     set({ projectPath: path });
   },
 }));
+
+/** 记录最近使用的项目文件夹（去重、最多 5 个；空 = 解绑不记录） */
+function recordRecentProject(v: string): void {
+  if (!v) return;
+  try {
+    const list: string[] = JSON.parse(localStorage.getItem('astra.recentProjects') ?? '[]');
+    const next = [v, ...list.filter((p) => p !== v)].slice(0, 5);
+    localStorage.setItem('astra.recentProjects', JSON.stringify(next));
+  } catch {
+    // localStorage 不可用时仅跳过记录
+  }
+}
 
 function persistenceMessage(error?: string | null): string {
   return error ? `模型上下文保存失败：${error}。未保存的上下文仍在内存中，请勿退出应用；后续运行可重试保存。` : '';

@@ -1,5 +1,6 @@
 mod agent;
 mod agent_sessions;
+mod agent_threads;
 mod chat;
 mod chat_sessions;
 mod command_runner;

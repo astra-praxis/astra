@@ -64,6 +64,9 @@ export default function SettingsPage() {
   const setMaxTurns = useAgentStore((s) => s.setMaxTurns);
   const autoCompactTokens = useAgentStore((s) => s.autoCompactTokens);
   const setAutoCompactTokens = useAgentStore((s) => s.setAutoCompactTokens);
+  // 图片识别：read_file 图片上传所选模型的显式授权（仅新会话生效）
+  const imageRecognition = useAgentStore((s) => s.imageRecognition);
+  const setImageRecognition = useAgentStore((s) => s.setImageRecognition);
   // Agent search_web 的 SearXNG 实例地址（可选；空 = 用 DuckDuckGo）
   const [searchEndpoint, setSearchEndpoint] = useState('');
 
@@ -479,6 +482,26 @@ export default function SettingsPage() {
               if (Number.isFinite(n) && n >= 0) setAutoCompactTokens(n);
             }}
           />
+        </div>
+        <div className="agent-perm-row">
+          <div className="agent-perm-text">
+            <span className="agent-perm-title">图片识别</span>
+            <span className="agent-perm-desc">
+              开启表示你已确认所选模型及网关支持 vision / image_url，并同意将 read_file 读取的项目图片上传至所选模型。
+              图片内容会写入本机 SQLite 会话历史（含 WAL、备份），删除源图片不会删除历史；不支持时会报错，不会静默降级。
+              仅新会话生效；旧会话保持原设置，配置或模型来源不一致时拒绝续聊。支持 PNG、JPEG、WebP。
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={imageRecognition}
+            className={`agent-perm-switch${imageRecognition ? ' is-on' : ''}`}
+            title={imageRecognition ? '已开启：新会话允许读取图片（需模型支持）' : '已关闭：点击开启'}
+            onClick={() => setImageRecognition(!imageRecognition)}
+          >
+            <span className="agent-perm-knob" />
+          </button>
         </div>
         <div className="agent-perm-row">
           <div className="agent-perm-text">

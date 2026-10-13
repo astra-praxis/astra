@@ -9,6 +9,8 @@
  */
 import {
   createContext,
+  memo,
+  useMemo,
   useContext,
   useEffect,
   useRef,
@@ -23,6 +25,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Copy, Play } from 'lucide-react';
 import { parseActionHref, executeAction } from './action-links';
+import { useStreamingText } from '@/hooks/useStreamingText';
 import './MarkdownMessage.scss';
 import 'highlight.js/styles/github-dark.css';
 
@@ -41,13 +44,23 @@ interface MarkdownMessageProps {
   content?: string;
   workspacePath?: string;
   isFresh?: boolean;
+  /** Agent opts in; existing Chat rendering remains immediate. */
+  streaming?: boolean;
 }
 
-export default function MarkdownMessage({
+const MarkdownMessage = memo(function MarkdownMessage({
   content = '',
   workspacePath = '',
   isFresh = false,
+  streaming = false,
 }: MarkdownMessageProps) {
+  const renderedContent = useStreamingText(content, streaming);
+  const context = useMemo(() => ({ workspacePath, isFresh }), [workspacePath, isFresh]);
+  const markdown = useMemo(() => renderedContent ? (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={mdComponents}>
+      {renderedContent}
+    </ReactMarkdown>
+  ) : <span className="md-empty">{renderedContent}</span>, [renderedContent]);
   // 命令输出事件监听（每个实例注册，卸载时清理）
   useEffect(() => {
     const listeners: Promise<UnlistenFn>[] = [
@@ -70,23 +83,13 @@ export default function MarkdownMessage({
   }, []);
 
   return (
-    <MdContext.Provider value={{ workspacePath, isFresh }}>
-      <div className="md-content">
-        {content ? (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={mdComponents}
-          >
-            {content}
-          </ReactMarkdown>
-        ) : (
-          <span className="md-empty">{content}</span>
-        )}
-      </div>
+    <MdContext.Provider value={context}>
+      <div className="md-content">{markdown}</div>
     </MdContext.Provider>
   );
-}
+});
+
+export default MarkdownMessage;
 
 // ============================================================
 // 命令输出广播（模块级：所有 MarkdownMessage 实例共享）

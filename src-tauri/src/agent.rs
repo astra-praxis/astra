@@ -10,7 +10,7 @@
 //! 会话模型（MVP）：
 //! - session_id 由前端生成；Thread 按 session_id 缓存（含消息历史与项目绑定）
 //! - 切换项目 / 模型来源后需新会话（Thread 创建时绑定 root 与 backend）
-//! - `agent_reset_session` 显式丢弃会话上下文
+//! - `agent_reset_session` unloads memory only; SQLite owns restart history.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use agent_core::skill_tools::truncate_desc;
 use agent_core::{
     ChatMessage, Decision, Envelope, ModelBackend, PermissionBridge, PermissionRequest, RigBackend,
-    Role, RunHandle, Thread, ThreadConfig, ToolPolicy, ToolRegistry, DEFAULT_AUTO_COMPACT_TOKENS,
+    Role, RunHandle, ThreadConfig, ToolPolicy, ToolRegistry, DEFAULT_AUTO_COMPACT_TOKENS,
     DEFAULT_MAX_TURNS,
 };
 use serde::{Deserialize, Serialize};
@@ -139,8 +139,11 @@ impl PermissionBridge for HubBridge {
 pub struct AgentState {
     hub: Arc<PermissionHub>,
     questions: Arc<QuestionHub>,
-    active: Mutex<Option<RunHandle>>,
-    threads: Mutex<HashMap<String, Thread>>,
+    active: Arc<Mutex<Option<(String, RunHandle)>>>,
+    pub(crate) threads: Arc<tokio::sync::Mutex<crate::agent_threads::AgentThreads>>,
+    pub(crate) persistence_errors: crate::agent_threads::PersistenceErrors,
+    // Serialize UI JSON updates and reject delayed saves after deletion.
+    pub(crate) session_files: tokio::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl Default for AgentState {
@@ -148,8 +151,12 @@ impl Default for AgentState {
         Self {
             hub: Arc::new(PermissionHub::default()),
             questions: Arc::new(QuestionHub::default()),
-            active: Mutex::new(None),
-            threads: Mutex::new(HashMap::new()),
+            active: Arc::new(Mutex::new(None)),
+            threads: Arc::new(tokio::sync::Mutex::new(
+                crate::agent_threads::AgentThreads::default(),
+            )),
+            persistence_errors: Arc::new(Mutex::new(HashMap::new())),
+            session_files: tokio::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 }
@@ -304,6 +311,14 @@ fn default_system_prompt() -> String {
         .into()
 }
 
+fn image_encoding(enabled: bool) -> agent_core::model::ImageEncoding {
+    if enabled {
+        agent_core::model::ImageEncoding::UserImageUrl
+    } else {
+        agent_core::model::ImageEncoding::Disabled
+    }
+}
+
 // ===== 命令 =====
 
 #[derive(Debug, Deserialize)]
@@ -325,6 +340,15 @@ pub struct AgentStartReq {
     /// 前端生成的会话 id（同会话复用 Thread 与历史）
     pub session_id: String,
     pub user_text: String,
+    /// Explicit consent for image-capable model/gateway requests. Never inferred from names.
+    #[serde(default)]
+    pub image_recognition: bool,
+    /// Thinking mode for reasoning models; None leaves gateway defaults untouched.
+    #[serde(default)]
+    pub thinking_enabled: Option<bool>,
+    /// Reasoning effort level (e.g. low/medium/high); requires a thinking-capable model.
+    #[serde(default)]
+    pub thinking_effort: Option<String>,
 }
 
 /// 启动一次 Run（多轮对话中的一轮）。事件经 `agent-event` 流出。
@@ -335,6 +359,15 @@ pub async fn agent_start_run(
     state: State<'_, AgentState>,
     req: AgentStartReq,
 ) -> Result<String, String> {
+    // Keep admission exclusive through stream closure, including write-through.
+    let mut threads = Arc::clone(&state.threads)
+        .try_lock_owned()
+        .map_err(|_| "Agent is running, draining or changing sessions".to_string())?;
+    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    threads
+        .open(&directory, Arc::clone(&state.persistence_errors))
+        .await?;
+
     // 1. 模型来源（URL 约定与 chat.rs 一致）
     let (base_url, api_key, model_name) = if let Some(port) = req.model_port {
         (
@@ -375,10 +408,13 @@ pub async fn agent_start_run(
         .map(crate::user_skills::summary_in)
         .unwrap_or_default();
 
+    threads
+        .bind_image_config(&session_id, req.image_recognition, &base_url, &model_name)
+        .await?;
+
     // 3. 取或建 Thread（绑定 root/backend/policy；历史保留在消息序列里）
     {
-        let mut threads = state.threads.lock().unwrap();
-        if !threads.contains_key(&session_id) {
+        if !threads.threads.contains_key(&session_id) {
             // 在默认策略上追加 pandoc 工具：转换是只读产物生成（Allow），
             // 构建 docx 会覆盖/创建交付文件（Confirm）
             let mut policy = ToolPolicy::default();
@@ -408,22 +444,21 @@ pub async fn agent_start_run(
                     ));
                 }
             }
-            let config = ThreadConfig {
-                session_id: session_id.clone(),
-                system_prompt,
-                project_root: project_root.clone(),
-                temperature: None,
-                max_tokens: None,
-                max_turns: req.max_turns.unwrap_or(DEFAULT_MAX_TURNS),
-                auto_compact_tokens: req
-                    .auto_compact_tokens
-                    .or(Some(DEFAULT_AUTO_COMPACT_TOKENS))
-                    .filter(|&t| t > 0),
-                policy,
-                texts: std::sync::Arc::new(agent_core::TextPack::zh()),
-            };
-            let backend: Arc<dyn ModelBackend> =
-                Arc::new(RigBackend::new(base_url, api_key, model_name));
+            let mut config = ThreadConfig::new(session_id.clone(), system_prompt);
+            config.project_root = project_root.clone();
+            config.max_turns = req.max_turns.unwrap_or(DEFAULT_MAX_TURNS);
+            config.auto_compact_tokens = req
+                .auto_compact_tokens
+                .or(Some(DEFAULT_AUTO_COMPACT_TOKENS))
+                .filter(|&t| t > 0);
+            config.policy = policy;
+            config.texts = std::sync::Arc::new(agent_core::TextPack::zh());
+            config.thinking_enabled = req.thinking_enabled;
+            config.thinking_effort = req.thinking_effort.clone();
+            let backend: Arc<dyn ModelBackend> = Arc::new(
+                RigBackend::new(base_url, api_key, model_name)
+                    .with_image_encoding(image_encoding(req.image_recognition)),
+            );
             let bridge: Arc<dyn PermissionBridge> = Arc::new(HubBridge(Arc::clone(&state.hub)));
             let question_bridge: Arc<dyn agent_core::UserQuestionBridge> =
                 Arc::new(QuestionBridge {
@@ -431,9 +466,8 @@ pub async fn agent_start_run(
                     app: app.clone(),
                     session_id: session_id.clone(),
                 });
-            threads.insert(
-                session_id.clone(),
-                Thread::new(
+            threads
+                .load_or_create(
                     config,
                     backend,
                     build_registry(
@@ -443,8 +477,8 @@ pub async fn agent_start_run(
                         settings_search_endpoint(&app),
                     ),
                     bridge,
-                ),
-            );
+                )
+                .await?;
         }
     }
 
@@ -462,22 +496,60 @@ pub async fn agent_start_run(
             )
         }
     };
-    let handle = {
-        let threads = state.threads.lock().unwrap();
-        threads
-            .get(&session_id)
-            .expect("Thread 刚插入必须存在")
-            .send(user_text, tx)
+    let thread = threads
+        .threads
+        .get(&session_id)
+        .ok_or_else(|| "Agent thread is unavailable".to_string())?;
+    // Mid-session thinking switch (Zed pattern): applies to the cached thread
+    // immediately, including runs after restore. Persisted via write-through.
+    if req.thinking_enabled.is_some() || req.thinking_effort.is_some() {
+        thread.set_thinking(req.thinking_enabled, req.thinking_effort);
+    }
+    let previous_error = state
+        .persistence_errors
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&session_id);
+    let handle = match thread.try_send(user_text, tx) {
+        Ok(handle) => handle,
+        Err(error) => {
+            if let Some(previous_error) = previous_error {
+                state
+                    .persistence_errors
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(session_id.clone(), previous_error);
+            }
+            return Err(error.to_string());
+        }
     };
-    *state.active.lock().unwrap() = Some(handle);
+    *state.active.lock().unwrap_or_else(|e| e.into_inner()) = Some((session_id.clone(), handle));
 
     // 4. 事件转发任务：Envelope → agent-event + JSONL 日志；Run 结束（tx 全部 drop）后自然退出
     let forward_app = app.clone();
+    let active = Arc::clone(&state.active);
+    let errors = Arc::clone(&state.persistence_errors);
+    let settled_session = session_id.clone();
     tokio::spawn(async move {
         while let Some(env) = rx.recv().await {
             log_event(&forward_app, &env);
             let _ = forward_app.emit("agent-event", &env);
         }
+        let persistence_error = errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&settled_session)
+            .cloned();
+        *active.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        // Release admission before notifying the UI that another send is safe.
+        drop(threads);
+        let _ = forward_app.emit(
+            "agent-run-settled",
+            json!({
+                "session_id": settled_session,
+                "persistence_error": persistence_error,
+            }),
+        );
     });
 
     Ok(session_id)
@@ -486,11 +558,13 @@ pub async fn agent_start_run(
 /// 取消当前 Run（停止不再启动新工具调用；进行中的模型流被中断）
 #[tauri::command]
 pub fn agent_cancel(state: State<'_, AgentState>) {
-    if let Some(h) = state.active.lock().unwrap().take() {
-        h.cancel();
+    // Do not clear active until the receiver has drained the persistence tail.
+    let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, handle)) = active.as_ref() {
+        handle.cancel();
+        state.hub.drop_all();
+        state.questions.drop_all();
     }
-    state.hub.drop_all();
-    state.questions.drop_all();
 }
 
 /// 回传用户对某次权限请求的决定（批准只对该 tool_call_id 生效）
@@ -520,33 +594,37 @@ pub fn agent_set_auto_all(state: State<'_, AgentState>, enabled: bool) {
     state.hub.set_auto_all(enabled);
 }
 
-/// 丢弃会话上下文（新对话 / 切换项目时调用）：取消运行、清挂起权限、删 Thread
+/// Unload memory only. Cancel and wait for agent-run-settled before resetting.
 #[tauri::command]
-pub fn agent_reset_session(state: State<'_, AgentState>, session_id: String) {
-    if let Some(h) = state.active.lock().unwrap().take() {
-        h.cancel();
-    }
-    state.hub.drop_all();
-    state.questions.drop_all();
-    state.threads.lock().unwrap().remove(&session_id);
+pub async fn agent_reset_session(
+    state: State<'_, AgentState>,
+    session_id: String,
+) -> Result<(), String> {
+    let mut threads = state.threads.try_lock().map_err(|_| {
+        "Agent is running or draining; cancel and wait before unloading".to_string()
+    })?;
+    threads.unload(&session_id, &state.persistence_errors)
 }
 
 /// 当前 Agent 是否有进行中的 Run（页面刷新后恢复状态用）
 #[derive(Debug, Serialize)]
 pub struct AgentStatus {
     pub running: bool,
+    pub session_id: Option<String>,
+    pub persistence_errors: HashMap<String, String>,
 }
 
 #[tauri::command]
 pub fn agent_status(state: State<'_, AgentState>) -> AgentStatus {
+    let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
     AgentStatus {
-        running: state
-            .active
+        running: active.is_some(),
+        session_id: active.as_ref().map(|(id, _)| id.clone()),
+        persistence_errors: state
+            .persistence_errors
             .lock()
-            .unwrap()
-            .as_ref()
-            .map(|h| !h.is_cancelled())
-            .unwrap_or(false),
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
     }
 }
 
@@ -557,6 +635,20 @@ fn _assert_types(_: ChatMessage, _: Role) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_recognition_defaults_off_and_configures_capability() {
+        let req: AgentStartReq = serde_json::from_value(json!({
+            "session_id": "test", "user_text": "read image"
+        }))
+        .unwrap();
+        assert!(!req.image_recognition);
+        for enabled in [false, true] {
+            let backend = RigBackend::new("http://localhost/v1", "", "arbitrary-model")
+                .with_image_encoding(image_encoding(enabled));
+            assert_eq!(backend.capabilities().vision, enabled);
+        }
+    }
 
     #[test]
     fn question_payload_contains_session_id() {

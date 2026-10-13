@@ -1,6 +1,7 @@
+use crate::agent::AgentState;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager, State};
 
 use crate::session_store;
 
@@ -31,7 +32,11 @@ fn ensure_sessions_file(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// 列出所有 Agent 会话（按更新时间倒序）
 #[tauri::command]
-pub fn list_agent_sessions(app: AppHandle) -> Result<Vec<AgentSession>, String> {
+pub async fn list_agent_sessions(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<Vec<AgentSession>, String> {
+    let _files = state.session_files.lock().await;
     let path = ensure_sessions_file(&app)?;
     let mut sessions = session_store::read_json_vec::<AgentSession>(&path);
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -40,14 +45,19 @@ pub fn list_agent_sessions(app: AppHandle) -> Result<Vec<AgentSession>, String> 
 
 /// 保存 Agent 会话（按 id upsert；id 由前端生成并保持稳定）
 #[tauri::command]
-pub fn save_agent_session(
+pub async fn save_agent_session(
     app: AppHandle,
+    state: State<'_, AgentState>,
     id: String,
     project_path: String,
     project_name: String,
     title: String,
     entries: serde_json::Value,
 ) -> Result<AgentSession, String> {
+    let deleted = state.session_files.lock().await;
+    if deleted.contains(&id) {
+        return Err("Cannot save a deleted agent session".into());
+    }
     let path = ensure_sessions_file(&app)?;
     let mut sessions = session_store::read_json_vec::<AgentSession>(&path);
 
@@ -79,9 +89,31 @@ pub fn save_agent_session(
 
 /// 删除 Agent 会话
 #[tauri::command]
-pub fn delete_agent_session(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn delete_agent_session(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    id: String,
+) -> Result<(), String> {
+    // Reject rather than race any active Run, including its cancelled write tail.
+    let mut threads = state
+        .threads
+        .try_lock()
+        .map_err(|_| "Agent is running or draining; wait before deleting".to_string())?;
+    let mut deleted = state.session_files.lock().await;
     let path = ensure_sessions_file(&app)?;
     let mut sessions = session_store::read_json_vec::<AgentSession>(&path);
+    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    threads
+        .open(&directory, std::sync::Arc::clone(&state.persistence_errors))
+        .await?;
+    threads.delete(&id).await?;
+    // A failed JSON write can be retried; never permit a delayed save to resurrect it.
+    deleted.insert(id.clone());
+    state
+        .persistence_errors
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     sessions.retain(|s| s.id != id);
     session_store::write_json_vec(&path, &sessions)
 }

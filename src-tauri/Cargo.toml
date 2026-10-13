@@ -15,7 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-agent-core = { path = "../agent-core" }
+agent-core = { package = "astra-agent", path = "../../astra-core", version = "=1.0.0-rc.1" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
@@ -33,3 +33,8 @@ which = "7"
 uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Keep proc-macro dylibs unstripped to avoid macOS LINKEDIT loader failures.
+[profile.release.build-override]
+debug = 0
+strip = "none"

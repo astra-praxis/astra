@@ -16,10 +16,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from '@/stores/workspace';
 import type { AgentSessionMeta } from '@/pages/AgentHistoryPanel';
+import type { Artifact } from '@/components/agent/ArtifactList';
 
 // ===== 事件模型（与 agent-core Envelope 对齐，type 标签 snake_case） =====
 
 export interface AgentEnvelope {
+  /** 旧载荷可省略这些 additive 元数据；排序只依赖 sequence。 */
+  schema_version?: number;
+  event_id?: string;
+  timestamp?: number;
   session_id: string;
   run_id: string;
   sequence: number;
@@ -36,16 +41,30 @@ export interface AgentEnvelope {
   summary?: string;
   final_text?: string;
   decision?: string;
-  artifacts?: Array<{ path: string; kind: string }>;
+  artifacts?: Artifact[];
   /** 工具参数流式片段（tool_call_args_delta） */
   fragment?: string;
+  /** usage_updated 载荷（字段均可缺省） */
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  max_tokens?: number;
 }
 
-export type ToolStatus = 'running' | 'completed' | 'failed' | 'denied';
+/** 上下文用量（usage_updated 写入；新会话/加载会话重置为 null） */
+export interface AgentUsage {
+  input?: number;
+  output?: number;
+  total?: number;
+  max?: number;
+}
 
-export type PermState = 'pending' | 'allowed' | 'denied';
+export type ToolStatus = 'running' | 'completed' | 'failed' | 'denied' | 'interrupted';
+
+export type PermState = 'pending' | 'allowed' | 'denied' | 'expired';
 
 export type Entry =
+  | { kind: 'notice'; text: string }
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; streaming: boolean }
   | {
@@ -64,7 +83,7 @@ export type Entry =
       args?: Record<string, unknown>;
       status: ToolStatus;
       result?: string;
-      artifacts?: Array<{ path: string; kind: string }>;
+      artifacts?: Artifact[];
       /** Confirm 工具的确认状态：内嵌在工具卡里，不再单出一张权限卡 */
       perm?: { state: PermState; summary: string };
       /** 参数流式生成中的原始 JSON 累计（tool_call_args_delta 到来时更新） */
@@ -101,22 +120,86 @@ function parseAutoCompact(raw: string | null | undefined): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 60000;
 }
 
+/** 终态和历史回放共用：不让遗留卡片继续等待或可操作。 */
+export function normalizeEntries(entries: Entry[]): Entry[] {
+  return entries.map((e): Entry => {
+    if (e.kind === 'assistant') return e.streaming ? { ...e, streaming: false } : e;
+    if (e.kind === 'thinking') return e.done ? e : { ...e, done: true };
+    if (e.kind === 'tool') return {
+      ...e,
+      status: e.status === 'running' ? 'interrupted' : e.status,
+      perm: e.perm?.state === 'pending' ? { ...e.perm, state: 'expired' } : e.perm,
+    };
+    if (e.kind === 'permission' && e.state === 'pending') return { ...e, state: 'expired' };
+    if (e.kind === 'question' && e.answer === undefined && !e.declined) return { ...e, declined: true };
+    return e;
+  });
+}
+
+export interface RunWindow {
+  activeRunId: string | null;
+  lastSequence: number;
+  /** 按 session 保存墓碑；切换历史后也不能重新绑定已结束 Run。 */
+  endedRuns: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+type RunState = RunWindow & { sessionId: string; running: boolean; status: string | null; entries: Entry[]; usage: AgentUsage | null };
+
+/** usage_updated 载荷 → 用量快照（缺省字段保持 undefined） */
+function readUsage(env: AgentEnvelope): AgentUsage {
+  return {
+    input: env.input_tokens,
+    output: env.output_tokens,
+    total: env.total_tokens,
+    max: env.max_tokens,
+  };
+}
+
+function closeRun(state: RunState): RunWindow {
+  const endedRuns = new Map(state.endedRuns);
+  if (state.activeRunId !== null) {
+    endedRuns.set(state.sessionId, new Set([...(endedRuns.get(state.sessionId) ?? []), state.activeRunId]));
+  }
+  return { activeRunId: null, lastSequence: 0, endedRuns };
+}
+
+export function transitionRun(state: RunState, running: boolean, status: string | null): RunState {
+  if (running && state.running) return { ...state, status };
+  return {
+    ...state, ...closeRun(state), running, status: running ? status : null,
+    entries: normalizeEntries(state.entries),
+  };
+}
+
+function isTerminal(env: AgentEnvelope): boolean {
+  return ['run_completed', 'run_failed', 'run_cancelled'].includes(env.type);
+}
+
+/** 返回原引用表示拒收；run_id 为不透明字符串，绝不解析。 */
+export function reduceAgentEvent(state: RunState, env: AgentEnvelope): RunState {
+  if (!state.running || env.session_id !== state.sessionId || !env.run_id ||
+      state.endedRuns.get(env.session_id)?.has(env.run_id) ||
+      (state.activeRunId !== null && state.activeRunId !== env.run_id) ||
+      !Number.isSafeInteger(env.sequence) || env.sequence <= state.lastSequence) return state;
+  const next = {
+    ...state,
+    activeRunId: env.run_id,
+    lastSequence: env.sequence,
+    entries: applyEnvelope(state.entries, env),
+    status: env.type === 'status_changed' ? env.status ?? null : state.status,
+    usage: env.type === 'usage_updated' ? readUsage(env) : state.usage ?? null,
+  };
+  return isTerminal(env) ? transitionRun(next, false, null) : next;
+}
+
 /** Envelope → Entry 归并（纯函数，返回新数组） */
 export function applyEnvelope(prev: Entry[], env: AgentEnvelope): Entry[] {
   const next = applyEnvelopeInner(prev, env);
   // 思考完成判定：任何非 thinking 增量到达，当前流式思考即已结束。
   // 注意不能只看末尾条目——后到的事件会先在 thinking 后面插入新条目，
   // 所以要扫描所有未完成的 thinking 条目（UI 据此自动收起思考块）
-  if (env.type !== 'thinking_delta') {
-    let changed = false;
-    const out = next.map((e) => {
-      if (e.kind === 'thinking' && !e.done) {
-        changed = true;
-        return { ...e, done: true };
-      }
-      return e;
-    });
-    return changed ? out : next;
+  if (env.type !== 'thinking_delta' && next.some((e) => e.kind === 'thinking' && !e.done)) {
+    return next.map((e) => e.kind === 'thinking' && !e.done ? { ...e, done: true } : e);
   }
   return next;
 }
@@ -240,10 +323,7 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
     case 'run_completed':
     case 'run_failed':
     case 'run_cancelled': {
-      // 结束流式中的助手条目
-      const closed = prev.map((e) =>
-        e.kind === 'assistant' && e.streaming ? { ...e, streaming: false } : e,
-      );
+      const closed = normalizeEntries(prev);
       if (env.type === 'run_completed') {
         const last = closed[closed.length - 1];
         if (last && last.kind === 'assistant' && last.text.trim()) {
@@ -258,7 +338,7 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
       return [...closed, { kind: 'terminal', outcome: 'cancelled' }];
     }
     case 'compaction_completed':
-      return [...prev, { kind: 'terminal', outcome: 'completed', text: '上下文已压缩' }];
+      return [...prev, { kind: 'notice', text: '上下文已压缩' }];
     default:
       return prev;
   }
@@ -273,14 +353,27 @@ export interface AgentQuestionPayload {
   allow_free_text: boolean;
 }
 
+// ===== 思考模式（thinking_enabled / thinking_effort 随 agent_start_run 下发） =====
+
+export const THINKING_EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
+export type ThinkingEffort = (typeof THINKING_EFFORTS)[number];
+
+/** 解析持久化的力度值：非法/缺省回退 'medium' */
+export function parseThinkingEffort(raw: string | null | undefined): ThinkingEffort {
+  return (THINKING_EFFORTS as readonly string[]).includes(raw ?? '') ? (raw as ThinkingEffort) : 'medium';
+}
+
 // ===== Store =====
 
-interface AgentState {
+interface AgentState extends RunWindow {
   sessionId: string;
   entries: Entry[];
   input: string;
   running: boolean;
+  settling: boolean;
+  sessionBusy: boolean;
   status: string | null;
+  persistenceErrors: Record<string, string>;
   error: string;
   /** 项目绑定（空 = 纯聊天）；顶部工具栏选择，@ 只负责引用文件 */
   projectPath: string;
@@ -292,6 +385,17 @@ interface AgentState {
   maxTurns: number;
   /** 上下文自动压缩阈值（估算 token 数，默认 60000，0 = 关闭） */
   autoCompactTokens: number;
+  /** Local preference; existing sessions retain their backend-bound consent. */
+  imageRecognition: boolean;
+  setImageRecognition: (enabled: boolean) => void;
+  /** 上下文用量（usage_updated 写入；新会话/加载会话重置为 null） */
+  usage: AgentUsage | null;
+  /** 思考模式开关（localStorage 持久化；发送时随 agent_start_run 下发，下次发送即生效） */
+  thinkingEnabled: boolean;
+  setThinkingEnabled: (v: boolean) => void;
+  /** 思考力度（localStorage 持久化） */
+  thinkingEffort: ThinkingEffort;
+  setThinkingEffort: (v: ThinkingEffort) => void;
 
   setInput: (v: string) => void;
   setError: (v: string) => void;
@@ -311,7 +415,9 @@ interface AgentState {
   answerQuestion: (questionId: string, answer: string | null) => Promise<void>;
   /** 新对话：重置会话（旧会话保存由调用方先行调用 saveSession） */
   startNewChat: () => void;
-  /** 从历史面板恢复会话（只读回放 + 续聊重新建 Thread） */
+  newChat: () => Promise<void>;
+  deleteSession: (id: string) => Promise<void>;
+  /** 恢复 UI 历史；续聊时后端从 SQLite 加载模型上下文。 */
   loadSession: (s: AgentSessionMeta) => void;
   /** 保存会话到后端并刷新列表（默认保存当前会话；空条目跳过） */
   saveSession: (id?: string) => Promise<void>;
@@ -320,9 +426,15 @@ interface AgentState {
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessionId: newSessionId(),
+  activeRunId: null,
+  lastSequence: 0,
+  endedRuns: new Map(),
   entries: [],
   input: '',
   running: false,
+  settling: false,
+  sessionBusy: false,
+  persistenceErrors: {},
   status: null,
   error: '',
   projectPath: '',
@@ -330,6 +442,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   autoApprove: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-autoapprove') === '1',
   maxTurns: Number(localStorage?.getItem('astra-agent-maxturns')) || 50,
   autoCompactTokens: parseAutoCompact(localStorage?.getItem('astra-agent-autocompact')),
+  imageRecognition: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-image-recognition') === '1',
+  setImageRecognition: (enabled) => {
+    localStorage.setItem('astra-agent-image-recognition', enabled ? '1' : '0');
+    set({ imageRecognition: enabled });
+  },
+  usage: null,
+  thinkingEnabled: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-thinking') === '1',
+  setThinkingEnabled: (v) => {
+    localStorage.setItem('astra-agent-thinking', v ? '1' : '0');
+    set({ thinkingEnabled: v });
+  },
+  thinkingEffort: parseThinkingEffort(typeof localStorage === 'undefined' ? null : localStorage.getItem('astra-agent-effort')),
+  setThinkingEffort: (v) => {
+    localStorage.setItem('astra-agent-effort', v);
+    set({ thinkingEffort: v });
+  },
 
   setInput: (v) => set({ input: v }),
   setMaxTurns: (v) => {
@@ -342,7 +470,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({ autoCompactTokens: n });
     localStorage.setItem('astra-agent-autocompact', String(n));
   },
-  setError: (v) => set({ error: v }),
+  setError: (v) => set((s) => ({ error: v || persistenceMessage(s.persistenceErrors[s.sessionId]) })),
   setProjectPath: (v) => set({ projectPath: v }),
   setAutoApprove: (v) => {
     set({ autoApprove: v });
@@ -351,13 +479,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // Tauri 不可用（纯 web 调试）时仅保留前端状态
     });
   },
-  setRunState: (running, status) => set({ running, status }),
+  setRunState: (running, status) => set((s) => ({ ...transitionRun(s, running, status), settling: false })),
   pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }] })),
   pushTerminal: (outcome, text) =>
-    set((s) => ({ entries: [...s.entries, { kind: 'terminal', outcome, text }] })),
+    set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), { kind: 'terminal', outcome, text }] })),
   pushQuestion: (q) =>
     set((s) =>
       // 幂等防御：同一 questionId 只入列一次（防事件层重复投递）
+      !s.running || s.settling || q.session_id !== s.sessionId ||
       s.entries.some((e) => e.kind === 'question' && e.questionId === q.question_id)
         ? s
         : {
@@ -374,6 +503,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           },
     ),
   answerQuestion: async (questionId, answer) => {
+    const before = get();
+    const question = before.entries.find((e) => e.kind === 'question' && e.questionId === questionId);
+    if (!before.running || before.settling || question?.kind !== 'question' || question.answer !== undefined || question.declined) return;
+    const runId = before.activeRunId;
+    const sessionId = before.sessionId;
     // 本地先置态（回答/取消后卡片禁用），后端 oneshot 解析由 invoke 完成
     set((s) => ({
       entries: s.entries.map((e) =>
@@ -389,7 +523,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     } catch (e) {
       // 提交失败必须可见：否则工具挂起等回答，用户看到的是「永远在分析」
       console.error('回答提交失败', e);
-      set((s) => ({
+      set((s) => s.sessionId !== sessionId || s.activeRunId !== runId || !s.running || s.settling ? s : ({
         error: `回答提交失败：${String(e)}`,
         entries: s.entries.map((en) =>
           en.kind === 'question' && en.questionId === questionId
@@ -400,15 +534,50 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
   startNewChat: () =>
-    set({ sessionId: newSessionId(), entries: [], status: null, error: '', input: '' }),
+    set((s) => s.running || s.sessionBusy ? s : ({ ...transitionRun(s, false, null), settling: false, sessionId: newSessionId(), entries: [], error: '', input: '', usage: null })),
+  newChat: async () => {
+    const st = get();
+    if (st.running || st.sessionBusy) return;
+    set({ sessionBusy: true });
+    try {
+      await st.saveSession();
+      await invoke('agent_reset_session', { sessionId: st.sessionId });
+      set({ sessionBusy: false });
+      get().startNewChat();
+    } catch (error) {
+      get().setError(`新对话失败：${String(error)}`);
+    } finally {
+      set({ sessionBusy: false });
+    }
+  },
+  deleteSession: async (id) => {
+    if (get().running || get().sessionBusy) return;
+    set({ sessionBusy: true });
+    try {
+      await invoke('delete_agent_session', { id });
+      const persistenceErrors = { ...get().persistenceErrors };
+      delete persistenceErrors[id];
+      set({ persistenceErrors });
+      await get().refreshSessions();
+      set({ sessionBusy: false });
+      if (get().sessionId === id) get().startNewChat();
+    } catch (error) {
+      get().setError(`删除会话失败：${String(error)}`);
+    } finally {
+      set({ sessionBusy: false });
+    }
+  },
   loadSession: (s) =>
-    set({
+    set((current) => current.running || current.sessionBusy ? current : ({
+      ...transitionRun(current, false, null),
+      settling: false,
       sessionId: s.id,
-      entries: (s.entries as Entry[]) ?? [],
+      entries: normalizeEntries((s.entries as Entry[]) ?? []),
       projectPath: s.project_path ?? '',
       status: null,
-      error: '',
-    }),
+      error: persistenceMessage(current.persistenceErrors[s.id]),
+      usage: null,
+    })),
   refreshSessions: async () => {
     try {
       set({ sessions: await invoke<AgentSessionMeta[]>('list_agent_sessions') });
@@ -433,56 +602,126 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       });
       await get().refreshSessions();
     } catch (e) {
-      console.error('保存会话失败', e);
+      get().setError(`保存页面历史失败：${String(e)}`);
+      throw e;
     }
   },
 }));
 
+function persistenceMessage(error?: string | null): string {
+  return error ? `模型上下文保存失败：${error}。未保存的上下文仍在内存中，请勿退出应用；后续运行可重试保存。` : '';
+}
+
+interface AgentSettledPayload {
+  session_id: string;
+  persistence_error: string | null;
+}
+
+function settleRun(payload: AgentSettledPayload): void {
+  const st = useAgentStore.getState();
+  const persistenceErrors = { ...st.persistenceErrors };
+  const previousMessage = persistenceMessage(persistenceErrors[payload.session_id]);
+  if (payload.persistence_error) persistenceErrors[payload.session_id] = payload.persistence_error;
+  else delete persistenceErrors[payload.session_id];
+  const current = st.sessionId === payload.session_id;
+  useAgentStore.setState({
+    ...(current ? {
+      ...transitionRun(st, false, null),
+      settling: false,
+      error: persistenceMessage(payload.persistence_error) || (st.error === previousMessage ? '' : st.error),
+    } : {}),
+    persistenceErrors,
+  });
+  if (current && st.running) void st.saveSession().catch(() => {});
+}
+
+// Status is a snapshot, not an event: never let an older request overwrite a new Run/settlement.
+let lifecycleRevision = 0;
+let statusRequest = 0;
+useAgentStore.subscribe((next, prev) => {
+  if (next.sessionId !== prev.sessionId || next.running !== prev.running ||
+      next.settling !== prev.settling || next.sessionBusy !== prev.sessionBusy ||
+      next.activeRunId !== prev.activeRunId || next.lastSequence !== prev.lastSequence ||
+      next.persistenceErrors !== prev.persistenceErrors) lifecycleRevision++;
+});
+
+export async function refreshAgentStatus(): Promise<void> {
+  const request = ++statusRequest;
+  const revision = lifecycleRevision;
+  if (useAgentStore.getState().sessionBusy) return;
+  try {
+    const status = await invoke<{
+      running: boolean; session_id: string | null; persistence_errors: Record<string, string>;
+    }>('agent_status');
+    if (request !== statusRequest || revision !== lifecycleRevision) return;
+    const st = useAgentStore.getState();
+    if (!status.running) {
+      settleRun({ session_id: st.sessionId, persistence_error: status.persistence_errors[st.sessionId] ?? null });
+      useAgentStore.setState({ persistenceErrors: status.persistence_errors });
+    } else if (status.session_id) {
+      const sameSession = status.session_id === st.sessionId;
+      useAgentStore.setState({
+        sessionId: status.session_id,
+        persistenceErrors: status.persistence_errors,
+        running: true,
+        // A recovered stream may have missed its terminal event; wait for the host barrier.
+        settling: sameSession ? st.settling : true,
+        status: sameSession ? st.status ?? 'analyzing' : 'persisting',
+        ...(sameSession ? {} : { activeRunId: null, lastSequence: 0, entries: [] }),
+        error: persistenceMessage(status.persistence_errors[status.session_id]) || st.error,
+      });
+    }
+  } catch (error) {
+    if (request === statusRequest && revision === lifecycleRevision) {
+      useAgentStore.getState().setError(`恢复运行状态失败：${String(error)}`);
+    }
+  }
+}
+
 // ===== 模块级单例事件监听 =====
 
-let listenersAttached = false;
+let listenersPromise: Promise<void> | undefined;
 
-/**
- * 挂载 agent-event 监听（幂等）。必须在页面组件 mount 时调用一次；
- * 页面卸载后监听不拆除，事件持续写入 store，实现「切页对话不丢」。
- */
-export function ensureAgentListeners(): void {
-  if (listenersAttached) return;
-  listenersAttached = true;
-
-  // ask_user 提问事件（独立于 Envelope 流，载荷自带 session_id 过滤旧会话）。
-  // 必须与 agent-event 同级注册一次，不能嵌套在回调里（否则每条事件都叠加一个监听器）。
-  listen<AgentQuestionPayload>('agent-question', (e) => {
-    const q = e.payload;
-    if (q.session_id !== useAgentStore.getState().sessionId) return;
-    useAgentStore.getState().pushQuestion(q);
-  }).catch(() => {});
-
-  listen<AgentEnvelope>('agent-event', (e) => {
-    const env = e.payload;
-    const st = useAgentStore.getState();
-    if (env.session_id !== st.sessionId) return; // 旧会话残余事件
-
-    if (env.type === 'status_changed') {
-      useAgentStore.setState({ status: env.status ?? null });
-      return;
+/** 页面 mount 时可预热；发送前必须 await。失败向调用方传播且允许重试。 */
+export function ensureAgentListeners(): Promise<void> {
+  if (listenersPromise) return listenersPromise;
+  listenersPromise = (async () => {
+    // 注册期间/失败回滚期间的半套监听器不能消费事件。
+    let ready = false;
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => listen<AgentQuestionPayload>('agent-question', (e) => {
+        if (ready) useAgentStore.getState().pushQuestion(e.payload);
+      })),
+      Promise.resolve().then(() => listen<AgentEnvelope>('agent-event', (e) => {
+        if (!ready) return;
+        const st = useAgentStore.getState();
+        if (st.settling) return;
+        const next = reduceAgentEvent(st, e.payload);
+        if (next === st) return;
+        useAgentStore.setState(isTerminal(e.payload)
+          ? { ...next, running: true, settling: true, status: 'persisting' }
+          : next);
+      })),
+      Promise.resolve().then(() => listen<AgentSettledPayload>('agent-run-settled', (e) => {
+        if (ready) settleRun(e.payload);
+      })),
+    ]);
+    const errors: unknown[] = [];
+    for (const result of results) {
+      if (result.status === 'rejected') errors.push(result.reason);
     }
-
-    if (
-      env.type === 'run_completed' ||
-      env.type === 'run_failed' ||
-      env.type === 'run_cancelled'
-    ) {
-      // 先归并终态条目（setState 同步生效），再收运行标志、落盘
-      useAgentStore.setState((s) => ({ entries: applyEnvelope(s.entries, env) }));
-      useAgentStore.setState({ running: false, status: null });
-      void st.saveSession();
-      return;
+    if (errors.length) {
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          try { result.value(); } catch (error) { errors.push(error); }
+        }
+      }
+      throw new AggregateError(errors, 'Agent 事件监听注册失败');
     }
-
-    useAgentStore.setState((s) => ({ entries: applyEnvelope(s.entries, env) }));
-  }).catch(() => {
-    // Tauri 不可用（纯 web 调试）时允许下次重试
-    listenersAttached = false;
+    ready = true;
+  })().catch((error: unknown) => {
+    listenersPromise = undefined;
+    throw error;
   });
+  return listenersPromise;
 }

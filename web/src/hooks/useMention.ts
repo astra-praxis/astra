@@ -50,6 +50,8 @@ export interface UseMentionResult<T> {
   handleKeydown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** 选中条目：替换 @xxx 为 @引用文本，返回新输入框值（焦点与光标由内部恢复） */
   pick: (item: T, currentValue: string) => string;
+  /** 手动触发（底栏「添加上下文」按钮）：光标处插入 @ 并检测，等价用户键入 @；返回新输入框值 */
+  insertAt: () => string;
   /** 关闭弹层 */
   close: () => void;
 }
@@ -115,6 +117,30 @@ export function useMention<T>(
     return newValue;
   }
 
+  /**
+   * 手动触发 @ 提及（底栏按钮）：在光标处插入 @，按检测规则打开弹层。
+   * 与键入 @ 行为一致——前置字符非空白/行首时正则不命中，弹层不打开。
+   * 返回新输入框值，由调用方回写受控状态（textarea 是受控组件，不能直接改 DOM value）。
+   */
+  function insertAt(): string {
+    const el = textareaRef.current;
+    const value = el?.value ?? '';
+    const start = el?.selectionStart ?? value.length;
+    const end = el?.selectionEnd ?? start;
+    const next = value.slice(0, start) + '@' + value.slice(end);
+    const pos = start + 1;
+    detect(next, pos);
+    // 受控值渲染完成后恢复焦点与光标（与 pick 同款 rAF 模式）
+    requestAnimationFrame(() => {
+      const t = textareaRef.current;
+      if (t) {
+        t.focus();
+        t.setSelectionRange(pos, pos);
+      }
+    });
+    return next;
+  }
+
   function handleKeydown(e: React.KeyboardEvent<HTMLTextAreaElement>): boolean {
     if (!active) return false;
 
@@ -164,6 +190,7 @@ export function useMention<T>(
     detect,
     handleKeydown,
     pick,
+    insertAt,
     close: () => setActive(false),
   };
 }

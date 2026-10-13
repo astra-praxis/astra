@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { createOutputScroll } from '@/hooks/outputScroll';
+import { useStreamingText } from '@/hooks/useStreamingText';
 import './StreamBlock.scss';
 
 /**
@@ -28,6 +30,17 @@ export function StreamBlock({
   const [open, setOpen] = useState(!finished);
   const [userToggled, setUserToggled] = useState(false);
   const bodyRef = useRef<HTMLPreElement | null>(null);
+  const renderedText = useStreamingText(text, !finished);
+  const [scroll] = useState(() => createOutputScroll(
+    () => bodyRef.current,
+    (callback) => requestAnimationFrame(callback),
+    (id) => cancelAnimationFrame(id),
+  ));
+  useEffect(() => () => scroll.dispose(), [scroll]);
+  useEffect(() => {
+    if (open) scroll.resume();
+    else scroll.dispose();
+  }, [open, scroll]);
 
   // 完成后自动收起（用户手动展开过则尊重用户选择）
   useEffect(() => {
@@ -36,9 +49,8 @@ export function StreamBlock({
 
   // 展开且仍在流式输出时，正文滚动条保持在最底部
   useEffect(() => {
-    const el = bodyRef.current;
-    if (open && el) el.scrollTop = el.scrollHeight;
-  }, [open, text]);
+    if (open && !finished) scroll.schedule();
+  }, [open, renderedText, finished, scroll]);
 
   return (
     <div className={`stream-block${variant ? ` stream-block--${variant}` : ''}`}>
@@ -59,8 +71,19 @@ export function StreamBlock({
         />
       </button>
       {open && (
-        <pre ref={bodyRef} className="stream-block__body">
-          {text}
+        <pre ref={bodyRef} className="stream-block__body" tabIndex={0}
+          onScroll={() => scroll.onScroll()}
+          onWheel={(event) => {
+            event.stopPropagation();
+            if (event.deltaY < 0) scroll.pause();
+          }}
+          onTouchMove={(event) => { event.stopPropagation(); scroll.pause(); }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) scroll.pause();
+          }}
+        >
+          {renderedText}
         </pre>
       )}
     </div>

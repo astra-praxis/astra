@@ -186,9 +186,15 @@ body .content:has(.agent-root) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
   // 右侧 16px 与 dock 外边距对齐；滚动条仍贴容器右缘（在 padding 外侧）
   padding: 16px 16px;
+}
+
+.agent-entries__content {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 /* ===== 空状态 ===== */
@@ -880,16 +886,159 @@ body .content:has(.agent-root) {
     }
   }
 
+  // 底栏（Zed thread_view 式）：左右两组，justify-between 撑开
   &__bar {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
     padding-top: 8px;
     border-top: 1px solid var(--border-color);
   }
 
-  &__spacer {
-    flex: 1;
+  &__bar-left,
+  &__bar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  // 思考模式 SplitButton：主按钮 + 小 chevron，开态 accent 高亮
+  &__thinking {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+
+    &-main,
+    &-chev {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    &-main {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px 0 0 7px;
+    }
+
+    &-chev {
+      width: 16px;
+      height: 26px;
+      border-radius: 0 7px 7px 0;
+    }
+
+    &-chev-up {
+      transform: rotate(180deg);
+    }
+
+    &-main:hover:not(:disabled),
+    &-chev:hover {
+      color: var(--brand-600);
+      background: var(--brand-50);
+    }
+
+    &.is-on &-main {
+      color: var(--text-inverse, #fff);
+      background: var(--brand-500);
+
+      &:hover {
+        background: var(--brand-600);
+      }
+    }
+
+    &.is-on &-chev {
+      color: var(--brand-600);
+    }
+  }
+
+  // 思考力度菜单：复用 popup 样式模式（浮层 + 阴影 + fade-in），自实现不引组件库
+  &__effort-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    min-width: 96px;
+    padding: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px var(--shadow-md);
+    animation: agent-fade-in 0.12s ease;
+
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 6px 10px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.12s ease;
+
+      &:hover {
+        color: var(--brand-600);
+        background: var(--brand-50);
+      }
+
+      svg {
+        color: var(--brand-600);
+      }
+    }
+  }
+
+  // 上下文用量：环形进度（SVG）或 token 缩写
+  &__usage {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: default;
+
+    svg {
+      transform: rotate(-90deg);
+    }
+
+    circle {
+      fill: none;
+      stroke-width: 2;
+    }
+
+    & .agent-dock__usage-track {
+      stroke: var(--border-color);
+    }
+
+    & .agent-dock__usage-arc {
+      stroke: var(--brand-500);
+      transition: stroke-dasharray 0.3s ease;
+    }
+
+    &.is-hot .agent-dock__usage-arc {
+      stroke: var(--danger-500);
+    }
+
+    &.is-hot .agent-dock__usage-pct {
+      color: var(--danger-600);
+      font-weight: 600;
+    }
   }
 
   &__iconbtn {
@@ -923,23 +1072,7 @@ body .content:has(.agent-root) {
     }
   }
 
-  &__hint {
-    font-size: 11px;
-    color: var(--text-muted);
-
-    kbd {
-      display: inline-block;
-      padding: 1px 5px;
-      background: var(--bg-surface-soft, var(--bg-surface));
-      border: 1px solid var(--border-color);
-      border-radius: 4px;
-      font-size: 10px;
-      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-      color: var(--text-secondary);
-    }
-  }
-
-  // 发送按钮：与 chat 页 send-btn 同款（34px 品牌色方块）
+  // 发送按钮：与 chat 页 send-btn 同款（34px 品牌色方块）；快捷键说明在 title 里
   &__send {
     width: 34px;
     height: 34px;

@@ -7,13 +7,15 @@
  * - 事件流：Tauri `agent-event`（Envelope：type 标签 + snake_case 载荷）
  * - 权限确认卡：批准/拒绝 → agent_permission_decide，UI 状态由 permission_decided 事件回写
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useOutputScroll } from '@/hooks/useOutputScroll';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import {
   ArrowRight,
+  AtSign,
   Brain,
   Check,
   ChevronDown,
@@ -38,7 +40,11 @@ import { useChatToolbarStore } from '@/stores/chatToolbar';
 import {
   useAgentStore,
   ensureAgentListeners,
+  refreshAgentStatus,
+  THINKING_EFFORTS,
+  type AgentUsage,
   type Entry,
+  type ThinkingEffort,
 } from '@/stores/agent';
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter, useMention } from '@/hooks/useMention';
@@ -50,6 +56,7 @@ import SettingsSheet from './chat/SettingsSheet';
 import { parseSlashCommand, useSlash, type UserSkillLite } from '@/hooks/useSlash';
 import AgentHistoryPanel, { type AgentSessionMeta } from './AgentHistoryPanel';
 import { StreamBlock } from '@/components/agent/StreamBlock';
+import { ArtifactList } from '@/components/agent/ArtifactList';
 import './AgentPage.scss';
 
 // 事件模型与条目类型见 stores/agent.ts（全局会话状态的唯一事实来源）
@@ -60,6 +67,7 @@ const STATUS_LABEL: Record<string, string> = {
   awaiting_permission: '等待确认',
   finalizing: '收尾中',
   compacting: '压缩上下文',
+  persisting: '保存上下文',
 };
 
 // 权限确认卡文案按工具区分（未收录的工具用兜底文案）
@@ -77,29 +85,162 @@ const PERM_ACTION_LABEL: Record<string, string> = {
   list_files: '请求列出目录',
 };
 
+/** token 数缩写（1234 → 1.2k，1500000 → 1.5M），用于无上限时的用量展示 */
+function humanizeTokens(n: number): string {
+  if (n >= 1_000_000) {
+    const v = n / 1_000_000;
+    return `${Number.isInteger(v) ? v : v.toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    const v = n / 1_000;
+    return `${Number.isInteger(v) ? v : v.toFixed(1)}k`;
+  }
+  return String(n);
+}
+
+const EFFORT_LABEL: Record<ThinkingEffort, string> = {
+  minimal: '最省',
+  low: '低',
+  medium: '中',
+  high: '高',
+};
+
+/**
+ * 思考模式 SplitButton（Zed 式）：主按钮切换开关（开 = accent 高亮），
+ * 右侧小 chevron 展开力度菜单。菜单复用现有 popup 样式模式（绝对定位 + 外点关闭）。
+ */
+function ThinkingButton(props: {
+  enabled: boolean;
+  effort: ThinkingEffort;
+  onToggle: () => void;
+  onEffortChange: (e: ThinkingEffort) => void;
+}) {
+  const { enabled, effort, onToggle, onEffortChange } = props;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // 菜单打开时监听外点关闭（capture 不需要，pointerdown 先于 click 即可）
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [menuOpen]);
+
+  return (
+    <div ref={rootRef} className={`agent-dock__thinking${enabled ? ' is-on' : ''}`}>
+      <button
+        type="button"
+        className="agent-dock__thinking-main"
+        onClick={onToggle}
+        aria-pressed={enabled}
+        title={`思考模式：${enabled ? '开' : '关'} · 力度 ${EFFORT_LABEL[effort]}（模型/网关需支持思考，不支持时请求报错）`}
+      >
+        <Brain size={14} strokeWidth={1.8} />
+      </button>
+      <button
+        type="button"
+        className="agent-dock__thinking-chev"
+        onClick={() => setMenuOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label="选择思考力度"
+        title={`思考力度：${EFFORT_LABEL[effort]}`}
+      >
+        <ChevronDown size={11} strokeWidth={2.4} className={menuOpen ? 'agent-dock__thinking-chev-up' : ''} />
+      </button>
+      {menuOpen && (
+        <div className="agent-dock__effort-menu" role="menu">
+          {THINKING_EFFORTS.map((e) => (
+            <button
+              key={e}
+              type="button"
+              role="menuitemradio"
+              aria-checked={effort === e}
+              onClick={() => {
+                onEffortChange(e);
+                setMenuOpen(false);
+              }}
+            >
+              <span>{EFFORT_LABEL[e]}</span>
+              {effort === e && <Check size={13} strokeWidth={2.5} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 上下文用量指示：有 max 显示环形进度 + 百分比（≥85% 警示色）；
+ * 无 max 有 total 显示缩写；usage 为 null 不渲染。tooltip 给 input/output/total 明细。
+ */
+function ContextUsage({ usage }: { usage: AgentUsage | null }) {
+  if (!usage) return null;
+  const { input, output, total, max } = usage;
+  const used = total ?? (input != null && output != null ? input + output : undefined);
+  const pct = max != null && max > 0 && used != null ? Math.min(used / max, 1) : null;
+  if (pct == null && total == null) return null;
+  const detail = `输入 ${input ?? '—'} · 输出 ${output ?? '—'} · 合计 ${total ?? '—'}${max != null ? ` · 上限 ${max}` : ''}`;
+  const hot = pct != null && pct >= 0.85;
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <span className={`agent-dock__usage${hot ? ' is-hot' : ''}`} title={detail}>
+      {pct != null ? (
+        <>
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle className="agent-dock__usage-track" cx="8" cy="8" r={radius} />
+            <circle
+              className="agent-dock__usage-arc"
+              cx="8"
+              cy="8"
+              r={radius}
+              strokeDasharray={`${circumference * pct} ${circumference}`}
+            />
+          </svg>
+          <span className="agent-dock__usage-pct">{Math.round(pct * 100)}%</span>
+        </>
+      ) : (
+        <span className="agent-dock__usage-total">{humanizeTokens(total!)}</span>
+      )}
+    </span>
+  );
+}
+
 export default function AgentPage() {
   // ===== 全局会话状态（zustand；切页不丢，事件由模块级单例监听持续写入） =====
   const sessionId = useAgentStore((s) => s.sessionId);
   const entries = useAgentStore((s) => s.entries);
   const input = useAgentStore((s) => s.input);
   const setInput = useAgentStore((s) => s.setInput);
-  const running = useAgentStore((s) => s.running);
+  const running = useAgentStore((s) => s.running || s.sessionBusy);
+  const settling = useAgentStore((s) => s.settling || s.sessionBusy);
   const status = useAgentStore((s) => s.status);
   const error = useAgentStore((s) => s.error);
   const setError = useAgentStore((s) => s.setError);
+  const imageRecognition = useAgentStore((s) => s.imageRecognition);
   const projectPath = useAgentStore((s) => s.projectPath);
   const setProjectPath = useAgentStore((s) => s.setProjectPath);
   const sessions = useAgentStore((s) => s.sessions);
   const refreshSessions = useAgentStore((s) => s.refreshSessions);
-  const saveSession = useAgentStore((s) => s.saveSession);
+  const usage = useAgentStore((s) => s.usage);
+  const thinkingEnabled = useAgentStore((s) => s.thinkingEnabled);
+  const thinkingEffort = useAgentStore((s) => s.thinkingEffort);
+  const setThinkingEnabled = useAgentStore((s) => s.setThinkingEnabled);
+  const setThinkingEffort = useAgentStore((s) => s.setThinkingEffort);
+
   const pushUser = useAgentStore((s) => s.pushUser);
   const pushTerminal = useAgentStore((s) => s.pushTerminal);
   const setRunState = useAgentStore((s) => s.setRunState);
 
   // 事件监听为模块级单例：首次进入本页时挂载，卸载后不拆除（切页对话继续）
   useEffect(() => {
-    ensureAgentListeners();
-  }, []);
+    void ensureAgentListeners().then(() => refreshAgentStatus()).catch((error) => setError(`事件监听失败：${String(error)}`));
+  }, [setError]);
 
   // 应用重启后同步「放权模式」开关到后端（开关切换时 setAutoApprove 已实时同步）
   useEffect(() => {
@@ -170,7 +311,7 @@ export default function AgentPage() {
   const showSettings = useChatToolbarStore((s) => s.showSettings);
 
   // ===== 参数（SettingsSheet；system_prompt 传给 agent_start_run，温度/token 后端暂不支持已移除） =====
-  const [systemPrompt, setSystemPrompt] = useState('你是一个有用的助手，请简洁准确地回答用户问题。');
+  const [systemPrompt, setSystemPrompt] = useState('');
 
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
   const selectedModel = runningModels.find((m) => m.port === selectedModelPort) ?? null;
@@ -189,16 +330,7 @@ export default function AgentPage() {
   // ===== 事件订阅：见 stores/agent.ts 的模块级单例（ensureAgentListeners） =====
 
   // ===== 动作 =====
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      const el = document.querySelector('.agent-main .agent-entries');
-      if (el) el.scrollTop = el.scrollHeight;
-    });
-  }, []);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [entries, scrollToBottom]);
+  const { viewportRef, contentRef, controller: outputScroll } = useOutputScroll(sessionId);
 
   const handleSend = useCallback(async () => {
     const raw = input.trim();
@@ -241,6 +373,14 @@ export default function AgentPage() {
       }
     }
 
+    try {
+      await ensureAgentListeners();
+    } catch (error) {
+      setError(`事件监听失败：${String(error)}`);
+      return;
+    }
+    if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId) return;
+    outputScroll.resume();
     setInput('');
     setError('');
     pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
@@ -261,26 +401,27 @@ export default function AgentPage() {
           project_root: projectPath || null,
           system_prompt: systemPrompt.trim() || null,
           max_turns: useAgentStore.getState().maxTurns,
-          auto_compact_tokens:
-            useAgentStore.getState().autoCompactTokens > 0
-              ? useAgentStore.getState().autoCompactTokens
-              : null,
+          auto_compact_tokens: useAgentStore.getState().autoCompactTokens,
+          image_recognition: useAgentStore.getState().imageRecognition,
+          thinking_enabled: useAgentStore.getState().thinkingEnabled,
+          thinking_effort: useAgentStore.getState().thinkingEffort,
         },
       });
     } catch (e) {
       setRunState(false, null);
       pushTerminal('failed', String(e));
     }
-  }, [input, running, projectPath, selectedProvider, systemPrompt, skills, sessionId, setInput, setError, pushUser, setRunState]);
+  }, [input, running, projectPath, selectedProvider, systemPrompt, skills, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, outputScroll]);
 
   const handleStop = useCallback(async () => {
+    if (useAgentStore.getState().settling || useAgentStore.getState().sessionBusy) return;
     try {
       await invoke('agent_cancel');
-    } catch {
-      // ignore
+    } catch (error) {
+      setError(`停止失败：${String(error)}`);
     }
-    setRunState(false, null);
-  }, [setRunState]);
+    // Keep admission occupied until agent-run-settled, including cancellation drain.
+  }, [setError]);
 
   const handleDecide = useCallback(
     async (callId: string, allow: boolean) => {
@@ -359,21 +500,15 @@ export default function AgentPage() {
   }, []);
 
   const newChat = useCallback(async () => {
-    if (running) return;
-    const st = useAgentStore.getState();
-    void st.saveSession(st.sessionId); // 旧会话落盘后重置（saveSession 内部读 get()，拿到的是保存时的快照）
-    st.startNewChat();
-    invoke('agent_reset_session', { sessionId: st.sessionId }).catch(() => {
-      // 后端不可用时忽略（本地调试）
-    });
-  }, [running]);
+    await useAgentStore.getState().newChat();
+  }, []);
 
-  /** 从历史面板恢复会话（只读回放 + 续聊重新建 Thread） */
+  /** 恢复页面历史；续聊模型上下文由后端 SQLite 加载。 */
   const selectSession = useCallback(
     (s: AgentSessionMeta) => {
-      if (running) return;
       const st = useAgentStore.getState();
-      void st.saveSession(st.sessionId);
+      if (st.running || st.sessionBusy) return;
+      void st.saveSession(st.sessionId).catch(() => {});
       st.loadSession(s);
       setError('');
     },
@@ -382,14 +517,9 @@ export default function AgentPage() {
 
   const deleteSession = useCallback(
     (id: string) => {
-      invoke('delete_agent_session', { id })
-        .then(() => {
-          void refreshSessions();
-          if (useAgentStore.getState().sessionId === id) void newChat();
-        })
-        .catch((e) => setError(`删除会话失败: ${e}`));
+      void useAgentStore.getState().deleteSession(id);
     },
-    [newChat, refreshSessions, setError],
+    [refreshSessions, setError],
   );
 
   // ===== 渲染 =====
@@ -446,12 +576,18 @@ export default function AgentPage() {
               {sourceLabel}
               {modelName ? ` · ${modelName}` : ''}
             </span>
+            <span
+              className="agent-tb__model"
+              title="图片识别开关在「设置 → Agent 权限」中调整；仅新会话生效，已有会话保持原设置，配置不一致时后端拒绝续聊。"
+            >
+              图片识别：{imageRecognition ? '开' : '关'}（新会话设置）
+            </span>
             <button
               type="button"
               className="agent-tb__iconbtn"
               onClick={() => void newChat()}
               disabled={running}
-              title="新对话（保留历史，丢弃当前上下文）"
+              title="新对话（保留 SQLite 上下文与页面历史）"
             >
               <Plus size={15} strokeWidth={2} />
             </button>
@@ -480,7 +616,16 @@ export default function AgentPage() {
       {/* 主体：左对话流 + 右历史面板 */}
       <div className="agent-body">
         <div className="agent-main">
-          <div className="agent-entries">
+          <div className="agent-entries" ref={viewportRef}
+            onScroll={() => outputScroll.onScroll()}
+            onWheel={(event) => { if (event.deltaY < 0) outputScroll.pause(); }}
+            onTouchMove={() => outputScroll.pause()}
+            onKeyDown={(event) => {
+              if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) outputScroll.pause();
+            }}
+            tabIndex={0}
+          >
+            <div ref={contentRef} className="agent-entries__content" key={sessionId}>
             {entries.length === 0 && (
               <div className="agent-empty">
                 <div className="agent-empty__art">
@@ -510,14 +655,16 @@ export default function AgentPage() {
               <div className="agent-statusline">
                 <Loader2 size={13} strokeWidth={2} className="agent-statusline__spin" />
                 {STATUS_LABEL[status ?? ''] ?? '运行中'}
-                <button type="button" onClick={() => void handleStop()}>
+                <button type="button" disabled={settling} onClick={() => void handleStop()}>
                   停止
                 </button>
               </div>
             )}
           </div>
 
-          {/* 参数设置面板（悬浮在输入区上方） */}
+          </div>
+
+          {/* 参数设置面板（悬浮在输入区上方）；图片识别开关在全局设置页 */}
           {showSettings && (
             <SettingsSheet
               systemPrompt={systemPrompt}
@@ -525,6 +672,7 @@ export default function AgentPage() {
               onSystemPromptChange={setSystemPrompt}
             />
           )}
+
 
           {/* 输入区（@ 提及 / / 技能弹层与输入框为兄弟节点，对齐 chat 页布局） */}
           <div className="agent-dock-wrap">
@@ -566,29 +714,49 @@ export default function AgentPage() {
                   }
                 }}
               />
-              {/* 底栏：模型切换（原标题栏功能移入）+ 提示 + 设置/清空 + 发送/停止 */}
+              {/* 底栏（Zed thread_view 式 justify-between 两组）：左 = 上下文/思考模式，右 = 用量 + 模型 + 发送 */}
               <div className="agent-dock__bar">
-                <ChatToolbar side="left" />
-                <span className="agent-dock__spacer" />
-                <div className="agent-dock__hint">
-                  <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行 · <kbd>@</kbd> 引用文件
+                <div className="agent-dock__bar-left">
+                  {projectPath && (
+                    <button
+                      type="button"
+                      className="agent-dock__iconbtn"
+                      disabled={running}
+                      onClick={() => setInput(mention.insertAt())}
+                      title="添加上下文（@ 引用文件）"
+                      aria-label="添加上下文"
+                    >
+                      <AtSign size={15} strokeWidth={1.8} />
+                    </button>
+                  )}
+                  <ThinkingButton
+                    enabled={thinkingEnabled}
+                    effort={thinkingEffort}
+                    onToggle={() => setThinkingEnabled(!thinkingEnabled)}
+                    onEffortChange={setThinkingEffort}
+                  />
                 </div>
-                {running ? (
-                  <button type="button" className="agent-dock__stop" onClick={() => void handleStop()}>
-                    <span className="agent-dock__stop-square" />
-                    停止
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="agent-dock__send"
-                    disabled={!canSend}
-                    onClick={() => void handleSend()}
-                    aria-label="发送"
-                  >
-                    <ArrowRight size={16} strokeWidth={2.5} />
-                  </button>
-                )}
+                <div className="agent-dock__bar-right">
+                  <ContextUsage usage={usage} />
+                  <ChatToolbar side="left" />
+                  {running ? (
+                    <button type="button" className="agent-dock__stop" disabled={settling} onClick={() => void handleStop()}>
+                      <span className="agent-dock__stop-square" />
+                      停止
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="agent-dock__send"
+                      disabled={!canSend}
+                      onClick={() => void handleSend()}
+                      aria-label="发送"
+                      title="Enter 发送 · Shift+Enter 换行 · @ 引用文件"
+                    >
+                      <ArrowRight size={16} strokeWidth={2.5} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -648,7 +816,7 @@ function parseUserRefs(
   return { refs, body: body.trim() };
 }
 
-function EntryView({
+const EntryView = memo(function EntryView({
   entry,
   onDecide,
   onAnswer,
@@ -695,7 +863,7 @@ function EntryView({
         <div className={`aentry aentry--assistant${entry.streaming ? ' is-streaming' : ''}`}>
           {entry.text ? (
             <div className="aentry__md">
-              <MarkdownMessage content={entry.text} />
+              <MarkdownMessage content={entry.text} streaming={entry.streaming} />
             </div>
           ) : (
             <div className="aentry__typing">
@@ -735,12 +903,14 @@ function EntryView({
             </div>
           ) : (
             <div className={`aentry__perm-state is-${entry.state}`}>
-              {entry.state === 'allowed' ? '已批准' : '已拒绝'}
+              {entry.state === 'allowed' ? '已批准' : entry.state === 'expired' ? '已失效' : '已拒绝'}
             </div>
           )}
         </div>
       );
     }
+    case 'notice':
+      return <div className="aentry aentry--terminal" role="status">{entry.text}</div>;
     case 'terminal':
       return (
         <div className={`aentry aentry--terminal is-${entry.outcome}`}>
@@ -762,7 +932,7 @@ function EntryView({
         </div>
       );
   }
-}
+});
 
 // ===== 提问卡（ask_user：选项按钮 + 自由文本；答案 verbatim 回传模型） =====
 
@@ -989,7 +1159,7 @@ function ToolEntry({
                 ? '完成'
                 : entry.status === 'denied'
                   ? '已拒绝'
-                  : '失败'}
+                  : entry.status === 'interrupted' ? '已中断' : '失败'}
         </span>
         {hasBody && (
           <ChevronDown size={12} strokeWidth={2} className={`aentry__tool-chev${open ? ' rotated' : ''}`} />
@@ -1024,14 +1194,7 @@ function ToolEntry({
         <div className="aentry__tool-body">
           {entry.result && <pre className="aentry__tool-result">{entry.result}</pre>}
           {entry.artifacts && entry.artifacts.length > 0 && (
-            <div className="aentry__artifacts">
-              {entry.artifacts.map((a) => (
-                <span key={a.path} className="aentry__artifact">
-                  <ChevronRight size={11} strokeWidth={2} />
-                  {a.path}
-                </span>
-              ))}
-            </div>
+            <ArtifactList artifacts={entry.artifacts} />
           )}
         </div>
       )}

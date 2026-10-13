@@ -46,6 +46,14 @@
   letter-spacing: 2px;
 }
 
+.titlebar-logo {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  margin-right: 6px;
+  display: block;
+}
+
 .titlebar-right {
   display: flex;
   align-items: center;
@@ -203,7 +211,7 @@
   height: 36px;
   flex-shrink: 0;
   padding: 0;
-  background: var(--accent-gradient);
+  background: transparent;
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -215,9 +223,10 @@
 }
 
 .header-logo {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-inverse);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: block;
 }
 
 .header-title {

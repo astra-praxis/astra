@@ -29,7 +29,7 @@ export default function OrbArt({ size = 128, className = '' }: Props) {
       height={size}
       viewBox="0 0 160 160"
       role="img"
-      aria-label="星野"
+      aria-label="Astra"
     >
       <defs>
         {/* 星球本体：左上高光 → 品牌深色 */}

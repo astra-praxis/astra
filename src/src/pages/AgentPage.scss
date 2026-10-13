@@ -222,24 +222,7 @@ body .content:has(.agent-root) {
     }
   }
 
-  &__hint {
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  // 右上角模型显示（只读；切换在输入框底栏）
-  &__model {
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    max-width: 260px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-right: 2px;
-  }
+  // 右上角仅保留历史面板开关；模型显示与新建 tab 已移除（模型在输入框下方切换）
 }
 
 /* ===== 错误提示 ===== */

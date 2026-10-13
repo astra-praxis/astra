@@ -108,7 +108,8 @@ export default function AppLayout() {
         )}
 
         <div className="titlebar-center">
-          <span className="title-bar-title">星野</span>
+          <img className="titlebar-logo" src="/logo.png" alt="Astra logo" />
+          <span className="title-bar-title">Astra</span>
         </div>
 
         <div className="titlebar-right">
@@ -163,9 +164,9 @@ export default function AppLayout() {
               title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
               aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
             >
-              <span className="header-logo">星</span>
+              <img className="header-logo" src="/logo.png" alt="Astra logo" />
             </button>
-            <h2 className="header-title">星野</h2>
+            <h2 className="header-title">Astra</h2>
           </div>
 
           <nav className="sidebar-nav">

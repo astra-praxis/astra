@@ -515,8 +515,6 @@ export default function AgentPage() {
     sourceType === 'model'
       ? (selectedModel?.name ?? 'local')
       : (overrideModelName ?? selectedProvider?.active_model ?? null);
-  const sourceLabel =
-    sourceType === 'model' ? (selectedModel?.name ?? '本地模型') : (selectedProvider?.name ?? '未选择');
 
   // 占用后端单活动 Run 准入的会话（可能是别的 tab 的会话在跑）：多 tab 发送互斥
   const busySessionId = useAgentStore((s) => runningSessionId(s));
@@ -564,11 +562,11 @@ export default function AgentPage() {
       const provider = st.providers.find((p) => p.id === st.selectedProviderId) ?? null;
       const name = st.overrideModelName ?? provider?.active_model ?? null;
       if (!provider) {
-        setError('请先在标题栏选择一个 API 提供者');
+        setError('请先在输入框下方选择一个 API 提供者');
         return;
       }
       if (!name) {
-        setError('请先选择模型（标题栏 → 对话设置）');
+        setError('请先在输入框下方选择模型');
         return;
       }
     }
@@ -843,7 +841,6 @@ export default function AgentPage() {
                 <FolderOpen size={14} strokeWidth={1.8} />
                 选择项目文件夹
               </button>
-              <span className="agent-tb__hint">选择项目后可用 @ 引用文件 · 未选项目为纯聊天</span>
             </>
           ),
           tbLeft,
@@ -851,18 +848,6 @@ export default function AgentPage() {
       {tbRight &&
         createPortal(
           <>
-            <span className="agent-tb__model" title="当前模型（在输入框下方切换）">
-              {sourceLabel}
-              {modelName ? ` · ${modelName}` : ''}
-            </span>
-            <button
-              type="button"
-              className="agent-tb__iconbtn"
-              onClick={newTab}
-              title="新建会话标签（当前会话驻留内存，可随时切回）"
-            >
-              <Plus size={15} strokeWidth={2} />
-            </button>
             <button
               type="button"
               className={`agent-tb__iconbtn${historyOpen ? ' is-active' : ''}`}

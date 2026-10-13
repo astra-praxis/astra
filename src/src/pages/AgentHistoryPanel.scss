@@ -1,25 +1,39 @@
-// Agent 会话历史面板（常驻右侧）
+// Agent 会话历史面板（全高左侧栏，历史即导航）
 // 样式只引用 var(--...)；BEM 命名
 
 .ahist {
-  width: 240px;
+  position: relative;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
-  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
   overflow: hidden;
 
+  // 头部 = 搜索框（常驻）+ 计数 + 新建按钮
   &__head {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 10px 12px;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--text-secondary);
+    padding: 8px 12px;
+    color: var(--text-muted);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+
+    input {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 12.5px;
+      font-family: inherit;
+      color: var(--text-primary);
+
+      &::placeholder {
+        color: var(--text-muted);
+      }
+    }
   }
 
   &__count {
@@ -32,7 +46,7 @@
     padding: 0 7px;
   }
 
-  &__search-btn {
+  &__new {
     margin-left: auto;
     display: flex;
     align-items: center;
@@ -48,40 +62,6 @@
     &:hover {
       color: var(--brand-600);
       background: var(--brand-50);
-    }
-
-    &.is-active {
-      color: var(--brand-600);
-      background: var(--brand-50);
-    }
-  }
-
-  // 搜索框行（点放大镜后展开，默认不渲染）
-  &__search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 8px 8px 0;
-    padding: 5px 8px;
-    color: var(--text-muted);
-    background: var(--bg-surface-soft, var(--bg-surface));
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    flex-shrink: 0;
-
-    input {
-      flex: 1;
-      min-width: 0;
-      border: none;
-      outline: none;
-      background: transparent;
-      font-size: 12px;
-      font-family: inherit;
-      color: var(--text-primary);
-
-      &::placeholder {
-        color: var(--text-muted);
-      }
     }
   }
 
@@ -106,6 +86,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    outline: none;
   }
 
   &__empty {
@@ -147,7 +128,8 @@
     cursor: pointer;
     transition: background 0.12s ease;
 
-    &:hover {
+    // 键盘/悬停游标（mouseenter 同步游标，两者视觉一致）
+    &.is-cursor {
       background: var(--bg-surface-soft, var(--bg-surface));
 
       .ahist__item-del {
@@ -161,6 +143,10 @@
       .ahist__item-title {
         color: var(--brand-700);
       }
+    }
+
+    &.is-running .ahist__item-title {
+      color: var(--brand-700);
     }
   }
 
@@ -180,6 +166,67 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  // 第二行：项目徽标 + 状态标识（运行中 / 待处理 / 打开中）
+  &__item-sub {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  &__item-proj {
+    max-width: 110px;
+    padding: 0 6px;
+    font-size: 10.5px;
+    line-height: 16px;
+    color: var(--brand-700);
+    background: var(--brand-50);
+    border: 1px solid var(--brand-200);
+    border-radius: 999px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &.is-chat {
+      color: var(--text-muted);
+      background: var(--bg-surface-soft, var(--bg-surface));
+      border-color: var(--border-color);
+    }
+  }
+
+  &__item-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+
+    &.is-running {
+      color: var(--brand-700);
+    }
+
+    &.is-waiting {
+      color: var(--danger-600);
+
+      &::before {
+        content: '';
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--danger-500, var(--danger-600));
+      }
+    }
+
+    &.is-open {
+      opacity: 0.85;
+    }
+  }
+
+  &__spin {
+    animation: ahist-spin 1s linear infinite;
   }
 
   &__item-time {
@@ -206,5 +253,38 @@
     &:hover {
       color: var(--danger-600);
     }
+  }
+
+  // 右缘拖拽手柄（可点击区域略宽于视觉条）
+  &__resize {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 5;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 1px;
+      height: 100%;
+      background: transparent;
+      transition: background 0.12s ease;
+    }
+
+    &:hover::after,
+    &:active::after {
+      background: var(--brand-400);
+    }
+  }
+}
+
+@keyframes ahist-spin {
+  to {
+    transform: rotate(360deg);
   }
 }

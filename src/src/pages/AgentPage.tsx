@@ -42,6 +42,7 @@ import {
   useAgentStore,
   ensureAgentListeners,
   refreshAgentStatus,
+  runningSessionId,
   THINKING_EFFORTS,
   type AgentUsage,
   type Entry,
@@ -49,13 +50,14 @@ import {
 } from '@/stores/agent';
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter, useMention } from '@/hooks/useMention';
-import ChatToolbar from '@/components/chat/ChatToolbar';
+import ModelPicker from '@/components/agent/ModelPicker';
 import MarkdownMessage from './chat/MarkdownMessage';
 import FileMentionPopup from './chat/FileMentionPopup';
 import SlashPopup from './chat/SlashPopup';
 import SettingsSheet from './chat/SettingsSheet';
 import { parseSlashCommand, useSlash, type UserSkillLite } from '@/hooks/useSlash';
 import AgentHistoryPanel, { type AgentSessionMeta } from './AgentHistoryPanel';
+import AgentTabs from './AgentTabs';
 import { StreamBlock } from '@/components/agent/StreamBlock';
 import { ArtifactList } from '@/components/agent/ArtifactList';
 import './AgentPage.scss';
@@ -412,7 +414,6 @@ export default function AgentPage() {
   const status = useAgentStore((s) => s.status);
   const error = useAgentStore((s) => s.error);
   const setError = useAgentStore((s) => s.setError);
-  const imageRecognition = useAgentStore((s) => s.imageRecognition);
   const projectPath = useAgentStore((s) => s.projectPath);
   const setProjectPath = useAgentStore((s) => s.setProjectPath);
   const sessions = useAgentStore((s) => s.sessions);
@@ -484,8 +485,14 @@ export default function AgentPage() {
   // 气泡内 @文件 chip 解析用的文件集合（files 变化时重建）
   const fileSet = useMemo(() => new Set(files), [files]);
 
-  // ===== 历史面板开关（易失 UI 状态，留在组件内） =====
-  const [historyOpen, setHistoryOpen] = useState(false);
+  // ===== 历史面板开关（持久化，重启后保持上次的开合状态） =====
+  const [historyOpen, setHistoryOpen] = useState(() => localStorage.getItem('astra.history.open') === '1');
+  const toggleHistory = useCallback(() => {
+    setHistoryOpen((o) => {
+      localStorage.setItem('astra.history.open', o ? '0' : '1');
+      return !o;
+    });
+  }, []);
 
   useEffect(() => {
     void refreshSessions();
@@ -512,8 +519,12 @@ export default function AgentPage() {
   const sourceLabel =
     sourceType === 'model' ? (selectedModel?.name ?? '本地模型') : (selectedProvider?.name ?? '未选择');
 
+  // 占用后端单活动 Run 准入的会话（可能是别的 tab 的会话在跑）：多 tab 发送互斥
+  const busySessionId = useAgentStore((s) => runningSessionId(s));
+
   const canSend =
     !running &&
+    (busySessionId === null || busySessionId === sessionId) &&
     input.trim().length > 0 &&
     (sourceType === 'model' ? !!selectedModelPort : !!selectedProviderId && !!modelName);
 
@@ -569,7 +580,7 @@ export default function AgentPage() {
       setError(`事件监听失败：${String(error)}`);
       return;
     }
-    if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId) return;
+    if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId || runningSessionId(useAgentStore.getState()) !== null) return;
     outputScroll.resume();
     setInput('');
     setError('');
@@ -689,20 +700,21 @@ export default function AgentPage() {
     setTbRight(document.getElementById('agent-titlebar-right'));
   }, []);
 
-  const newChat = useCallback(async () => {
-    await useAgentStore.getState().newChat();
+  /** 新建会话标签：当前会话驻留内存，切回零重建 */
+  const newTab = useCallback(() => {
+    useAgentStore.getState().newTab();
   }, []);
 
-  /** 恢复页面历史；续聊模型上下文由后端 SQLite 加载。 */
+  /** 恢复页面历史；续聊模型上下文由后端 SQLite 加载。切换时当前会话驻留内存。 */
   const selectSession = useCallback(
     (s: AgentSessionMeta) => {
       const st = useAgentStore.getState();
-      if (st.running || st.sessionBusy) return;
-      void st.saveSession(st.sessionId).catch(() => {});
-      st.loadSession(s);
+      if (st.sessionBusy) return;
+      if (st.entries.length > 0) void st.saveSession(st.sessionId).catch(() => {});
+      st.activateSession(s);
       setError('');
     },
-    [running, setError],
+    [setError],
   );
 
   const deleteSession = useCallback(
@@ -766,25 +778,18 @@ export default function AgentPage() {
               {sourceLabel}
               {modelName ? ` · ${modelName}` : ''}
             </span>
-            <span
-              className="agent-tb__model"
-              title="图片识别开关在「设置 → Agent 权限」中调整；仅新会话生效，已有会话保持原设置，配置不一致时后端拒绝续聊。"
-            >
-              图片识别：{imageRecognition ? '开' : '关'}（新会话设置）
-            </span>
             <button
               type="button"
               className="agent-tb__iconbtn"
-              onClick={() => void newChat()}
-              disabled={running}
-              title="新对话（保留 SQLite 上下文与页面历史）"
+              onClick={newTab}
+              title="新建会话标签（当前会话驻留内存，可随时切回）"
             >
               <Plus size={15} strokeWidth={2} />
             </button>
             <button
               type="button"
               className={`agent-tb__iconbtn${historyOpen ? ' is-active' : ''}`}
-              onClick={() => setHistoryOpen((o) => !o)}
+              onClick={toggleHistory}
               title={historyOpen ? '隐藏历史面板' : '显示历史面板'}
             >
               <History size={15} strokeWidth={1.8} />
@@ -793,18 +798,33 @@ export default function AgentPage() {
           tbRight,
         )}
 
-      {error && (
-        <div className="agent-warn">
-          <CircleAlert size={14} strokeWidth={1.8} />
-          {error}
-          <button type="button" onClick={() => setError('')}>
-            <X size={12} strokeWidth={2} />
-          </button>
-        </div>
+      {/* 历史面板：全高左侧栏（Zed 式），与右列并排；开合时右列整体（tab + 对话）一起右移/左移 */}
+      {historyOpen && (
+        <AgentHistoryPanel
+          sessions={sessions}
+          currentSessionId={sessionId}
+          projectPath={projectPath}
+          onSelect={(s) => selectSession(s)}
+          onDelete={deleteSession}
+          onNewChat={newTab}
+        />
       )}
 
-      {/* 主体：左对话流 + 右历史面板 */}
-      <div className="agent-body">
+      {/* 右列：标签栏 + 错误提示 + 对话流 */}
+      <div className="agent-col">
+        {/* 多会话标签栏（tab 即 AgentSession 视图；当前会话切换时驻留内存） */}
+        <AgentTabs />
+
+        {error && (
+          <div className="agent-warn">
+            <CircleAlert size={14} strokeWidth={1.8} />
+            {error}
+            <button type="button" onClick={() => setError('')}>
+              <X size={12} strokeWidth={2} />
+            </button>
+          </div>
+        )}
+
         <div className="agent-main">
           <div className="agent-entries" ref={viewportRef}
             onScroll={() => outputScroll.onScroll()}
@@ -937,7 +957,7 @@ export default function AgentPage() {
                 </div>
                 <div className="agent-dock__bar-right">
                   <ContextUsage usage={usage} />
-                  <ChatToolbar side="left" />
+                  <ModelPicker />
                   {running ? (
                     <button type="button" className="agent-dock__stop" disabled={settling} onClick={() => void handleStop()}>
                       <span className="agent-dock__stop-square" />
@@ -950,7 +970,11 @@ export default function AgentPage() {
                       disabled={!canSend}
                       onClick={() => void handleSend()}
                       aria-label="发送"
-                      title="Enter 发送 · Shift+Enter 换行 · @ 引用文件"
+                      title={
+                        busySessionId !== null && busySessionId !== sessionId
+                          ? `会话 ${busySessionId.slice(-4)} 正在运行，结束后才能在其他会话发送`
+                          : 'Enter 发送 · Shift+Enter 换行 · @ 引用文件'
+                      }
                     >
                       <ArrowRight size={16} strokeWidth={2.5} />
                     </button>
@@ -960,16 +984,6 @@ export default function AgentPage() {
             </div>
           </div>
         </div>
-
-        {historyOpen && (
-          <AgentHistoryPanel
-            sessions={sessions}
-            currentSessionId={sessionId}
-            running={running}
-            onSelect={(s) => selectSession(s)}
-            onDelete={deleteSession}
-          />
-        )}
       </div>
     </div>
   );

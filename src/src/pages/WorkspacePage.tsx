@@ -115,9 +115,9 @@ export default function WorkspacePage() {
     });
   }
 
-  // ===== 一键在 Agent 页打开项目 =====
+  // ===== 一键在 Agent 页打开项目：打开绑定项目的草稿会话标签（多会话 S0） =====
   function openInAgent(path: string) {
-    useAgentStore.getState().setProjectPath(path);
+    useAgentStore.getState().openDraftForProject(path);
     navigate('/agent');
   }
 

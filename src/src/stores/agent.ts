@@ -145,6 +145,50 @@ export interface RunWindow {
 
 type RunState = RunWindow & { sessionId: string; running: boolean; status: string | null; entries: Entry[]; usage: AgentUsage | null };
 
+// ===== 多会话（SESSION_RUNTIME_SPEC S0：retained 等价实现）=====
+
+export type SessionPhase = 'draft' | 'active';
+
+/** 驻留内存的非激活会话快照（= Zed retained_threads 条目，结构兼容 RunState） */
+export interface ParkedSession {
+  sessionId: string;
+  isDraft: boolean;
+  entries: Entry[];
+  input: string;
+  running: boolean;
+  settling: boolean;
+  status: string | null;
+  activeRunId: string | null;
+  lastSequence: number;
+  endedRuns: ReadonlyMap<string, ReadonlySet<string>>;
+  projectPath: string;
+  usage: AgentUsage | null;
+  error: string;
+  lastActive: number;
+}
+
+/** 打开 tab 的软上限（超出时按 LRU 清理可清理的驻留会话，不清则允许超出） */
+export const MAX_RETAINED_TABS = 8;
+
+/** 会话是否有待用户决策的卡片（权限/问题）——LRU 保护 + tab 徽标 */
+export function hasPendingDecision(entries: Entry[]): boolean {
+  return entries.some(
+    (e) =>
+      (e.kind === 'tool' && e.perm?.state === 'pending') ||
+      (e.kind === 'permission' && e.state === 'pending') ||
+      (e.kind === 'question' && e.answer === undefined && !e.declined),
+  );
+}
+
+/** 当前占用后端准入（活动 Run）的会话；null = 空闲。单活动 Run 期间用于多 tab 发送互斥 */
+export function runningSessionId(
+  st: Pick<AgentState, 'sessionId' | 'running' | 'parked'>,
+): string | null {
+  if (st.running) return st.sessionId;
+  for (const p of Object.values(st.parked)) if (p.running) return p.sessionId;
+  return null;
+}
+
 /** usage_updated 载荷 → 用量快照（缺省字段保持 undefined） */
 function readUsage(env: AgentEnvelope): AgentUsage {
   return {
@@ -421,13 +465,38 @@ interface AgentState extends RunWindow {
   deleteSession: (id: string) => Promise<void>;
   /** 恢复 UI 历史；续聊时后端从 SQLite 加载模型上下文。 */
   loadSession: (s: AgentSessionMeta) => void;
-  /** 保存会话到后端并刷新列表（默认保存当前会话；空条目跳过） */
-  saveSession: (id?: string) => Promise<void>;
+  /** 保存会话到后端并刷新列表（默认保存当前会话；空条目跳过；snapshot 用于保存驻留会话） */
+  saveSession: (id?: string, snapshot?: { entries: Entry[]; projectPath: string }) => Promise<void>;
   refreshSessions: () => Promise<void>;
+
+  // ===== 多会话（S0）：tab 即 AgentSession 视图，数据驻留 store 不销毁 =====
+  /** 非激活会话快照；事件按 session_id 路由写入，切回零重建 */
+  parked: Record<string, ParkedSession>;
+  /** 打开的会话标签（易失 UI 状态，不持久化） */
+  openTabs: string[];
+  activeTabId: string | null;
+  /** 草稿：新会话未发送首条消息（不保存、不进历史、LRU 可清） */
+  isDraft: boolean;
+  /** 新建会话标签：驻留当前会话，flat 重置为全新草稿 */
+  newTab: () => void;
+  /** 切换激活 tab：驻留当前 + 恢复目标（驻留快照或历史） */
+  setTabActive: (id: string) => void;
+  /** 从历史打开会话（同 setTabActive，meta 可不在列表中） */
+  activateSession: (meta: AgentSessionMeta) => void;
+  /** 关闭 tab：保存 + 释放后端内存；运行中/待决策拒绝 */
+  closeTab: (id: string) => boolean;
+  /** 打开绑定项目的草稿会话（工作空间页「在 Agent 打开」入口） */
+  openDraftForProject: (path: string) => void;
 }
 
+const INITIAL_SESSION_ID = newSessionId();
+
 export const useAgentStore = create<AgentState>((set, get) => ({
-  sessionId: newSessionId(),
+  sessionId: INITIAL_SESSION_ID,
+  isDraft: true,
+  parked: {},
+  openTabs: [INITIAL_SESSION_ID],
+  activeTabId: INITIAL_SESSION_ID,
   activeRunId: null,
   lastSequence: 0,
   endedRuns: new Map(),
@@ -481,8 +550,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // Tauri 不可用（纯 web 调试）时仅保留前端状态
     });
   },
-  setRunState: (running, status) => set((s) => ({ ...transitionRun(s, running, status), settling: false })),
-  pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }] })),
+  setRunState: (running, status) =>
+    set((s) => ({ ...transitionRun(s, running, status), settling: false, ...(running ? { isDraft: false } : {}) })),
+  pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }], isDraft: false })),
   /** checkpoint 恢复：后端已回退，前端用回退后的消息序列重建会话视图（不计入当前 Run） */
   restoreEntries: (sessionId, entries) =>
     set((s) =>
@@ -499,24 +569,28 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   pushTerminal: (outcome, text) =>
     set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), { kind: 'terminal', outcome, text }] })),
   pushQuestion: (q) =>
-    set((s) =>
+    set((s) => {
       // 幂等防御：同一 questionId 只入列一次（防事件层重复投递）
-      !s.running || s.settling || q.session_id !== s.sessionId ||
-      s.entries.some((e) => e.kind === 'question' && e.questionId === q.question_id)
-        ? s
-        : {
-            entries: [
-              ...s.entries,
-              {
-                kind: 'question',
-                questionId: q.question_id,
-                question: q.question,
-                options: q.options,
-                allowFreeText: q.allow_free_text,
-              },
-            ],
-          },
-    ),
+      const dup = (entries: Entry[]) =>
+        entries.some((e) => e.kind === 'question' && e.questionId === q.question_id);
+      const card = {
+        kind: 'question' as const,
+        questionId: q.question_id,
+        question: q.question,
+        options: q.options,
+        allowFreeText: q.allow_free_text,
+      };
+      if (q.session_id === s.sessionId) {
+        if (!s.running || s.settling || dup(s.entries)) return s;
+        return { entries: [...s.entries, card] };
+      }
+      // 非激活会话：问题卡路由到驻留快照（切回后可见、可答）
+      const p = s.parked[q.session_id];
+      if (!p || !p.running || p.settling || dup(p.entries)) return s;
+      return {
+        parked: { ...s.parked, [p.sessionId]: { ...p, entries: [...p.entries, card], lastActive: Date.now() } },
+      };
+    }),
   answerQuestion: async (questionId, answer) => {
     const before = get();
     const question = before.entries.find((e) => e.kind === 'question' && e.questionId === questionId);
@@ -549,7 +623,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
   startNewChat: () =>
-    set((s) => s.running || s.sessionBusy ? s : ({ ...transitionRun(s, false, null), settling: false, sessionId: newSessionId(), entries: [], error: '', input: '', usage: null })),
+    set((s) => {
+      if (s.running || s.sessionBusy) return s;
+      const id = newSessionId();
+      const hadTab = s.openTabs.includes(s.sessionId);
+      return {
+        ...transitionRun(s, false, null),
+        settling: false,
+        sessionId: id,
+        entries: [],
+        error: '',
+        input: '',
+        usage: null,
+        isDraft: true,
+        openTabs: hadTab ? s.openTabs.map((t) => (t === s.sessionId ? id : t)) : [...s.openTabs, id],
+        activeTabId: id,
+      };
+    }),
   newChat: async () => {
     const st = get();
     if (st.running || st.sessionBusy) return;
@@ -572,7 +662,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       await invoke('delete_agent_session', { id });
       const persistenceErrors = { ...get().persistenceErrors };
       delete persistenceErrors[id];
-      set({ persistenceErrors });
+      set((s) => {
+        const openTabs = s.openTabs.filter((t) => t !== id);
+        return {
+          persistenceErrors,
+          parked: omitKey(s.parked, id),
+          openTabs,
+          activeTabId: s.activeTabId === id ? openTabs[openTabs.length - 1] ?? null : s.activeTabId,
+        };
+      });
       await get().refreshSessions();
       set({ sessionBusy: false });
       if (get().sessionId === id) get().startNewChat();
@@ -600,8 +698,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // 后端不可用（本地调试）时忽略
     }
   },
-  saveSession: async (id) => {
-    const { entries, projectPath } = get();
+  saveSession: async (id, snapshot) => {
+    const entries = snapshot ? snapshot.entries : get().entries;
+    const projectPath = snapshot ? snapshot.projectPath : get().projectPath;
     if (entries.length === 0) return;
     const firstUser = entries.find((e): e is Extract<Entry, { kind: 'user' }> => e.kind === 'user');
     const title = firstUser ? firstUser.text.slice(0, 30) : 'Agent 会话';
@@ -621,10 +720,278 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       throw e;
     }
   },
+
+  // ===== 多会话动作（S0：swap 模型实现 retained，tab 状态并入本 store）=====
+
+  newTab: () => {
+    if (get().sessionBusy) return;
+    set((s) => {
+      // 已在空草稿上：无需再开（空草稿全局至多一个）
+      if (s.entries.length === 0 && !s.running) return s;
+      // 驻留当前会话（运行中也可驻留，事件路由保证不丢）；新草稿继承项目绑定
+      let parked = { ...s.parked, [s.sessionId]: snapshotFlat(s) };
+      let openTabs = [...s.openTabs, newSessionId()];
+      ({ parked, openTabs } = evictOverflow({ parked, openTabs }));
+      const id = openTabs[openTabs.length - 1];
+      return {
+        ...transitionRun(s, false, null),
+        settling: false,
+        sessionId: id,
+        entries: [],
+        input: '',
+        usage: null,
+        error: '',
+        isDraft: true,
+        parked,
+        openTabs,
+        activeTabId: id,
+      };
+    });
+  },
+
+  setTabActive: (id) => {
+    const st = get();
+    if (st.sessionBusy) return;
+    if (id === st.sessionId) {
+      set({ activeTabId: id });
+      return;
+    }
+    const swap = swapToSession(st, id);
+    if (swap) set(swap);
+    else set({ error: '会话不存在' });
+  },
+
+  activateSession: (meta) => {
+    const st = get();
+    if (st.sessionBusy) return;
+    if (meta.id === st.sessionId) {
+      set({ activeTabId: meta.id });
+      return;
+    }
+    const swap = swapToSession(st, meta.id, meta);
+    if (swap) set(swap);
+    else set({ error: '会话不存在' });
+  },
+
+  closeTab: (id) => {
+    const st = get();
+    if (st.sessionBusy) return false;
+    if (id === st.sessionId) {
+      if (st.running || st.settling) return false;
+      const idx = st.openTabs.indexOf(id);
+      const remaining = st.openTabs.filter((t) => t !== id);
+      // 关闭前落库 + 释放后端内存（fire-and-forget；关闭动作本身不阻塞）
+      void saveSessionSnapshot(id, { entries: st.entries, projectPath: st.projectPath });
+      invoke('agent_reset_session', { sessionId: id }).catch(() => {});
+      if (remaining.length === 0 || idx < 0) {
+        // 最后一个 tab：重置为全新草稿，保留项目绑定
+        const nid = newSessionId();
+        set((s) => ({
+          ...transitionRun(s, false, null),
+          settling: false,
+          sessionId: nid,
+          entries: [],
+          input: '',
+          usage: null,
+          error: '',
+          isDraft: true,
+          parked: omitKey(s.parked, id),
+          openTabs: [nid],
+          activeTabId: nid,
+        }));
+        return true;
+      }
+      // swap 到邻居：把关闭中的会话当作空草稿（tab 丢弃、不驻留）
+      const neighbor = st.openTabs[idx + 1] ?? st.openTabs[idx - 1];
+      const swap = swapToSession({ ...st, entries: [], isDraft: true, running: false, settling: false }, neighbor);
+      if (swap) {
+        set((s) => ({ ...swap, parked: omitKey(s.parked, id) }));
+      } else {
+        // 邻居无法解析（防御）：回退到全新草稿
+        const nid = newSessionId();
+        set((s) => ({
+          ...transitionRun(s, false, null),
+          settling: false,
+          sessionId: nid,
+          entries: [],
+          input: '',
+          usage: null,
+          error: '',
+          isDraft: true,
+          parked: omitKey(s.parked, id),
+          openTabs: [nid],
+          activeTabId: nid,
+        }));
+      }
+      return true;
+    }
+    const p = st.parked[id];
+    if (p && (p.running || p.settling)) return false;
+    set((s) => {
+      const openTabs = s.openTabs.filter((t) => t !== id);
+      return {
+        parked: omitKey(s.parked, id),
+        openTabs,
+        activeTabId: s.activeTabId === id ? openTabs[openTabs.length - 1] ?? null : s.activeTabId,
+      };
+    });
+    if (p) {
+      void saveSessionSnapshot(id, p);
+      invoke('agent_reset_session', { sessionId: id }).catch(() => {});
+    }
+    return true;
+  },
+
+  openDraftForProject: (path) => {
+    const st = get();
+    if (st.sessionBusy) return;
+    if (st.entries.length === 0 && !st.running) {
+      // 当前已是空草稿：直接改绑项目
+      set({ projectPath: path, activeTabId: st.sessionId });
+      return;
+    }
+    get().newTab();
+    set({ projectPath: path });
+  },
 }));
 
 function persistenceMessage(error?: string | null): string {
   return error ? `模型上下文保存失败：${error}。未保存的上下文仍在内存中，请勿退出应用；后续运行可重试保存。` : '';
+}
+
+// ===== 多会话模块级 helpers（函数声明提升，供 store 动作与事件层调用）=====
+
+/** flat 会话中参与驻留快照的字段（与 ParkedSession 一一对应） */
+type FlatSession = Pick<
+  AgentState,
+  | 'sessionId' | 'isDraft' | 'entries' | 'input' | 'running' | 'settling' | 'status'
+  | 'activeRunId' | 'lastSequence' | 'endedRuns' | 'projectPath' | 'usage' | 'error'
+>;
+
+function snapshotFlat(st: FlatSession): ParkedSession {
+  return { ...st, lastActive: Date.now() };
+}
+
+/** 驻留快照 → flat 状态（去掉 lastActive） */
+function hydrateFromParked(p: ParkedSession): FlatSession {
+  return {
+    sessionId: p.sessionId,
+    isDraft: p.isDraft,
+    entries: p.entries,
+    input: p.input,
+    running: p.running,
+    settling: p.settling,
+    status: p.status,
+    activeRunId: p.activeRunId,
+    lastSequence: p.lastSequence,
+    endedRuns: p.endedRuns,
+    projectPath: p.projectPath,
+    usage: p.usage,
+    error: p.error,
+  };
+}
+
+/** 历史会话 → flat 状态（loadSession 语义：后端续聊时从 SQLite 加载上下文） */
+function hydrateFromMeta(s: AgentSessionMeta, persistenceError?: string | null): FlatSession {
+  return {
+    sessionId: s.id,
+    isDraft: false,
+    entries: normalizeEntries((s.entries as Entry[]) ?? []),
+    input: '',
+    running: false,
+    settling: false,
+    status: null,
+    activeRunId: null,
+    lastSequence: 0,
+    endedRuns: new Map(),
+    projectPath: s.project_path ?? '',
+    usage: null,
+    error: persistenceMessage(persistenceError),
+  };
+}
+
+/** 驻留当前 flat 并恢复目标会话；返回 null 表示目标不存在 */
+function swapToSession(
+  st: AgentState,
+  targetId: string,
+  meta?: AgentSessionMeta,
+): Partial<AgentState> | null {
+  let parked = st.parked;
+  let openTabs = st.openTabs;
+  // 空草稿不驻留：其 tab 被目标顶替；运行中/有内容的会话打快照保活
+  if (st.entries.length > 0 || st.running) {
+    parked = { ...parked, [st.sessionId]: snapshotFlat(st) };
+  } else {
+    openTabs = openTabs.filter((t) => t !== st.sessionId);
+  }
+  const ensureTab = (tabs: string[]): string[] =>
+    tabs.includes(targetId) ? tabs : [...tabs, targetId];
+  const p = parked[targetId];
+  if (p) {
+    return {
+      ...hydrateFromParked(p),
+      parked: omitKey(parked, targetId),
+      openTabs: ensureTab(openTabs),
+      activeTabId: targetId,
+    };
+  }
+  const found = meta ?? st.sessions.find((s) => s.id === targetId);
+  if (found) {
+    return {
+      ...hydrateFromMeta(found, st.persistenceErrors[targetId]),
+      endedRuns: st.endedRuns,
+      parked,
+      openTabs: ensureTab(openTabs),
+      activeTabId: targetId,
+    };
+  }
+  return null;
+}
+
+/** tab 超上限时按 LRU 清理可清理的驻留会话（先落库再释放后端内存；无物可清则允许超出） */
+function evictOverflow(
+  st: Pick<AgentState, 'parked' | 'openTabs'>,
+): Pick<AgentState, 'parked' | 'openTabs'> {
+  let { parked, openTabs } = st;
+  if (openTabs.length <= MAX_RETAINED_TABS) return { parked, openTabs };
+  const evictable = Object.values(parked)
+    .filter((p) => !p.running && !p.settling && !p.isDraft && !hasPendingDecision(p.entries))
+    .sort((a, b) => a.lastActive - b.lastActive);
+  for (const p of evictable) {
+    if (openTabs.length <= MAX_RETAINED_TABS) break;
+    openTabs = openTabs.filter((t) => t !== p.sessionId);
+    parked = omitKey(parked, p.sessionId);
+    void saveSessionSnapshot(p.sessionId, p);
+    invoke('agent_reset_session', { sessionId: p.sessionId }).catch(() => {});
+  }
+  return { parked, openTabs };
+}
+
+/** 保存驻留/关闭中的会话快照（fire-and-forget；失败可见于 error 栏） */
+async function saveSessionSnapshot(id: string, snap: { entries: Entry[]; projectPath: string }): Promise<void> {
+  if (snap.entries.length === 0) return;
+  try {
+    const firstUser = snap.entries.find((e): e is Extract<Entry, { kind: 'user' }> => e.kind === 'user');
+    const title = firstUser ? firstUser.text.slice(0, 30) : 'Agent 会话';
+    const projectName =
+      useWorkspaceStore.getState().projects.find((p) => p.path === snap.projectPath)?.name ?? '';
+    await invoke('save_agent_session', {
+      id,
+      projectPath: snap.projectPath,
+      projectName,
+      title,
+      entries: snap.entries,
+    });
+    await useAgentStore.getState().refreshSessions();
+  } catch (e) {
+    useAgentStore.getState().setError(`保存会话失败：${String(e)}`);
+  }
+}
+
+function omitKey(obj: Record<string, ParkedSession>, key: string): Record<string, ParkedSession> {
+  const next = { ...obj };
+  delete next[key];
+  return next;
 }
 
 interface AgentSettledPayload {
@@ -639,15 +1006,28 @@ function settleRun(payload: AgentSettledPayload): void {
   if (payload.persistence_error) persistenceErrors[payload.session_id] = payload.persistence_error;
   else delete persistenceErrors[payload.session_id];
   const current = st.sessionId === payload.session_id;
+  const parked = st.parked[payload.session_id];
   useAgentStore.setState({
     ...(current ? {
       ...transitionRun(st, false, null),
       settling: false,
       error: persistenceMessage(payload.persistence_error) || (st.error === previousMessage ? '' : st.error),
+    } : parked ? {
+      // 驻留会话的 Run 结算：更新快照并落库（切回时零重建）
+      parked: {
+        ...st.parked,
+        [parked.sessionId]: {
+          ...parked,
+          ...transitionRun(parked, false, null),
+          settling: false,
+          lastActive: Date.now(),
+        },
+      },
     } : {}),
     persistenceErrors,
   });
   if (current && st.running) void st.saveSession().catch(() => {});
+  else if (parked && parked.running) void saveSessionSnapshot(payload.session_id, parked);
 }
 
 // Status is a snapshot, not an event: never let an older request overwrite a new Run/settlement.
@@ -657,7 +1037,8 @@ useAgentStore.subscribe((next, prev) => {
   if (next.sessionId !== prev.sessionId || next.running !== prev.running ||
       next.settling !== prev.settling || next.sessionBusy !== prev.sessionBusy ||
       next.activeRunId !== prev.activeRunId || next.lastSequence !== prev.lastSequence ||
-      next.persistenceErrors !== prev.persistenceErrors) lifecycleRevision++;
+      next.persistenceErrors !== prev.persistenceErrors ||
+      next.parked !== prev.parked || next.openTabs !== prev.openTabs) lifecycleRevision++;
 });
 
 export async function refreshAgentStatus(): Promise<void> {
@@ -672,19 +1053,58 @@ export async function refreshAgentStatus(): Promise<void> {
     const st = useAgentStore.getState();
     if (!status.running) {
       settleRun({ session_id: st.sessionId, persistence_error: status.persistence_errors[st.sessionId] ?? null });
+      // 驻留中的运行会话一并结算（切走期间后端已把 Run 跑完）
+      for (const p of Object.values(st.parked)) {
+        if (p.running) {
+          settleRun({ session_id: p.sessionId, persistence_error: status.persistence_errors[p.sessionId] ?? null });
+        }
+      }
       useAgentStore.setState({ persistenceErrors: status.persistence_errors });
     } else if (status.session_id) {
-      const sameSession = status.session_id === st.sessionId;
-      useAgentStore.setState({
-        sessionId: status.session_id,
-        persistenceErrors: status.persistence_errors,
-        running: true,
-        // A recovered stream may have missed its terminal event; wait for the host barrier.
-        settling: sameSession ? st.settling : true,
-        status: sameSession ? st.status ?? 'analyzing' : 'persisting',
-        ...(sameSession ? {} : { activeRunId: null, lastSequence: 0, entries: [] }),
-        error: persistenceMessage(status.persistence_errors[status.session_id]) || st.error,
-      });
+      const sid = status.session_id;
+      if (sid === st.sessionId) {
+        useAgentStore.setState({
+          persistenceErrors: status.persistence_errors,
+          running: true,
+          // A recovered stream may have missed its terminal event; wait for the host barrier.
+          settling: st.settling,
+          status: st.status ?? 'analyzing',
+          error: persistenceMessage(status.persistence_errors[sid]) || st.error,
+        });
+      } else if (st.parked[sid]) {
+        // 运行中的会话当前处于驻留态：保持事件路由生效
+        const p = st.parked[sid]!;
+        useAgentStore.setState((s) => ({
+          parked: {
+            ...s.parked,
+            [sid]: { ...p, running: true, settling: true, status: p.status ?? 'persisting', lastActive: Date.now() },
+          },
+          persistenceErrors: status.persistence_errors,
+        }));
+      } else {
+        // 应用重启恢复：未知的运行中会话 → 建驻留快照并开 tab（终端事件到达后落库）
+        const recovered: ParkedSession = {
+          sessionId: sid,
+          isDraft: false,
+          entries: [],
+          input: '',
+          running: true,
+          settling: true,
+          status: 'persisting',
+          activeRunId: null,
+          lastSequence: 0,
+          endedRuns: st.endedRuns,
+          projectPath: '',
+          usage: null,
+          error: persistenceMessage(status.persistence_errors[sid]),
+          lastActive: Date.now(),
+        };
+        useAgentStore.setState((s) => ({
+          parked: { ...s.parked, [sid]: recovered },
+          openTabs: s.openTabs.includes(sid) ? s.openTabs : [...s.openTabs, sid],
+          persistenceErrors: status.persistence_errors,
+        }));
+      }
     }
   } catch (error) {
     if (request === statusRequest && revision === lifecycleRevision) {
@@ -710,12 +1130,28 @@ export function ensureAgentListeners(): Promise<void> {
       Promise.resolve().then(() => listen<AgentEnvelope>('agent-event', (e) => {
         if (!ready) return;
         const st = useAgentStore.getState();
-        if (st.settling) return;
-        const next = reduceAgentEvent(st, e.payload);
-        if (next === st) return;
-        useAgentStore.setState(isTerminal(e.payload)
-          ? { ...next, running: true, settling: true, status: 'persisting' }
-          : next);
+        if (e.payload.session_id === st.sessionId) {
+          if (st.settling) return;
+          const next = reduceAgentEvent(st, e.payload);
+          if (next === st) return;
+          useAgentStore.setState(isTerminal(e.payload)
+            ? { ...next, running: true, settling: true, status: 'persisting' }
+            : next);
+          return;
+        }
+        // 非激活会话：路由到驻留快照（运行中的 parked 会话持续吸收事件，切回零重建）
+        const p = st.parked[e.payload.session_id];
+        if (!p || p.settling) return;
+        const next = reduceAgentEvent(p, e.payload);
+        if (next === p) return;
+        useAgentStore.setState((s) => ({
+          parked: {
+            ...s.parked,
+            [p.sessionId]: isTerminal(e.payload)
+              ? { ...p, ...next, running: true, settling: true, status: 'persisting', lastActive: Date.now() }
+              : { ...p, ...next, lastActive: Date.now() },
+          },
+        }));
       })),
       Promise.resolve().then(() => listen<AgentSettledPayload>('agent-run-settled', (e) => {
         if (ready) settleRun(e.payload);

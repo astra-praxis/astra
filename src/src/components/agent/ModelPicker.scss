@@ -1,0 +1,246 @@
+/* ============================================================
+   Agent 模型选择器（分组弹层式，参考 Zed agent panel 的 model selector）
+   - 颜色只引用 var(--...)；BEM 命名
+   - 弹层从底栏向上弹出（锚点在 dock 右下角）
+   - 分组：本地模型 / 每个 Provider 一组（后续新增 API 只需在数据层加组）
+   ============================================================ */
+
+.mpick {
+  position: relative;
+  flex-shrink: 0;
+
+  &__box {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 220px;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+
+    &:hover:not(:disabled) {
+      color: var(--text-primary);
+      border-color: var(--brand-400);
+      background: var(--brand-50);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  &__label {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__chevron {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: transform 0.15s ease;
+
+    &.is-open {
+      transform: rotate(180deg);
+    }
+  }
+
+  // ===== 弹层：向上展开（Zed 式分组列表） =====
+  &__pop {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    min-width: 260px;
+    max-width: 340px;
+    padding: 6px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  // 搜索框行（弹层顶部，打开即聚焦）
+  &__search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    color: var(--text-muted);
+    background: var(--bg-surface-soft, var(--bg-surface));
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    flex-shrink: 0;
+
+    input {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 12px;
+      font-family: inherit;
+      color: var(--text-primary);
+
+      &::placeholder {
+        color: var(--text-muted);
+      }
+    }
+  }
+
+  &__search-clear {
+    display: flex;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--text-secondary);
+    }
+  }
+
+  // 滚动区：搜索框固定在顶部，分组列表在此滚动
+  &__scroll {
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__group {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+
+    & + & {
+      padding-top: 6px;
+      border-top: 1px solid var(--border-color);
+    }
+  }
+
+  &__group-name {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px 5px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+  }
+
+  &__refresh {
+    margin-left: auto;
+    display: flex;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+
+    &:hover {
+      color: var(--brand-600);
+      background: var(--brand-50);
+    }
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 8px;
+    font-size: 12.5px;
+    color: var(--text-primary);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s ease;
+
+    svg {
+      flex-shrink: 0;
+      color: var(--text-muted);
+    }
+
+    &:hover {
+      background: var(--bg-surface-soft, var(--bg-surface));
+    }
+
+    // 选中态：Zed 式右侧勾选
+    &.is-active {
+      background: var(--brand-50);
+      color: var(--brand-700);
+      font-weight: 500;
+
+      svg {
+        color: var(--brand-600);
+      }
+
+      &::after {
+        content: '';
+        flex-shrink: 0;
+        margin-left: auto;
+        width: 5px;
+        height: 9px;
+        border-right: 2px solid var(--brand-600);
+        border-bottom: 2px solid var(--brand-600);
+        transform: rotate(45deg);
+      }
+    }
+  }
+
+  &__item-label {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &.mono {
+      font-family: var(--font-mono, ui-monospace, monospace);
+      font-size: 12px;
+    }
+  }
+
+  &__hint {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  &__empty {
+    padding: 14px 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  &__spin {
+    animation: mpick-spin 1s linear infinite;
+  }
+}
+
+@keyframes mpick-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

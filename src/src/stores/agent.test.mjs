@@ -346,19 +346,26 @@ test('stale status cannot release a new run or overwrite settlement errors', asy
   assert.match(store.getState().error, /new failure/);
 });
 
-test('latest status request wins; active host recovered on mount waits for barrier', async () => {
+test('latest status request wins; recovered host parks into a tab and waits for barrier', async () => {
   const first = deferred(), second = deferred();
   let count = 0;
   const { store, emit, refreshAgentStatus } = await harness(async () => (++count === 1 ? first.promise : second.promise));
+  store.setState({ sessionId: 's' });
   const one = refreshAgentStatus(), two = refreshAgentStatus();
   second.resolve({ running: true, session_id: 'recovered', persistence_errors: {} });
   await two;
+  // 最新请求生效：未知运行中会话进驻留并开 tab，flat 不被劫持
+  assert.equal(store.getState().sessionId, 's');
+  assert.equal(store.getState().parked.recovered.running, true);
+  assert.equal(store.getState().parked.recovered.settling, true);
+  assert.ok(store.getState().openTabs.includes('recovered'));
   first.resolve({ running: false, session_id: null, persistence_errors: {} });
   await one;
-  assert.equal(store.getState().sessionId, 'recovered');
-  assert.equal(store.getState().running, true);
-  assert.equal(store.getState().settling, true);
+  // 过期请求被丢弃：不劫持 flat 也不误结算驻留会话
+  assert.equal(store.getState().sessionId, 's');
+  assert.equal(store.getState().parked.recovered.running, true);
   emit('agent-run-settled', { session_id: 'recovered', persistence_error: null });
+  assert.equal(store.getState().parked.recovered.running, false);
   assert.equal(store.getState().running, false);
 });
 
@@ -429,3 +436,149 @@ for (const failed of ['agent-event', 'agent-question', 'agent-run-settled']) {
     assert.equal(saves, 1);
   });
 }
+
+// ===== 多会话（S0）：tab 驻留、事件路由、关闭保护、LRU、草稿语义 =====
+
+test('multi-session: newTab parks current, activate restores zero-rebuild, empty draft tab is discarded', async () => {
+  const { store } = await harness();
+  const entries = [{ kind: 'user', text: 'hi' }, { kind: 'assistant', text: 'yo', streaming: true }];
+  store.setState({ sessionId: 's', openTabs: ['s'], activeTabId: 's', projectPath: '/proj', input: 'partial' });
+  // 空草稿上 newTab 是 no-op，不会堆积重复草稿 tab
+  store.getState().newTab();
+  assert.equal(store.getState().sessionId, 's');
+  assert.deepEqual([...store.getState().openTabs], ['s']);
+  // 有内容后 newTab：驻留当前 + 新草稿 tab（继承项目绑定）
+  store.setState({ entries });
+  store.getState().newTab();
+  const draftId = store.getState().sessionId;
+  assert.notEqual(draftId, 's');
+  assert.equal(store.getState().isDraft, true);
+  assert.equal(store.getState().entries.length, 0);
+  assert.equal(store.getState().projectPath, '/proj');
+  assert.deepEqual([...store.getState().openTabs], ['s', draftId]);
+  assert.equal(store.getState().parked.s.entries, entries);
+  assert.equal(store.getState().parked.s.input, 'partial');
+  // 切回：零重建（entries 同引用）、驻留槽清空，空草稿 tab 被顶替丢弃
+  store.getState().setTabActive('s');
+  assert.equal(store.getState().sessionId, 's');
+  assert.equal(store.getState().entries, entries);
+  assert.equal(store.getState().input, 'partial');
+  assert.equal(store.getState().parked.s, undefined);
+  assert.equal(store.getState().activeTabId, 's');
+  assert.deepEqual([...store.getState().openTabs], ['s']);
+});
+
+test('multi-session: events and questions route to parked sessions; terminal waits for barrier', async () => {
+  const { store, emit } = await harness();
+  store.setState({ sessionId: 's', openTabs: ['s'], activeTabId: 's', entries: [{ kind: 'user', text: 'hi' }], running: true, status: 'analyzing' });
+  store.getState().newTab();
+  assert.notEqual(store.getState().sessionId, 's');
+  assert.equal(store.getState().parked.s.running, true);
+  emit('agent-event', env('message_delta', 1, 'run-1', { text: 'streamed' }));
+  assert.equal(store.getState().parked.s.entries.at(-1).text, 'streamed');
+  assert.equal(store.getState().entries.length, 0);
+  emit('agent-question', { session_id: 's', question_id: 'q1', question: '继续?', options: ['是'], allow_free_text: false });
+  assert.equal(store.getState().parked.s.entries.at(-1).kind, 'question');
+  emit('agent-event', env('run_completed', 2, 'run-1'));
+  assert.equal(store.getState().parked.s.running, true);
+  assert.equal(store.getState().parked.s.settling, true);
+  emit('agent-run-settled', { session_id: 's', persistence_error: null });
+  assert.equal(store.getState().parked.s.running, false);
+  // 切回零重建：流式文本与已闭环的条目都在（run_completed 追加了 terminal 条目）
+  store.getState().setTabActive('s');
+  assert.equal(store.getState().sessionId, 's');
+  assert.equal(store.getState().entries.at(-3).text, 'streamed');
+  assert.equal(store.getState().entries.at(-2).kind, 'question');
+  assert.equal(store.getState().entries.at(-1).kind, 'terminal');
+});
+
+test('multi-session: closeTab saves and frees backend; running tabs refuse close', async () => {
+  const calls = [];
+  const { store } = await harness(async (command) => { calls.push(command); return []; });
+  store.setState({ sessionId: 's', openTabs: ['s'], activeTabId: 's', entries: [{ kind: 'user', text: 'hi' }], running: true });
+  store.getState().newTab();
+  const draftId = store.getState().sessionId;
+  assert.equal(store.getState().closeTab('s'), false);
+  assert.equal(calls.includes('save_agent_session'), false);
+  store.setState((s) => ({ parked: { ...s.parked, s: { ...s.parked.s, running: false, settling: false } } }));
+  assert.equal(store.getState().closeTab('s'), true);
+  assert.equal(store.getState().openTabs.includes('s'), false);
+  assert.equal(store.getState().parked.s, undefined);
+  assert.ok(calls.includes('save_agent_session'));
+  assert.ok(calls.includes('agent_reset_session'));
+  assert.equal(store.getState().sessionId, draftId);
+  // flat 运行中拒绝关闭；settling 同理
+  store.setState({ running: true, entries: [{ kind: 'user', text: 'x' }] });
+  assert.equal(store.getState().closeTab(draftId), false);
+  store.setState({ running: false, settling: true });
+  assert.equal(store.getState().closeTab(draftId), false);
+  store.setState({ settling: false });
+  // 最后一个 tab：重置为保留项目绑定的全新草稿
+  store.setState({ projectPath: '/keep' });
+  assert.equal(store.getState().closeTab(draftId), true);
+  assert.equal(store.getState().isDraft, true);
+  assert.equal(store.getState().entries.length, 0);
+  assert.equal(store.getState().projectPath, '/keep');
+  assert.deepEqual([...store.getState().openTabs], [store.getState().sessionId]);
+});
+
+test('multi-session: LRU evicts idle parked tabs beyond cap, protecting running and pending', async () => {
+  const { store } = await harness();
+  const mk = (id, lastActive, extra = {}) => ({
+    sessionId: id, isDraft: false, entries: [{ kind: 'user', text: `t-${id}` }], input: '',
+    running: false, settling: false, status: null, activeRunId: null, lastSequence: 0,
+    endedRuns: new Map(), projectPath: '', usage: null, error: '', lastActive, ...extra,
+  });
+  const parked = {};
+  const tabs = [];
+  for (let i = 0; i < 8; i++) {
+    parked[`p${i}`] = mk(`p${i}`, i);
+    tabs.push(`p${i}`);
+  }
+  // p0 虽最老但运行中受保护；p7 有待决策卡受保护
+  parked.p0 = mk('p0', 0, { running: true });
+  parked.p7 = mk('p7', 7, { entries: [{ kind: 'question', questionId: 'q', question: '?', options: [], allowFreeText: false }] });
+  store.setState({ sessionId: 's', entries: [{ kind: 'user', text: 'base' }], parked, openTabs: [...tabs, 's'], activeTabId: 's' });
+  store.getState().newTab();
+  const st = store.getState();
+  // 驱逐的是可清理的最老会话 p1、p2（p0 运行中、p7 待决策）
+  assert.equal(st.parked.p1, undefined);
+  assert.equal(st.parked.p2, undefined);
+  assert.ok(st.parked.p0.running);
+  assert.ok(st.parked.p7);
+  assert.ok(st.openTabs.includes('p0'));
+  assert.ok(st.openTabs.includes('p7'));
+  assert.equal(st.openTabs.length, 8);
+  assert.equal(st.parked.s.entries[0].text, 'base');
+});
+
+test('multi-session: draft semantics, openDraftForProject and activateSession from history', async () => {
+  const { store } = await harness();
+  assert.equal(store.getState().isDraft, true);
+  store.getState().pushUser('hello');
+  assert.equal(store.getState().isDraft, false);
+  store.getState().openDraftForProject('/tmp/proj');
+  assert.equal(store.getState().projectPath, '/tmp/proj');
+  assert.equal(store.getState().isDraft, true);
+  assert.equal(store.getState().entries.length, 0);
+  // 空草稿上再次打开：只改绑，不新增 tab
+  const tabsBefore = store.getState().openTabs.length;
+  store.getState().openDraftForProject('/tmp/proj2');
+  assert.equal(store.getState().projectPath, '/tmp/proj2');
+  assert.equal(store.getState().openTabs.length, tabsBefore);
+  // 非空会话上打开：新草稿 tab + 改绑
+  store.getState().pushUser('work');
+  store.getState().openDraftForProject('/tmp/other');
+  assert.equal(store.getState().projectPath, '/tmp/other');
+  assert.equal(store.getState().isDraft, true);
+  assert.equal(store.getState().openTabs.length, tabsBefore + 1);
+  // 历史会话激活：meta 不在列表也能换入
+  store.getState().activateSession({
+    id: 'h1', entries: [{ kind: 'user', text: 'hist' }], project_path: '/p',
+    project_name: 'P', title: 'T', created_at: 1, updated_at: 2,
+  });
+  assert.equal(store.getState().sessionId, 'h1');
+  assert.equal(store.getState().entries[0].text, 'hist');
+  assert.equal(store.getState().isDraft, false);
+  assert.ok(store.getState().openTabs.includes('h1'));
+});

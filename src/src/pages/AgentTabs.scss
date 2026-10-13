@@ -1,0 +1,157 @@
+/* ============================================================
+   Agent 多会话标签栏（S0）
+   - 颜色只引用 var(--...)；BEM 命名
+   - 贴在 agent-root 顶部、错误提示之上，与标题栏视觉衔接
+   ============================================================ */
+
+.atabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 0;
+  flex-shrink: 0;
+  overflow: hidden;
+
+  &__list {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  &__tab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 180px;
+    min-width: 0;
+    padding: 5px 6px 5px 9px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-surface-soft, var(--bg-surface));
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease, color 0.12s ease;
+    flex-shrink: 1;
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-surface);
+      border-color: var(--border-color);
+
+      .atabs__close {
+        opacity: 0.7;
+      }
+    }
+
+    &.is-active {
+      color: var(--text-primary);
+      background: var(--bg-surface);
+      border-color: var(--border-color);
+      font-weight: 500;
+      // 盖住 agent-body 顶缘的分隔线，形成「连到主体」的标签形态
+      box-shadow: 0 1px 0 var(--bg-surface);
+
+      .atabs__close {
+        opacity: 0.7;
+      }
+    }
+
+    &.is-running .atabs__title {
+      color: var(--brand-700);
+    }
+  }
+
+  &__title {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  // 待决策徽标：红点（权限 / 提问卡在等待）
+  &__dot {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: var(--danger-500, var(--danger-600));
+  }
+
+  &__close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-surface-soft, var(--bg-surface));
+      opacity: 1;
+    }
+  }
+
+  &__new {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    margin-bottom: 2px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.12s ease;
+
+    &:hover {
+      color: var(--brand-600);
+      background: var(--brand-50);
+    }
+  }
+
+  // 右侧全局提示：任意会话运行中（当前页可能在看别的 tab）
+  &__running-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--brand-700);
+    background: var(--brand-50);
+    border: 1px solid var(--brand-200);
+    border-radius: 999px;
+  }
+
+  &__spin {
+    animation: atabs-spin 1s linear infinite;
+  }
+}
+
+@keyframes atabs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

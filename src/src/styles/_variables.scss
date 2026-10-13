@@ -1,8 +1,9 @@
 /* ============================================================
-   星野主题变量（唯一事实来源）— 按 campus-ai-frontend-design 分层
+   Astra 主题变量（唯一事实来源）— 按 campus-ai-frontend-design 分层
    - 亮/暗主题通过 <html data-theme="dark|light"> 切换
    - 每个变量必须同时定义亮/暗两份，漏一份就是暗色模式 bug
    - 暗色不是简单反转：brand 色阶整体反向（暗色下 brand-50 是深底、brand-700 是浅字）
+   - 品牌色为靛蓝紫（indigo）色阶，对齐 logo 的 蓝紫渐变 + 深空蓝黑底
    - 下半部分保留旧版变量名（--accent/--bg-card/--error-* 等）作为语义别名，
      指向上面的新色阶，存量样式无需改动即可跟随主题
    ============================================================ */
@@ -11,15 +12,15 @@
 [data-theme='light'] {
   color-scheme: light;
 
-  /* ===== 1. 品牌色：青墨绿色阶 ===== */
-  --brand-50: #f2faf7;
-  --brand-100: #ddf3ea;
-  --brand-200: #b9e6d6;
-  --brand-300: #8ad3bc;
-  --brand-400: #56b99d;
-  --brand-500: #2f9e82;
-  --brand-600: #237f68;
-  --brand-700: #1d6454;
+  /* ===== 1. 品牌色：靛蓝紫色阶（对齐 Astra logo） ===== */
+  --brand-50: #f4f4fe;
+  --brand-100: #e8e8fd;
+  --brand-200: #d0d1fb;
+  --brand-300: #a8aef8;
+  --brand-400: #7c83f2;
+  --brand-500: #6366f1;
+  --brand-600: #4f46e5;
+  --brand-700: #4338ca;
 
   /* ===== 2. 语义色（Tailwind emerald / amber / red / blue） ===== */
   --success-50: #ecfdf5;
@@ -55,32 +56,32 @@
   --info-600: #2563eb;
   --info-700: #1d4ed8;
 
-  /* ===== 3. 背景/表面 ===== */
-  --bg-body: #f2f5f4;
+  /* ===== 3. 背景/表面（蓝灰冷调） ===== */
+  --bg-body: #f3f4f8;
   --bg-surface: #ffffff;
-  --bg-surface-soft: #f6faf8;
+  --bg-surface-soft: #f6f7fb;
   --bg-elevated: #ffffff;
   --bg-glass: rgba(255, 255, 255, 0.72);
 
-  /* ===== 4. 文字 ===== */
-  --text-primary: #1c2b27;
-  --text-secondary: #51645d;
-  --text-muted: #8a9b95;
-  --text-placeholder: #c2cfc9;
+  /* ===== 4. 文字（藏青调） ===== */
+  --text-primary: #1c2233;
+  --text-secondary: #4f5a75;
+  --text-muted: #8891a8;
+  --text-placeholder: #c3c9d9;
   --text-inverse: #ffffff;
 
   /* ===== 5. 边框 ===== */
-  --border-color: #dde7e3;
-  --border-strong: #c4d2cc;
-  --divider: #eaf1ee;
+  --border-color: #e2e6f0;
+  --border-strong: #c8cede;
+  --divider: #eef0f6;
 
-  /* ===== 6. 渐变/阴影/圆角 ===== */
-  --gradient-brand: linear-gradient(135deg, #2f9e82, #1d6454);
-  --shadow-sm: rgba(20, 32, 27, 0.05);
-  --shadow-md: rgba(20, 32, 27, 0.08);
-  --shadow-hover: rgba(20, 32, 27, 0.12);
-  --shadow-lg: 0 24px 48px rgba(20, 32, 27, 0.22);
-  --shadow-glow: 0 4px 16px rgba(47, 158, 130, 0.35);
+  /* ===== 6. 渐变/阴影/圆角（渐变对齐 logo：蓝→紫） ===== */
+  --gradient-brand: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  --shadow-sm: rgba(15, 20, 40, 0.05);
+  --shadow-md: rgba(15, 20, 40, 0.08);
+  --shadow-hover: rgba(15, 20, 40, 0.12);
+  --shadow-lg: 0 24px 48px rgba(15, 20, 40, 0.22);
+  --shadow-glow: 0 4px 16px rgba(99, 102, 241, 0.35);
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -88,19 +89,19 @@
   --radius-full: 999px;
 
   /* ===== 7. 组件级 ===== */
-  --overlay: rgba(8, 14, 12, 0.55);
-  --tooltip-bg: #1c2b27;
-  --tooltip-text: #f2faf7;
-  --scrollbar-thumb: #c4d2cc;
-  --scrollbar-thumb-hover: #8a9b95;
+  --overlay: rgba(10, 14, 28, 0.55);
+  --tooltip-bg: #1c2233;
+  --tooltip-text: #f4f4fe;
+  --scrollbar-thumb: #c8cede;
+  --scrollbar-thumb-hover: #8891a8;
   --on-accent-text: rgba(255, 255, 255, 0.88);
   --on-accent-soft: rgba(255, 255, 255, 0.25);
   --on-accent-border: rgba(255, 255, 255, 0.2);
 
-  /* 代码块（设计约定：亮暗主题下都用墨绿深底） */
-  --code-bg: #101b17;
-  --code-bg-deep: #0b1210;
-  --code-text: #dce8e3;
+  /* 代码块（设计约定：亮暗主题下都用深空蓝黑底） */
+  --code-bg: #10131f;
+  --code-bg-deep: #0a0d17;
+  --code-text: #dfe3f0;
   --code-border: rgba(255, 255, 255, 0.08);
 
   /* ===== 语义别名（旧变量名 → 新色阶） ===== */
@@ -118,10 +119,10 @@
   --accent-bg: var(--brand-50);
   --accent-bg-hover: var(--brand-100);
   --accent-gradient: var(--gradient-brand);
-  --accent-shadow: rgba(47, 158, 130, 0.3);
-  --accent-shadow-hover: rgba(47, 158, 130, 0.4);
-  --accent-light: rgba(47, 158, 130, 0.1);
-  --accent-ring: rgba(47, 158, 130, 0.28);
+  --accent-shadow: rgba(99, 102, 241, 0.3);
+  --accent-shadow-hover: rgba(99, 102, 241, 0.4);
+  --accent-light: rgba(99, 102, 241, 0.1);
+  --accent-ring: rgba(99, 102, 241, 0.28);
 
   --link: var(--info-500);
   --link-hover: var(--info-600);
@@ -143,29 +144,29 @@
   --highlight-bg: rgba(254, 240, 138, 0.5);
   --highlight-text: #1e293b;
 
-  /* 深色侧边栏（两种主题下侧边栏都是墨绿深底） */
-  --sidebar-bg: #0f1a16;
-  --sidebar-text: #93a8a0;
-  --sidebar-text-hover: #dce8e3;
-  --sidebar-active-bg: #56b99d;
-  --sidebar-active-text: #0f1a16;
+  /* 深色侧边栏（两种主题下侧边栏都是深空蓝黑底） */
+  --sidebar-bg: #0d1120;
+  --sidebar-text: #8b93ad;
+  --sidebar-text-hover: #dfe3f0;
+  --sidebar-active-bg: #6366f1;
+  --sidebar-active-text: #ffffff;
   --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-hover-bg: rgba(86, 185, 157, 0.14);
-  --sidebar-accent: #56b99d;
+  --sidebar-hover-bg: rgba(124, 131, 242, 0.14);
+  --sidebar-accent: #7c83f2;
 }
 
 [data-theme='dark'] {
   color-scheme: dark;
 
-  /* ===== 1. 品牌色：青墨绿色阶（反向） ===== */
-  --brand-50: #12201b;
-  --brand-100: #1a2c26;
-  --brand-200: #243c33;
-  --brand-300: #4f7a6b;
-  --brand-400: #6fa894;
-  --brand-500: #8ac7b2;
-  --brand-600: #a8dccb;
-  --brand-700: #c6ecdd;
+  /* ===== 1. 品牌色：靛蓝紫色阶（反向） ===== */
+  --brand-50: #131527;
+  --brand-100: #1b1e35;
+  --brand-200: #262a47;
+  --brand-300: #666fd0;
+  --brand-400: #8a93e8;
+  --brand-500: #a5abee;
+  --brand-600: #c1c6f4;
+  --brand-700: #dcdff9;
 
   /* ===== 2. 语义色 ===== */
   --success-50: rgba(16, 185, 129, 0.12);
@@ -201,32 +202,32 @@
   --info-600: #60a5fa;
   --info-700: #93c5fd;
 
-  /* ===== 3. 背景/表面 ===== */
-  --bg-body: #0e1615;
-  --bg-surface: #152019;
-  --bg-surface-soft: #1a2a24;
-  --bg-elevated: #1c2b26;
-  --bg-glass: rgba(14, 22, 21, 0.72);
+  /* ===== 3. 背景/表面（深空蓝黑，对齐 logo 底色） ===== */
+  --bg-body: #0d0f1a;
+  --bg-surface: #151829;
+  --bg-surface-soft: #1a1e33;
+  --bg-elevated: #1d2136;
+  --bg-glass: rgba(13, 15, 26, 0.72);
 
   /* ===== 4. 文字 ===== */
-  --text-primary: #e4ece9;
-  --text-secondary: #a3b5ae;
-  --text-muted: #6d817a;
-  --text-placeholder: #46564f;
-  --text-inverse: #0e1615;
+  --text-primary: #e5e7f2;
+  --text-secondary: #a6abc4;
+  --text-muted: #6d7392;
+  --text-placeholder: #454b66;
+  --text-inverse: #0d0f1a;
 
   /* ===== 5. 边框 ===== */
   --border-color: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.16);
   --divider: rgba(255, 255, 255, 0.06);
 
-  /* ===== 6. 渐变/阴影/圆角 ===== */
-  --gradient-brand: linear-gradient(135deg, #2f9e82, #1d6454);
+  /* ===== 6. 渐变/阴影/圆角（渐变对齐 logo：蓝→紫） ===== */
+  --gradient-brand: linear-gradient(135deg, #3b82f6, #8b5cf6);
   --shadow-sm: rgba(0, 0, 0, 0.25);
   --shadow-md: rgba(0, 0, 0, 0.35);
   --shadow-hover: rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 24px 48px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 4px 16px rgba(47, 158, 130, 0.4);
+  --shadow-glow: 0 4px 16px rgba(99, 102, 241, 0.4);
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -235,18 +236,18 @@
 
   /* ===== 7. 组件级 ===== */
   --overlay: rgba(0, 0, 0, 0.6);
-  --tooltip-bg: #e4ece9;
-  --tooltip-text: #12201b;
-  --scrollbar-thumb: #2a3b35;
-  --scrollbar-thumb-hover: #3a4d46;
+  --tooltip-bg: #e5e7f2;
+  --tooltip-text: #131527;
+  --scrollbar-thumb: #2a2f4a;
+  --scrollbar-thumb-hover: #3a4066;
   --on-accent-text: rgba(255, 255, 255, 0.88);
   --on-accent-soft: rgba(255, 255, 255, 0.25);
   --on-accent-border: rgba(255, 255, 255, 0.2);
 
-  /* 代码块（设计约定：亮暗主题下都用墨绿深底） */
-  --code-bg: #101b17;
-  --code-bg-deep: #0b1210;
-  --code-text: #dce8e3;
+  /* 代码块（设计约定：亮暗主题下都用深空蓝黑底） */
+  --code-bg: #10131f;
+  --code-bg-deep: #0a0d17;
+  --code-text: #dfe3f0;
   --code-border: rgba(255, 255, 255, 0.08);
 
   /* ===== 语义别名（旧变量名 → 新色阶） ===== */
@@ -254,7 +255,7 @@
   --bg-card: var(--bg-surface);
   --bg-card-hover: var(--bg-surface-soft);
   --bg-subtle: var(--bg-surface-soft);
-  --bg-input: #1c2b26;
+  --bg-input: #1d2136;
 
   --border: var(--border-color);
   --border-light: var(--divider);
@@ -264,10 +265,10 @@
   --accent-bg: var(--brand-50);
   --accent-bg-hover: var(--brand-100);
   --accent-gradient: var(--gradient-brand);
-  --accent-shadow: rgba(47, 158, 130, 0.35);
-  --accent-shadow-hover: rgba(47, 158, 130, 0.45);
-  --accent-light: rgba(138, 199, 178, 0.12);
-  --accent-ring: rgba(138, 199, 178, 0.3);
+  --accent-shadow: rgba(99, 102, 241, 0.35);
+  --accent-shadow-hover: rgba(99, 102, 241, 0.45);
+  --accent-light: rgba(138, 147, 232, 0.12);
+  --accent-ring: rgba(138, 147, 232, 0.3);
 
   --link: var(--info-400);
   --link-hover: var(--info-300);
@@ -287,15 +288,15 @@
   --info-text: var(--info-400);
 
   --highlight-bg: rgba(254, 240, 138, 0.25);
-  --highlight-text: #e4ece9;
+  --highlight-text: #e5e7f2;
 
-  /* 深色侧边栏（两种主题下侧边栏都是墨绿深底） */
-  --sidebar-bg: #0a1210;
-  --sidebar-text: #7e938b;
-  --sidebar-text-hover: #dce8e3;
-  --sidebar-active-bg: #56b99d;
-  --sidebar-active-text: #0a1210;
+  /* 深色侧边栏（两种主题下侧边栏都是深空蓝黑底） */
+  --sidebar-bg: #090b14;
+  --sidebar-text: #7e849e;
+  --sidebar-text-hover: #dfe3f0;
+  --sidebar-active-bg: #6366f1;
+  --sidebar-active-text: #ffffff;
   --sidebar-border: rgba(255, 255, 255, 0.06);
-  --sidebar-hover-bg: rgba(86, 185, 157, 0.16);
-  --sidebar-accent: #56b99d;
+  --sidebar-hover-bg: rgba(124, 131, 242, 0.16);
+  --sidebar-accent: #7c83f2;
 }

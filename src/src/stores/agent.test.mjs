@@ -513,13 +513,14 @@ test('multi-session: closeTab saves and frees backend; running tabs refuse close
   store.setState({ running: false, settling: true });
   assert.equal(store.getState().closeTab(draftId), false);
   store.setState({ settling: false });
-  // 最后一个 tab：重置为保留项目绑定的全新草稿
+  // 最后一个 tab：重置为保留项目绑定的全新草稿，且不出 tab（隐式草稿）
   store.setState({ projectPath: '/keep' });
   assert.equal(store.getState().closeTab(draftId), true);
   assert.equal(store.getState().isDraft, true);
   assert.equal(store.getState().entries.length, 0);
   assert.equal(store.getState().projectPath, '/keep');
-  assert.deepEqual([...store.getState().openTabs], [store.getState().sessionId]);
+  assert.deepEqual([...store.getState().openTabs], []);
+  assert.equal(store.getState().activeTabId, null);
 });
 
 test('multi-session: LRU evicts idle parked tabs beyond cap, protecting running and pending', async () => {
@@ -555,6 +556,12 @@ test('multi-session: LRU evicts idle parked tabs beyond cap, protecting running 
 test('multi-session: draft semantics, openDraftForProject and activateSession from history', async () => {
   const { store } = await harness();
   assert.equal(store.getState().isDraft, true);
+  // 新打开：隐式草稿默认无 tab；点 + 后同一会话转正出 tab
+  assert.deepEqual([...store.getState().openTabs], []);
+  assert.equal(store.getState().activeTabId, null);
+  store.getState().newTab();
+  assert.deepEqual([...store.getState().openTabs], [store.getState().sessionId]);
+  assert.equal(store.getState().activeTabId, store.getState().sessionId);
   store.getState().pushUser('hello');
   assert.equal(store.getState().isDraft, false);
   store.getState().openDraftForProject('/tmp/proj');

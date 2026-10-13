@@ -21,12 +21,13 @@ body .content:has(.agent-root) {
 /* ===== 标题栏功能（portal 到 AppLayout 的 /agent 标题栏，样式与标题栏融合） ===== */
 
 .agent-tb {
-  // 项目 chip：文件夹图标 + 名称（点击 Finder 打开）+ 编辑器/解绑两个图标按钮
+  // 项目 chip：文件夹图标 + 名称（Zed 式：点击弹出项目切换菜单）
   &__project {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 4px 3px 10px;
+    padding: 3px 6px 3px 10px;
     font-size: 12px;
     color: var(--text-secondary);
     background: var(--brand-50);
@@ -36,23 +37,138 @@ body .content:has(.agent-root) {
   }
 
   &__project-name {
+    display: flex;
+    align-items: center;
+    gap: 5px;
     max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-weight: 600;
     font-size: 12px;
     color: var(--brand-700);
     background: transparent;
     border: none;
-    padding: 2px;
+    padding: 2px 4px 2px 0;
     cursor: pointer;
     border-radius: 6px;
     transition: background 0.12s ease;
 
+    svg:first-child {
+      flex-shrink: 0;
+    }
+
     &:hover {
       background: var(--brand-100);
     }
+  }
+
+  &__project-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__project-chevron {
+    flex-shrink: 0;
+    color: var(--brand-600);
+    transition: transform 0.15s ease;
+
+    &.is-open {
+      transform: rotate(180deg);
+    }
+  }
+
+  // 项目切换菜单（锚在 chip 下方，Zed project picker 式）
+  &__proj-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 220px;
+    max-width: 300px;
+    padding: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__proj-list {
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  &__proj-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-primary);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s ease;
+
+    &:hover:not(:disabled) {
+      background: var(--bg-surface-soft, var(--bg-surface));
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    &.is-active {
+      color: var(--brand-700);
+      font-weight: 500;
+
+      svg {
+        margin-left: auto;
+        flex-shrink: 0;
+        color: var(--brand-600);
+      }
+    }
+
+    &.is-danger {
+      color: var(--danger-600);
+
+      &:hover:not(:disabled) {
+        background: var(--danger-50, var(--bg-surface-soft));
+      }
+    }
+  }
+
+  &__proj-item-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__proj-item-path {
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 140px;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__proj-sep {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--border-color);
+    flex-shrink: 0;
   }
 
   &__iconbtn {

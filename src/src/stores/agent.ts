@@ -495,8 +495,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sessionId: INITIAL_SESSION_ID,
   isDraft: true,
   parked: {},
-  openTabs: [INITIAL_SESSION_ID],
-  activeTabId: INITIAL_SESSION_ID,
+  // 新打开时默认无 tab：隐式草稿不发消息不出 tab，点 + 或首条消息后转正
+  openTabs: [],
+  activeTabId: null,
   activeRunId: null,
   lastSequence: 0,
   endedRuns: new Map(),
@@ -551,8 +552,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     });
   },
   setRunState: (running, status) =>
-    set((s) => ({ ...transitionRun(s, running, status), settling: false, ...(running ? { isDraft: false } : {}) })),
-  pushUser: (text) => set((s) => ({ entries: [...s.entries, { kind: 'user', text }], isDraft: false })),
+    set((s) => ({
+      ...transitionRun(s, running, status),
+      settling: false,
+      ...(running
+        ? {
+            isDraft: false,
+            // 隐式草稿开始运行：补上 tab 转正
+            openTabs: s.openTabs.includes(s.sessionId) ? s.openTabs : [...s.openTabs, s.sessionId],
+            activeTabId: s.activeTabId ?? s.sessionId,
+          }
+        : {}),
+    })),
+  pushUser: (text) =>
+    set((s) => ({
+      entries: [...s.entries, { kind: 'user', text }],
+      isDraft: false,
+      // 首条消息触发：隐式草稿补上 tab 转正
+      openTabs: s.openTabs.includes(s.sessionId) ? s.openTabs : [...s.openTabs, s.sessionId],
+      activeTabId: s.activeTabId ?? s.sessionId,
+    })),
   /** checkpoint 恢复：后端已回退，前端用回退后的消息序列重建会话视图（不计入当前 Run） */
   restoreEntries: (sessionId, entries) =>
     set((s) =>
@@ -726,8 +745,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   newTab: () => {
     if (get().sessionBusy) return;
     set((s) => {
-      // 已在空草稿上：无需再开（空草稿全局至多一个）
-      if (s.entries.length === 0 && !s.running) return s;
+      // 已在空草稿上：无 tab（新打开的隐式草稿）则补上 tab；已有 tab 则无需再开
+      if (s.entries.length === 0 && !s.running) {
+        if (s.openTabs.includes(s.sessionId)) return s;
+        return { openTabs: [...s.openTabs, s.sessionId], activeTabId: s.sessionId };
+      }
       // 驻留当前会话（运行中也可驻留，事件路由保证不丢）；新草稿继承项目绑定
       let parked = { ...s.parked, [s.sessionId]: snapshotFlat(s) };
       let openTabs = [...s.openTabs, newSessionId()];
@@ -784,7 +806,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       void saveSessionSnapshot(id, { entries: st.entries, projectPath: st.projectPath });
       invoke('agent_reset_session', { sessionId: id }).catch(() => {});
       if (remaining.length === 0 || idx < 0) {
-        // 最后一个 tab：重置为全新草稿，保留项目绑定
+        // 最后一个 tab：重置为全新草稿且无 tab（回到「隐式草稿」状态），保留项目绑定
         const nid = newSessionId();
         set((s) => ({
           ...transitionRun(s, false, null),
@@ -796,8 +818,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           error: '',
           isDraft: true,
           parked: omitKey(s.parked, id),
-          openTabs: [nid],
-          activeTabId: nid,
+          openTabs: [],
+          activeTabId: null,
         }));
         return true;
       }
@@ -807,7 +829,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (swap) {
         set((s) => ({ ...swap, parked: omitKey(s.parked, id) }));
       } else {
-        // 邻居无法解析（防御）：回退到全新草稿
+        // 邻居无法解析（防御）：回退到无 tab 的隐式草稿
         const nid = newSessionId();
         set((s) => ({
           ...transitionRun(s, false, null),
@@ -819,8 +841,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           error: '',
           isDraft: true,
           parked: omitKey(s.parked, id),
-          openTabs: [nid],
-          activeTabId: nid,
+          openTabs: [],
+          activeTabId: null,
         }));
       }
       return true;
@@ -846,8 +868,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const st = get();
     if (st.sessionBusy) return;
     if (st.entries.length === 0 && !st.running) {
-      // 当前已是空草稿：直接改绑项目
-      set({ projectPath: path, activeTabId: st.sessionId });
+      // 当前已是空草稿：直接改绑项目（无 tab 时保持隐式，不提前出 tab）
+      set({ projectPath: path });
       return;
     }
     get().newTab();

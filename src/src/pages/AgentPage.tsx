@@ -23,7 +23,6 @@ import {
   CircleAlert,
   CircleCheck,
   CircleX,
-  ExternalLink,
   FileText,
   FolderOpen,
   History,
@@ -700,6 +699,18 @@ export default function AgentPage() {
     setTbRight(document.getElementById('agent-titlebar-right'));
   }, []);
 
+  // ===== 项目切换菜单（Zed 式：点项目名弹出最近项目 + 打开文件夹等操作） =====
+  const [projMenuOpen, setProjMenuOpen] = useState(false);
+  const projRootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!projMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (!projRootRef.current?.contains(e.target as Node)) setProjMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [projMenuOpen]);
+
   /** 新建会话标签：当前会话驻留内存，切回零重建 */
   const newTab = useCallback(() => {
     useAgentStore.getState().newTab();
@@ -732,33 +743,99 @@ export default function AgentPage() {
       {tbLeft &&
         createPortal(
           projectPath ? (
-            <div className="agent-tb__project">
-              <FolderOpen size={14} strokeWidth={1.8} />
+            <div className="agent-tb__project" ref={projRootRef}>
               <button
                 type="button"
                 className="agent-tb__project-name"
-                onClick={() => void openProjectInFolder()}
-                title={`${projectPath}（点击在 Finder 中打开）`}
+                onClick={() => setProjMenuOpen((o) => !o)}
+                title="切换项目"
               >
-                {projects.find((p) => p.path === projectPath)?.name ?? projectPath.split('/').pop()}
+                <FolderOpen size={14} strokeWidth={1.8} />
+                <span className="agent-tb__project-label">
+                  {projects.find((p) => p.path === projectPath)?.name ?? projectPath.split('/').pop()}
+                </span>
+                <ChevronDown size={11} strokeWidth={2.2} className={`agent-tb__project-chevron${projMenuOpen ? ' is-open' : ''}`} />
               </button>
-              <button
-                type="button"
-                className="agent-tb__iconbtn"
-                onClick={openProjectInEditor}
-                title="在编辑器中打开"
-              >
-                <ExternalLink size={13} strokeWidth={1.8} />
-              </button>
-              <button
-                type="button"
-                className="agent-tb__iconbtn"
-                onClick={() => setProjectPath('')}
-                disabled={running}
-                title="解绑项目（转为纯聊天）"
-              >
-                <X size={13} strokeWidth={2} />
-              </button>
+
+              {projMenuOpen && (
+                <div className="agent-tb__proj-menu" role="menu">
+                  <div className="agent-tb__proj-list">
+                    {/* 当前目录可能不在项目列表（手动选的任意文件夹）：置顶展示 */}
+                    {!projects.some((p) => p.path === projectPath) && (
+                      <button type="button" role="menuitem" className="agent-tb__proj-item is-active" disabled>
+                        <span className="agent-tb__proj-item-name">{projectPath.split('/').pop()}</span>
+                        <span className="agent-tb__proj-item-path">{projectPath}</span>
+                        <Check size={13} strokeWidth={2.2} />
+                      </button>
+                    )}
+                    {projects.map((p) => (
+                      <button
+                        key={p.path}
+                        type="button"
+                        role="menuitem"
+                        className={`agent-tb__proj-item${p.path === projectPath ? ' is-active' : ''}`}
+                        disabled={running}
+                        title={p.path}
+                        onClick={() => {
+                          setProjectPath(p.path);
+                          setError('');
+                          setProjMenuOpen(false);
+                        }}
+                      >
+                        <span className="agent-tb__proj-item-name">{p.name}</span>
+                        {p.path === projectPath && <Check size={13} strokeWidth={2.2} />}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="agent-tb__proj-sep" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-tb__proj-item"
+                    onClick={() => {
+                      setProjMenuOpen(false);
+                      void pickProjectFolder();
+                    }}
+                  >
+                    选择其他文件夹…
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-tb__proj-item"
+                    onClick={() => {
+                      setProjMenuOpen(false);
+                      void openProjectInFolder();
+                    }}
+                  >
+                    在 Finder 中打开
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-tb__proj-item"
+                    onClick={() => {
+                      setProjMenuOpen(false);
+                      openProjectInEditor();
+                    }}
+                  >
+                    在编辑器中打开
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="agent-tb__proj-item is-danger"
+                    disabled={running}
+                    onClick={() => {
+                      setProjMenuOpen(false);
+                      setProjectPath('');
+                    }}
+                  >
+                    解绑项目（转为纯聊天）
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <>

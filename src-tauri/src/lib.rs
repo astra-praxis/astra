@@ -1529,6 +1529,9 @@ pub fn run() {
             agent_sessions::list_agent_sessions,
             agent_sessions::save_agent_session,
             agent_sessions::delete_agent_session,
+            // Agent Preview（后台任务预览窗口）
+            agent::agent_preview_tasks,
+            agent::agent_open_preview,
             // Chat Sessions
             chat_sessions::list_chat_sessions,
             chat_sessions::save_chat_session,

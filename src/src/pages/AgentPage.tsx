@@ -28,6 +28,7 @@ import {
   HelpCircle,
   History,
   Loader2,
+  MonitorUp,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -107,6 +108,8 @@ const PERM_ACTION_LABEL: Record<string, string> = {
   move_path: '请求移动/重命名',
   create_directory: '请求创建目录',
   shell_execute: '请求执行命令',
+  shell_background: '请求后台启动进程',
+  shell_kill: '请求停止后台进程',
   build_docx: '请求生成 docx 文档',
   extract_document: '请求转换文档为 Markdown',
   fetch: '请求抓取网页',
@@ -1625,9 +1628,24 @@ function ToolEntry({
         ? '文件内容'
         : entry.toolName === 'edit_file'
           ? '修改对照'
-          : entry.toolName === 'shell_execute'
+          : entry.toolName === 'shell_execute' || entry.toolName === 'shell_background'
             ? '命令'
             : '参数';
+  // shell_background 完成后：从结果中取 task_id，提供「预览」入口（host 从日志检测地址后开窗）
+  const bgTaskId =
+    entry.toolName === 'shell_background' && entry.status === 'completed' && entry.result
+      ? (entry.result.match(/task_id=(\d+)/)?.[1] ?? null)
+      : null;
+  const [previewHint, setPreviewHint] = useState('');
+  const openPreview = useCallback(async () => {
+    if (!bgTaskId) return;
+    setPreviewHint('');
+    try {
+      await invoke('agent_open_preview', { taskId: Number(bgTaskId) });
+    } catch (e) {
+      setPreviewHint(String(e).replace(/^.*错误:/, '').trim());
+    }
+  }, [bgTaskId]);
   return (
     <div className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}>
       <button
@@ -1663,6 +1681,15 @@ function ToolEntry({
           <ChevronDown size={12} strokeWidth={2} className={`aentry__tool-chev${open ? ' rotated' : ''}`} />
         )}
       </button>
+      {bgTaskId && (
+        <div className="aentry__preview">
+          <button type="button" className="aentry__preview-btn" onClick={() => void openPreview()}>
+            <MonitorUp size={12} strokeWidth={1.8} />
+            预览
+          </button>
+          {previewHint && <span className="aentry__preview-hint">{previewHint}</span>}
+        </div>
+      )}
       {previewText && (
         <StreamBlock
           variant="tool"

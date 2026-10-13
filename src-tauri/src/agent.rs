@@ -144,6 +144,10 @@ pub struct AgentState {
     pub(crate) persistence_errors: crate::agent_threads::PersistenceErrors,
     // Serialize UI JSON updates and reject delayed saves after deletion.
     pub(crate) session_files: tokio::sync::Mutex<std::collections::HashSet<String>>,
+    /// Background task registry shared by every session's tool registry.
+    /// Project-level lifetime: dev servers survive session switches; killed
+    /// on app exit (ProcessManager::drop → process-group teardown).
+    pub(crate) processes: Arc<agent_core::shell_background::ProcessManager>,
 }
 
 impl Default for AgentState {
@@ -157,6 +161,7 @@ impl Default for AgentState {
             )),
             persistence_errors: Arc::new(Mutex::new(HashMap::new())),
             session_files: tokio::sync::Mutex::new(std::collections::HashSet::new()),
+            processes: Arc::new(agent_core::shell_background::ProcessManager::new()),
         }
     }
 }
@@ -273,6 +278,7 @@ fn build_registry(
     skills_dir: Option<&Path>,
     question_bridge: Arc<dyn agent_core::UserQuestionBridge>,
     search_endpoint: Option<String>,
+    processes: Arc<agent_core::shell_background::ProcessManager>,
 ) -> ToolRegistry {
     // 网络工具 + ask_user 不依赖项目根，纯聊天也可用
     let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search_endpoint)
@@ -286,6 +292,9 @@ fn build_registry(
             let reg = agent_core::fs_basic::register(reg, root);
             let reg = agent_core::doc_tools::register(reg, root);
             let reg = agent_core::shell_tool::register(reg, root);
+            // Background task management (dev servers / watchers): manager is
+            // host-owned and shared across sessions, so tasks outlive a chat.
+            let reg = agent_core::shell_background::register(reg, root, processes);
             // fs_tools（Zed 移植）：搜索/编辑/移动类
             agent_core::fs_tools::register(reg, root)
         }
@@ -303,6 +312,8 @@ fn default_system_prompt() -> String {
      复制/移动/建目录用 copy_path / move_path / create_directory（目标已存在会报错，不会覆盖）。\
      需要交付 docx 时用 build_docx（会请求用户确认）。\
      需要运行命令（pandoc/python/构建工具等）时用 shell_execute（在项目根目录执行，每次都请求用户确认）。\
+     需要启动长驻进程（dev server / watch / 长任务）时用 shell_background 后台启动，\
+     然后用 shell_status 增量查看输出（可从中发现监听端口和构建报错并自行修复），不再需要时用 shell_kill 停止。\
      需要查阅网页资料时用 fetch 抓取页面（返回 Markdown），需要实时信息时用 search_web 搜索后再 fetch 具体页面。\
      任务需要用户决定、确认或补充信息时用 ask_user 提问（问题会以卡片形式展示给用户）。\
      系统提示末尾列出了用户的技能库：任务与某技能相关时，先用 read_skill 读取该技能说明再严格按其执行；\
@@ -430,6 +441,10 @@ pub async fn agent_start_run(
             policy.confirm_tools.push("create_directory".into());
             policy.confirm_tools.push("build_docx".into());
             policy.confirm_tools.push("shell_execute".into());
+            // 后台任务：启动/停止有副作用走 Confirm；shell_status 只读（Allow）
+            policy.confirm_tools.push("shell_background".into());
+            policy.confirm_tools.push("shell_kill".into());
+            policy.allowed_readonly.push("shell_status".into());
             // fetch 涉及外部网络访问，走确认弹窗（SSRF 门在工具内部始终生效）
             policy.confirm_tools.push("fetch".into());
             let mut system_prompt = req.system_prompt.unwrap_or_else(default_system_prompt);
@@ -475,6 +490,7 @@ pub async fn agent_start_run(
                         skills_dir.as_deref(),
                         question_bridge,
                         settings_search_endpoint(&app),
+                        Arc::clone(&state.processes),
                     ),
                     bridge,
                 )
@@ -607,6 +623,104 @@ pub async fn agent_reset_session(
         "Agent is running or draining; cancel and wait before unloading".to_string()
     })?;
     threads.unload(&session_id, &state.persistence_errors)
+}
+
+// ===== 预览：从后台任务日志发现本地服务地址并打开预览窗口 =====
+
+/// 可预览任务信息（前端展示用）
+#[derive(serde::Serialize)]
+pub struct AgentPreviewTask {
+    pub task_id: u64,
+    pub command: String,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub urls: Vec<String>,
+}
+
+/// 列出后台任务及从其日志中检测到的本地服务地址
+#[tauri::command]
+pub async fn agent_preview_tasks(
+    state: State<'_, AgentState>,
+) -> Result<Vec<AgentPreviewTask>, String> {
+    let urls_of = |id: u64| {
+        state
+            .processes
+            .full_log(id)
+            .map(|log| agent_core::shell_background::detect_local_urls(&log))
+            .unwrap_or_default()
+    };
+    Ok(state
+        .processes
+        .snapshot()
+        .into_iter()
+        .map(|t| AgentPreviewTask {
+            task_id: t.id,
+            command: t.command.clone(),
+            urls: urls_of(t.id),
+            status: t.status,
+            exit_code: t.exit_code,
+        })
+        .collect())
+}
+
+/// 为后台任务打开预览窗口：优先用显式传入的 url，否则用日志中检测到的第一个。
+/// 同一 url 复用已存在的窗口（避免点出一片窗口海）。
+#[tauri::command]
+pub async fn agent_open_preview(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    task_id: u64,
+    url: Option<String>,
+) -> Result<String, String> {
+    let target = match url {
+        Some(u) if !u.trim().is_empty() => u,
+        _ => {
+            let log = state
+                .processes
+                .full_log(task_id)
+                .ok_or_else(|| format!("后台任务不存在: {task_id}"))?;
+            agent_core::shell_background::detect_local_urls(&log)
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    "日志中未检测到本地服务地址（服务可能还没就绪，稍后再试）".to_string()
+                })?
+        }
+    };
+
+    // 同 url 复用现有窗口并聚焦；label 由 url 的简单 FNV-1a 摘要派生（稳定且唯一性足够）
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in target.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let label = format!("preview-{hash:016x}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.set_focus();
+        return Ok(existing.label().to_string());
+    }
+
+    use tauri::WebviewUrl;
+    use tauri::WebviewWindowBuilder;
+    let parsed: tauri::Url = target
+        .parse()
+        .map_err(|e| format!("无效的服务地址 {target}: {e}"))?;
+    let title = format!(
+        "预览 · {}",
+        state
+            .processes
+            .snapshot()
+            .into_iter()
+            .find(|t| t.id == task_id)
+            .map(|t| t.command.chars().take(40).collect::<String>())
+            .unwrap_or_else(|| format!("任务 {task_id}"))
+    );
+    WebviewWindowBuilder::new(&app, label.clone(), WebviewUrl::External(parsed))
+        .title(title)
+        .inner_size(1200.0, 800.0)
+        .build()
+        .map_err(|e| format!("打开预览窗口失败: {e}"))?;
+    Ok(label)
 }
 
 /// 当前 Agent 是否有进行中的 Run（页面刷新后恢复状态用）

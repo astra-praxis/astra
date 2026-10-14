@@ -8,6 +8,7 @@ mod dev_mode;
 mod downloader;
 mod embedding;
 mod indexer;
+mod market;
 mod providers;
 mod session_store;
 mod user_skills;
@@ -1550,6 +1551,12 @@ pub fn run() {
             user_skills::write_user_skill_file,
             user_skills::delete_user_skill_file,
             user_skills::delete_user_skill,
+            // Extensions Market（MCP / Skill 市场搜索与一键安装）
+            market::market_mcp_search,
+            market::market_mcp_install,
+            market::market_skill_search,
+            market::market_skill_install,
+            market::market_status,
             // Dev Mode
             dev_mode::scan_dev_dirs,
             dev_mode::run_card_command,

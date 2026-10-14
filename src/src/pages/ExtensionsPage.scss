@@ -1,0 +1,434 @@
+/**
+ * 扩展管理页样式 — 复用主题变量与 market 页的卡片体系
+ */
+.extensions-page {
+  padding: 24px 28px;
+  max-width: 960px;
+  margin: 0 auto;
+  overflow-y: auto;
+
+  .page-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+
+    h1 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 0 0 6px;
+    }
+
+    p {
+      margin: 0;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .head-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s;
+
+    &:hover {
+      border-color: var(--border-strong, var(--border));
+      background: var(--bg-subtle);
+    }
+
+    .spin {
+      animation: ext-spin 0.8s linear infinite;
+    }
+  }
+
+  .error-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #b91c1c;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: 8px;
+
+    code {
+      font-size: 12px;
+      color: inherit;
+    }
+  }
+
+  .loading {
+    padding: 48px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  .section {
+    margin-bottom: 28px;
+  }
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+
+    .count {
+      padding: 1px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-subtle);
+      border-radius: 99px;
+    }
+  }
+
+  .ext-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .ext-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    transition: border-color 0.15s;
+
+    &:hover {
+      border-color: var(--border-strong, var(--border));
+
+      .ext-actions {
+        opacity: 1;
+      }
+    }
+
+    &.disabled {
+      opacity: 0.62;
+    }
+
+    .ext-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .kind-badge {
+        padding: 2px 8px;
+        font-size: 11px;
+        font-weight: 700;
+        border-radius: 6px;
+
+        &.mcp {
+          color: #4338ca;
+          background: rgba(99, 102, 241, 0.12);
+        }
+
+        &.acp {
+          color: #047857;
+          background: rgba(16, 185, 129, 0.12);
+        }
+      }
+
+      .ext-id {
+        font-size: 14.5px;
+        font-weight: 600;
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .badge {
+        padding: 1px 7px;
+        font-size: 11px;
+        border-radius: 5px;
+
+        &.required {
+          color: #b45309;
+          background: rgba(245, 158, 11, 0.14);
+        }
+
+        &.off {
+          color: var(--text-muted);
+          background: var(--bg-subtle);
+        }
+      }
+
+      .spacer {
+        flex: 1;
+      }
+    }
+
+    .ext-cmd {
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: var(--bg-subtle);
+      border-radius: 6px;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .ext-env {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+
+      .env-chip {
+        padding: 1px 8px;
+        font-size: 11px;
+        font-family: var(--font-mono, monospace);
+        color: var(--text-secondary);
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-light);
+        border-radius: 5px;
+      }
+    }
+
+    .ext-meta {
+      display: flex;
+      gap: 14px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .ext-actions {
+      position: absolute;
+      top: 12px;
+      right: 56px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+
+      .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        color: var(--text-secondary);
+        background: transparent;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+
+        &:hover {
+          color: var(--text-primary);
+          background: var(--bg-subtle);
+        }
+
+        &.danger:hover {
+          color: #b91c1c;
+          background: rgba(239, 68, 68, 0.08);
+        }
+      }
+    }
+
+    // 开关
+    .switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+
+      input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        inset: 0;
+        background: var(--border);
+        border-radius: 99px;
+        cursor: pointer;
+        transition: background 0.18s;
+
+        &::before {
+          content: '';
+          position: absolute;
+          top: 2px;
+          left: 2px;
+          width: 16px;
+          height: 16px;
+          background: #fff;
+          border-radius: 50%;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+          transition: transform 0.18s;
+        }
+      }
+
+      input:checked + .slider {
+        background: var(--accent, #6366f1);
+
+        &::before {
+          transform: translateX(16px);
+        }
+      }
+
+      input:disabled + .slider {
+        opacity: 0.6;
+      }
+    }
+  }
+
+  .empty {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 28px 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+    background: var(--bg-subtle);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+
+    a {
+      color: var(--accent, #6366f1);
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+
+  .config-path {
+    padding-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono, monospace);
+  }
+
+  // 编辑表单
+  .edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+
+      input[type='text'],
+      input:not([type]),
+      textarea {
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: var(--font-mono, monospace);
+        color: var(--text-primary);
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        outline: none;
+        resize: vertical;
+
+        &:focus {
+          border-color: var(--accent, #6366f1);
+        }
+      }
+    }
+
+    .checkbox-row {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      font-weight: 400;
+      cursor: pointer;
+    }
+  }
+
+  .btn-primary {
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent, #6366f1);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+  }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    background: #dc2626;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+  }
+
+  .confirm-text {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+
+  .confirm-hint {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+}
+
+@keyframes ext-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

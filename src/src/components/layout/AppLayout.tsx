@@ -12,6 +12,7 @@ import {
   ScrollText,
   Package,
   PackageSearch,
+  Blocks,
   GraduationCap,
   Settings,
   Activity,
@@ -30,6 +31,7 @@ const menuItems = [
   { id: 'tools', label: '工具箱', path: '/tools', icon: Wrench },
   { id: 'logs', label: '日志', path: '/logs', icon: ScrollText },
   { id: 'artifacts', label: '产物库', path: '/artifacts', icon: Package },
+  { id: 'extensions', label: '扩展管理', path: '/extensions', icon: Blocks },
   { id: 'market-mcp', label: '扩展市场', path: '/market/mcp', icon: PackageSearch },
   { id: 'market-skills', label: '技能市场', path: '/market/skills', icon: GraduationCap },
 ];

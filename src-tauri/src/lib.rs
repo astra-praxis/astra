@@ -7,6 +7,7 @@ mod command_runner;
 mod dev_mode;
 mod downloader;
 mod embedding;
+mod extensions;
 mod indexer;
 mod market;
 mod providers;
@@ -1559,6 +1560,11 @@ pub fn run() {
             market::market_skill_detail,
             market::market_skill_install,
             market::market_status,
+            // Extensions 管理（MCP / ACP 启停、编辑、删除）
+            extensions::extensions_list,
+            extensions::extensions_set_enabled,
+            extensions::extensions_remove,
+            extensions::extensions_update,
             // Dev Mode
             dev_mode::scan_dev_dirs,
             dev_mode::run_card_command,

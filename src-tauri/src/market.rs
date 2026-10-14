@@ -698,7 +698,7 @@ pub fn market_status() -> MarketStatus {
 
 // ===== 配置文件定位与解析 =====
 
-fn astra_config_path() -> Result<PathBuf, String> {
+pub(crate) fn astra_config_path() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
     let dir = home.join(".astra");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.astra 失败: {e}"))?;
@@ -748,7 +748,7 @@ fn append_config_section(section: &str) -> Result<(), String> {
     writeln!(file, "\n{section}").map_err(|e| format!("写入 config.toml 失败: {e}"))
 }
 
-fn toml_array(values: &[String]) -> String {
+pub(crate) fn toml_array(values: &[String]) -> String {
     values
         .iter()
         .map(|v| format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")))

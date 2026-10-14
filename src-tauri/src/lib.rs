@@ -1553,6 +1553,7 @@ pub fn run() {
             user_skills::delete_user_skill,
             // Extensions Market（MCP / Skill 市场搜索与一键安装）
             market::market_mcp_search,
+            market::market_mcp_remote_search,
             market::market_mcp_install,
             market::market_skill_search,
             market::market_skill_detail,

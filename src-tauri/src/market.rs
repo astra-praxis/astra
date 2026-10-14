@@ -610,6 +610,83 @@ pub fn market_mcp_search(query: Option<String>) -> Vec<McpMarketEntry> {
     list
 }
 
+// ===== MCP 在线搜索（Smithery registry 开放生态） =====
+
+const SMITHERY_API: &str = "https://registry.smithery.ai/servers";
+
+#[derive(Debug, Deserialize)]
+struct SmitherySearchResponse {
+    servers: Vec<SmitheryServerSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SmitheryServerSummary {
+    #[serde(rename = "qualifiedName")]
+    qualified_name: String,
+    #[serde(rename = "displayName")]
+    display_name: String,
+    description: String,
+    verified: bool,
+    #[serde(rename = "useCount")]
+    use_count: u64,
+}
+
+/// Smithery 远程条目的统一安装形态：
+/// stdio 命令 = npx -y @smithery/cli@latest run <qualifiedName>
+/// （smithery CLI 本地代理远程服务器，KEY 经 env 传入，不落配置文件）
+fn smithery_install_entry(s: &SmitheryServerSummary) -> McpMarketEntry {
+    let id = s.qualified_name.replace('/', "--").replace('@', "");
+    McpMarketEntry {
+        id: format!("smithery:{id}"),
+        kind: "mcp".into(),
+        name: s.display_name.clone(),
+        description: s.description.clone(),
+        tags: vec![],
+        official: s.verified,
+        recommended: false,
+        recommend_reason: String::new(),
+        command: "npx".into(),
+        args: vec![
+            "-y".into(),
+            "@smithery/cli@latest".into(),
+            "run".into(),
+            s.qualified_name.clone(),
+        ],
+        requires: vec!["node".into()],
+        npm_package: Some("@smithery/cli".into()),
+        suggested_allow: vec![],
+        requires_env: vec!["SMITHERY_API_KEY".into()],
+    }
+}
+
+#[tauri::command]
+pub async fn market_mcp_remote_search(
+    query: Option<String>,
+) -> Result<Vec<McpMarketEntry>, String> {
+    let q = query.unwrap_or_default();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
+    let resp: SmitherySearchResponse = client
+        .get(SMITHERY_API)
+        .query(&[("q", q.trim()), ("pageSize", "24")])
+        .send()
+        .await
+        .map_err(|e| format!("Smithery 搜索失败: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("解析 Smithery 响应失败: {e}"))?;
+    // 按使用量排序后映射为市场条目
+    let mut pairs: Vec<(u64, McpMarketEntry)> = resp
+        .servers
+        .iter()
+        .map(|s| (s.use_count, smithery_install_entry(s)))
+        .collect();
+    pairs.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(pairs.into_iter().map(|(_, e)| e).collect())
+}
+
 #[tauri::command]
 pub fn market_status() -> MarketStatus {
     MarketStatus {

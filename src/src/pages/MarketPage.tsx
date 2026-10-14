@@ -51,7 +51,7 @@ interface InstallResult {
 }
 
 type InstallState = 'idle' | 'installing' | 'installed' | 'error';
-type SkillFilter = 'all' | 'installed' | 'uninstalled';
+type MarketFilter = 'all' | 'installed' | 'uninstalled';
 
 function formatInstalls(n: number): string {
   if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
@@ -83,8 +83,12 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
   const [installMessages, setInstallMessages] = useState<Record<string, string>>({});
   // skills.sh 远程条目描述懒加载缓存
   const [descMap, setDescMap] = useState<Record<string, string>>({});
-  // Skill 页过滤：全部 / 已安装 / 未安装
-  const [skillFilter, setSkillFilter] = useState<SkillFilter>('all');
+  // 市场过滤：全部 / 已安装（MCP=已配置）/ 未安装
+  const [mcpFilter, setMcpFilter] = useState<MarketFilter>('all');
+  const [skillFilter, setSkillFilter] = useState<MarketFilter>('all');
+  const isMcpKind = kind === 'mcp';
+  const filter = isMcpKind ? mcpFilter : skillFilter;
+  const setFilter = isMcpKind ? setMcpFilter : setSkillFilter;
   // 在线搜索进行中（搜索反馈）
   const [searching, setSearching] = useState(false);
 
@@ -119,15 +123,21 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 搜索（Rust 侧空格分词 AND 匹配；非空查询走 skills.sh 在线搜索）
+  // 搜索（MCP：空查询→精选目录，非空→Smithery 在线生态；Skill 同理 skills.sh）
   const searched = useMemo(() => {
     return async () => {
       try {
         setSearching(true);
         if (kind === 'mcp') {
-          setMcpEntries(
-            await invoke<McpMarketEntry[]>('market_mcp_search', { query })
-          );
+          if (query.trim() === '') {
+            setMcpEntries(
+              await invoke<McpMarketEntry[]>('market_mcp_search', { query: '' })
+            );
+          } else {
+            setMcpEntries(
+              await invoke<McpMarketEntry[]>('market_mcp_remote_search', { query })
+            );
+          }
         } else {
           setSkillEntries(
             await invoke<SkillMarketEntry[]>('market_skill_search', { query })
@@ -212,10 +222,19 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
   const banners = RECO_BANNERS[kind];
   const isMcp = kind === 'mcp';
 
-  // Skill 过滤：已安装 = Rust 侧标记 或 本次会话刚装完
+  // 过滤：已安装 = MCP 已配置 / Skill 已安装（含本次会话刚装完）
+  const mcpInstalled = (e: McpMarketEntry) =>
+    configuredSet.has(e.id) || installStates[e.id] === 'installed';
   const skillInstalled = (e: SkillMarketEntry) =>
     e.installed || installStates[e.id] === 'installed';
-  const installedCount = skillEntries.filter(skillInstalled).length;
+  const mcpInstalledCount = mcpEntries.filter(mcpInstalled).length;
+  const skillInstalledCount = skillEntries.filter(skillInstalled).length;
+  const filteredMcpEntries =
+    mcpFilter === 'installed'
+      ? mcpEntries.filter(mcpInstalled)
+      : mcpFilter === 'uninstalled'
+        ? mcpEntries.filter((e) => !mcpInstalled(e))
+        : mcpEntries;
   const filteredSkillEntries =
     skillFilter === 'installed'
       ? skillEntries.filter(skillInstalled)
@@ -277,7 +296,7 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
         )}
       </div>
 
-      {/* 搜索框 + Skill 过滤 */}
+      {/* 搜索框 */}
       <div className="market-search">
         <Search size={16} strokeWidth={2.2} />
         <input
@@ -285,40 +304,45 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
           onChange={(e) => setQuery(e.target.value)}
           placeholder={
             isMcp
-              ? '搜索扩展，如 浏览器 github'
+              ? '搜索 Smithery 生态，如 github memory fetch'
               : '搜索 skills.sh 生态，如 commit react 文档'
           }
         />
         {searching && <div className="searching-hint">搜索中…</div>}
       </div>
 
-      {!isMcp && (
-        <div className="filter-row">
-          <div className="filter-tabs">
-            <button
-              className={skillFilter === 'all' ? 'active' : ''}
-              onClick={() => setSkillFilter('all')}
-            >
-              全部 {skillEntries.length > 0 && `(${skillEntries.length})`}
-            </button>
-            <button
-              className={skillFilter === 'installed' ? 'active' : ''}
-              onClick={() => setSkillFilter('installed')}
-            >
-              已安装 {installedCount > 0 && `(${installedCount})`}
-            </button>
-            <button
-              className={skillFilter === 'uninstalled' ? 'active' : ''}
-              onClick={() => setSkillFilter('uninstalled')}
-            >
-              未安装
-            </button>
-          </div>
-          {query.trim() !== '' && (
-            <span className="result-count">共 {filteredSkillEntries.length} 个结果 · skills.sh</span>
-          )}
+      {/* 过滤行：全部 / 已安装 / 未安装 + 结果计数（两页通用） */}
+      <div className="filter-row">
+        <div className="filter-tabs">
+          <button
+            className={filter === 'all' ? 'active' : ''}
+            onClick={() => setFilter('all')}
+          >
+            全部 {(isMcp ? mcpEntries.length : skillEntries.length) > 0 &&
+              `(${isMcp ? mcpEntries.length : skillEntries.length})`}
+          </button>
+          <button
+            className={filter === 'installed' ? 'active' : ''}
+            onClick={() => setFilter('installed')}
+          >
+            {isMcp ? '已配置' : '已安装'}
+            {(isMcp ? mcpInstalledCount : skillInstalledCount) > 0 &&
+              `(${isMcp ? mcpInstalledCount : skillInstalledCount})`}
+          </button>
+          <button
+            className={filter === 'uninstalled' ? 'active' : ''}
+            onClick={() => setFilter('uninstalled')}
+          >
+            {isMcp ? '未配置' : '未安装'}
+          </button>
         </div>
-      )}
+        {query.trim() !== '' && (
+          <span className="result-count">
+            共 {(isMcp ? filteredMcpEntries.length : filteredSkillEntries.length)} 个结果 ·{' '}
+            {isMcp ? 'Smithery' : 'skills.sh'}
+          </span>
+        )}
+      </div>
 
       {loading ? (
         <div className="loading">
@@ -328,7 +352,7 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
       ) : (
         <div className="market-grid">
           {isMcp &&
-            mcpEntries.map((e) => {
+            filteredMcpEntries.map((e) => {
               const configured = configuredSet.has(e.id);
               const st = installStates[e.id] ?? 'idle';
               return (
@@ -483,16 +507,26 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
               </h3>
               <p>
                 {skillFilter === 'installed' && query.trim() === ''
-                  ? '在下方或「全部」里挑一个安装，装完用 /技能名 调用'
+                  ? '在「全部」里挑一个安装，装完用 /技能名 调用'
                   : '换个关键词试试'}
               </p>
             </div>
           )}
-          {isMcp && mcpEntries.length === 0 && (
+          {isMcp && filteredMcpEntries.length === 0 && (
             <div className="empty-state">
               <span className="empty-icon">🔍</span>
-              <h3>没有匹配的扩展</h3>
-              <p>换个关键词试试</p>
+              <h3>
+                {mcpFilter === 'installed' && query.trim() === ''
+                  ? '还没有已配置的扩展'
+                  : mcpFilter === 'installed'
+                    ? '搜索结果中没有已配置的扩展'
+                    : '没有匹配的扩展'}
+              </h3>
+              <p>
+                {mcpFilter === 'installed' && query.trim() === ''
+                  ? '在「全部」里挑一个安装，装完新会话生效'
+                  : '换个关键词试试，在线搜索走 Smithery 生态'}
+              </p>
             </div>
           )}
         </div>

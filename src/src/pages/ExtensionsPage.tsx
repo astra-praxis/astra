@@ -66,6 +66,40 @@ interface DeleteTarget {
   id: string;
 }
 
+interface McpRuntimeStatus {
+  id: string;
+  status: 'stopped' | 'starting' | 'ready' | 'failed';
+  toolCount: number;
+  tools: string[];
+  error: string | null;
+  attempts: number;
+}
+
+interface AcpRuntimeStatus {
+  id: string;
+  status: 'stopped' | 'starting' | 'ready' | 'failed';
+  tool: string | null;
+  error: string | null;
+  attempts: number;
+}
+
+interface SessionRuntimeStatus {
+  sessionId: string;
+  mcp: McpRuntimeStatus[];
+  acp: AcpRuntimeStatus[];
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  ready: '运行中',
+  starting: '加载中',
+  failed: '加载失败',
+  stopped: '未加载',
+};
+
+function statusLabel(s: string): string {
+  return STATUS_LABEL[s] ?? s;
+}
+
 function kindLabel(kind: Kind): string {
   return kind === 'mcp' ? 'MCP' : 'ACP';
 }
@@ -77,6 +111,17 @@ export default function ExtensionsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [edit, setEdit] = useState<EditTarget | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
+  const [runtime, setRuntime] = useState<SessionRuntimeStatus[] | null>(null);
+
+  const refreshRuntime = useCallback(async () => {
+    try {
+      const r = await invoke<SessionRuntimeStatus[]>('extensions_runtime_status');
+      setRuntime(r);
+    } catch {
+      // 状态查询失败不阻塞配置管理（旧版本后端可能没有该命令）
+      setRuntime(null);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -92,7 +137,11 @@ export default function ExtensionsPage() {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void refreshRuntime();
+    // 会话扩展在建新会话时变化：停留页面时低频轮询，切回来时也能看到最新状态
+    const timer = setInterval(() => void refreshRuntime(), 5000);
+    return () => clearInterval(timer);
+  }, [refresh, refreshRuntime]);
 
   const toggleEnabled = async (kind: Kind, id: string, enabled: boolean) => {
     const key = `${kind}/${id}`;
@@ -253,6 +302,53 @@ export default function ExtensionsPage() {
             刷新
           </button>
         </div>
+      </div>
+
+      {/* 运行状态：配置里「启用」≠ 实际加载成功；这里反映当前活跃会话的真实状态 */}
+      <div className="section">
+        <div className="section-title">
+          运行状态
+          <span className="count">{runtime?.length ?? 0}</span>
+          <span className="runtime-hint">活跃会话中实际加载的扩展（5s 自动刷新）</span>
+        </div>
+        {runtime === null ? (
+          <div className="runtime-empty">状态不可用</div>
+        ) : runtime.length === 0 ? (
+          <div className="runtime-empty">
+            暂无活跃会话 —— 扩展在新建会话时加载，启动一个会话后这里会显示加载状态
+          </div>
+        ) : (
+          runtime.map((session) => (
+            <div key={session.sessionId} className="runtime-session">
+              <div className="runtime-session-id" title={session.sessionId}>
+                {session.sessionId}
+              </div>
+              {session.mcp.length === 0 && session.acp.length === 0 && (
+                <div className="runtime-empty">该会话未配置扩展</div>
+              )}
+              {session.mcp.map((m) => (
+                <div key={m.id} className="runtime-row">
+                  <span className="kind-badge mcp">MCP</span>
+                  <span className="runtime-name">{m.id}</span>
+                  <span className={`status-badge ${m.status}`}>{statusLabel(m.status)}</span>
+                  {m.toolCount > 0 && <span className="runtime-meta">{m.toolCount} 个工具</span>}
+                  {m.attempts > 1 && <span className="runtime-meta">重试 {m.attempts - 1} 次</span>}
+                  {m.error && <span className="runtime-error" title={m.error}>{m.error}</span>}
+                </div>
+              ))}
+              {session.acp.map((a) => (
+                <div key={a.id} className="runtime-row">
+                  <span className="kind-badge acp">ACP</span>
+                  <span className="runtime-name">{a.id}</span>
+                  <span className={`status-badge ${a.status}`}>{statusLabel(a.status)}</span>
+                  {a.tool && <span className="runtime-meta">{a.tool}</span>}
+                  {a.attempts > 1 && <span className="runtime-meta">重试 {a.attempts - 1} 次</span>}
+                  {a.error && <span className="runtime-error" title={a.error}>{a.error}</span>}
+                </div>
+              ))}
+            </div>
+          ))
+        )}
       </div>
 
       {error && (

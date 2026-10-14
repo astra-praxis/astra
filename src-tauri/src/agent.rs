@@ -148,6 +148,16 @@ pub struct AgentState {
     /// Project-level lifetime: dev servers survive session switches; killed
     /// on app exit (ProcessManager::drop → process-group teardown).
     pub(crate) processes: Arc<agent_core::shell_background::ProcessManager>,
+    /// 运行中的扩展 manager（每会话一份，attach_extensions 时登记）：
+    /// 保活让 ACP 崩溃降级 / 懒重连继续可用，并支撑运行状态查询。
+    pub(crate) extensions: Arc<tokio::sync::Mutex<HashMap<String, SessionExtensions>>>,
+}
+
+/// 一次会话装配产生的扩展 manager 句柄（Arc 保活）。
+#[derive(Default)]
+pub(crate) struct SessionExtensions {
+    pub mcp: Vec<std::sync::Arc<astra_mcp::McpManager>>,
+    pub acp: Vec<std::sync::Arc<astra_acp::AcpManager>>,
 }
 
 impl Default for AgentState {
@@ -162,6 +172,7 @@ impl Default for AgentState {
             persistence_errors: Arc::new(Mutex::new(HashMap::new())),
             session_files: tokio::sync::Mutex::new(std::collections::HashSet::new()),
             processes: Arc::new(agent_core::shell_background::ProcessManager::new()),
+            extensions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 }
@@ -313,6 +324,7 @@ fn build_registry(
 async fn attach_extensions(
     mut registry: ToolRegistry,
     config: &mut ThreadConfig,
+    handles: &mut SessionExtensions,
 ) -> Result<ToolRegistry, String> {
     let cfg = match agent_core::astra_config::load() {
         Ok(c) => c,
@@ -347,8 +359,10 @@ async fn attach_extensions(
                 dropped.server, dropped.tool, dropped.reason
             );
         }
-        // manager 由 rule_provider 持有保活；权限规则按发现结果逐工具生成，
-        // 未列出的默认 Confirm（MCP_SPEC §9.2），经 ThreadConfig 进入权限管线。
+        // manager 由 rule_provider + state.extensions 保活；权限规则按发现
+        // 结果逐工具生成，未列出的默认 Confirm（MCP_SPEC §9.2），经
+        // ThreadConfig 进入权限管线。
+        handles.mcp.push(std::sync::Arc::clone(&manager));
         let permissions: std::collections::HashMap<
             String,
             agent_core::astra_config::McpPermissions,
@@ -390,11 +404,92 @@ async fn attach_extensions(
             "[extensions] ACP: {} agent(s) 已注册（见上方失败日志，如有）",
             report.loaded.len()
         );
-        // manager 随作用域释放：adapter 持有连接，调用不受影响；
-        // 仅崩溃降级/懒重连不再可用（v1 简化）。
+        // manager 保活在 state.extensions：adapter 持有连接不影响调用，
+        // 保活额外让崩溃降级 / 懒重连 / 运行状态查询可用。
+        handles.acp.push(std::sync::Arc::new(manager));
     }
 
     Ok(registry)
+}
+
+// ===== 运行状态查询 =====
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRuntimeStatus {
+    pub id: String,
+    /// stopped | starting | ready | failed
+    pub status: String,
+    pub tool_count: usize,
+    pub tools: Vec<String>,
+    pub error: Option<String>,
+    pub attempts: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpRuntimeStatus {
+    pub id: String,
+    /// stopped | starting | ready | failed
+    pub status: String,
+    pub tool: Option<String>,
+    pub error: Option<String>,
+    pub attempts: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRuntimeStatus {
+    pub session_id: String,
+    pub mcp: Vec<McpRuntimeStatus>,
+    pub acp: Vec<AcpRuntimeStatus>,
+}
+
+/// MCP/ACP 运行状态（agent_start_run 装配时登记的 manager 快照）。
+/// `session_id = None` 返回所有活跃会话；会话存在但未配置扩展 → 空 vec。
+#[tauri::command]
+pub async fn extensions_runtime_status(
+    state: State<'_, AgentState>,
+    session_id: Option<String>,
+) -> Result<Vec<SessionRuntimeStatus>, String> {
+    let extensions = state.extensions.lock().await;
+    let mut out = Vec::new();
+    for (sid, ext) in extensions.iter() {
+        if session_id.as_ref().is_some_and(|s| s != sid) {
+            continue;
+        }
+        let mut mcp = Vec::new();
+        for manager in &ext.mcp {
+            for s in manager.snapshot().await {
+                mcp.push(McpRuntimeStatus {
+                    id: s.id,
+                    status: format!("{:?}", s.status).to_lowercase(),
+                    tool_count: s.tools.len(),
+                    tools: s.tools.into_iter().map(|t| t.remote).collect(),
+                    error: s.error,
+                    attempts: s.attempts,
+                });
+            }
+        }
+        let mut acp = Vec::new();
+        for manager in &ext.acp {
+            for s in manager.snapshot().await {
+                acp.push(AcpRuntimeStatus {
+                    id: s.id,
+                    status: format!("{:?}", s.status).to_lowercase(),
+                    tool: s.tool,
+                    error: s.error,
+                    attempts: s.attempts,
+                });
+            }
+        }
+        out.push(SessionRuntimeStatus {
+            session_id: sid.clone(),
+            mcp,
+            acp,
+        });
+    }
+    Ok(out)
 }
 
 fn default_system_prompt() -> String {
@@ -592,7 +687,14 @@ pub async fn agent_start_run(
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
             // ~/.astra/config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
             // registry；required 失败阻断启动，其余失败降级（工具不出现）。
-            registry = attach_extensions(registry, &mut config).await?;
+            // manager 句柄登记到 state.extensions：运行状态查询 + ACP 懒重连。
+            let mut ext = SessionExtensions::default();
+            registry = attach_extensions(registry, &mut config, &mut ext).await?;
+            state
+                .extensions
+                .lock()
+                .await
+                .insert(session_id.clone(), ext);
             threads
                 .load_or_create(config, backend, registry, bridge)
                 .await?;

@@ -116,6 +116,8 @@ pub async fn delete_agent_session(
         .open(&directory, std::sync::Arc::clone(&state.persistence_errors))
         .await?;
     threads.delete(&id).await?;
+    // 释放该会话登记的扩展 manager（MCP/ACP 子进程随 Arc 归零结束）。
+    state.extensions.lock().await.remove(&id);
     // A failed JSON write can be retried; never permit a delayed save to resurrect it.
     deleted.insert(id.clone());
     state

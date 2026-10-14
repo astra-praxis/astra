@@ -337,6 +337,98 @@
     font-family: var(--font-mono, monospace);
   }
 
+  // ===== 运行状态 =====
+  .runtime-hint {
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-left: 4px;
+  }
+
+  .runtime-empty {
+    padding: 12px 14px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    background: var(--bg-subtle);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+  }
+
+  .runtime-session {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+
+    .runtime-session-id {
+      font-size: 12px;
+      font-family: var(--font-mono, monospace);
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .runtime-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+    font-size: 12.5px;
+
+    .runtime-name {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .runtime-meta {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .runtime-error {
+      color: #b91c1c;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .status-badge {
+      padding: 1px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 99px;
+
+      &.ready {
+        color: #047857;
+        background: rgba(16, 185, 129, 0.14);
+      }
+
+      &.failed {
+        color: #b91c1c;
+        background: rgba(239, 68, 68, 0.12);
+      }
+
+      &.starting {
+        color: #b45309;
+        background: rgba(245, 158, 11, 0.14);
+      }
+
+      &.stopped {
+        color: var(--text-muted);
+        background: var(--bg-subtle);
+      }
+    }
+  }
+
   .btn-danger {
     display: inline-flex;
     align-items: center;

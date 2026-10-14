@@ -196,6 +196,7 @@ dependencies = [
  "astra-model",
  "astra-permission",
  "astra-skill",
+ "astra-task",
  "astra-tools",
  "async-trait",
  "futures",
@@ -282,10 +283,24 @@ dependencies = [
  "astra-error",
  "astra-events",
  "astra-model",
+ "astra-task",
  "async-trait",
  "serde",
  "serde_json",
  "sqlx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "astra-task"
+version = "1.0.0-rc.1"
+dependencies = [
+ "astra-error",
+ "astra-events",
+ "async-trait",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -299,6 +314,7 @@ dependencies = [
  "astra-model",
  "astra-permission",
  "astra-skill",
+ "astra-task",
  "async-trait",
  "futures",
  "glob",

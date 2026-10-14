@@ -148,6 +148,10 @@ pub struct AgentState {
     /// Project-level lifetime: dev servers survive session switches; killed
     /// on app exit (ProcessManager::drop → process-group teardown).
     pub(crate) processes: Arc<agent_core::shell_background::ProcessManager>,
+    /// 统一异步任务运行时（TASK_SPEC）：shell_background spawn 的进程经
+    /// adopt 收编进来，task_status/task_result/task_cancel 跨会话跟踪。
+    /// v1 仅内存态（无 store、无事件通道），Run 永不挂起（D1）。
+    pub(crate) tasks: Arc<agent_core::TaskManager>,
     /// 运行中的扩展 manager（每会话一份，attach_extensions 时登记）：
     /// 保活让 ACP 崩溃降级 / 懒重连继续可用，并支撑运行状态查询。
     pub(crate) extensions: Arc<tokio::sync::Mutex<HashMap<String, SessionExtensions>>>,
@@ -162,6 +166,7 @@ pub(crate) struct SessionExtensions {
 
 impl Default for AgentState {
     fn default() -> Self {
+        let processes = Arc::new(agent_core::shell_background::ProcessManager::new());
         Self {
             hub: Arc::new(PermissionHub::default()),
             questions: Arc::new(QuestionHub::default()),
@@ -171,8 +176,17 @@ impl Default for AgentState {
             )),
             persistence_errors: Arc::new(Mutex::new(HashMap::new())),
             session_files: tokio::sync::Mutex::new(std::collections::HashSet::new()),
-            processes: Arc::new(agent_core::shell_background::ProcessManager::new()),
             extensions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            processes: Arc::clone(&processes),
+            tasks: Arc::new(
+                agent_core::TaskManager::new(agent_core::task::DEFAULT_MAX_TASKS, None)
+                    .with_backend(Arc::new(agent_core::ShellTaskBackend::new(
+                        // root only serves direct backend.start (host path is
+                        // adoption via shell_background); temp dir is a safe stub.
+                        std::env::temp_dir(),
+                        processes,
+                    ))),
+            ),
         }
     }
 }
@@ -290,10 +304,12 @@ fn build_registry(
     question_bridge: Arc<dyn agent_core::UserQuestionBridge>,
     search_endpoint: Option<String>,
     processes: Arc<agent_core::shell_background::ProcessManager>,
+    tasks: Arc<agent_core::TaskManager>,
 ) -> ToolRegistry {
-    // 网络工具 + ask_user 不依赖项目根，纯聊天也可用
+    // 网络工具 + ask_user 不依赖项目根，纯聊天也可用；任务查询工具同全局
     let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search_endpoint)
         .register(agent_core::AskUserTool::new(question_bridge));
+    let reg = agent_core::task_tools::register(reg, tasks.clone());
     let reg = match skills_dir {
         Some(dir) => agent_core::skill_tools::register(reg, dir),
         None => reg,
@@ -305,7 +321,9 @@ fn build_registry(
             let reg = agent_core::shell_tool::register(reg, root);
             // Background task management (dev servers / watchers): manager is
             // host-owned and shared across sessions, so tasks outlive a chat.
-            let reg = agent_core::shell_background::register(reg, root, processes);
+            // Spawned processes are adopted into the unified task runtime
+            // (TASK_SPEC §六: same TaskManager as task_status/task_result).
+            let reg = agent_core::shell_background::register(reg, root, processes, Some(tasks));
             // fs_tools（Zed 移植）：搜索/编辑/移动类
             agent_core::fs_tools::register(reg, root)
         }
@@ -504,6 +522,7 @@ fn default_system_prompt() -> String {
      需要运行命令（pandoc/python/构建工具等）时用 shell_execute（在项目根目录执行，每次都请求用户确认）。\
      需要启动长驻进程（dev server / watch / 长任务）时用 shell_background 后台启动，\
      然后用 shell_status 增量查看输出（可从中发现监听端口和构建报错并自行修复），不再需要时用 shell_kill 停止。\
+     后台任务会自动纳入统一任务跟踪（返回统一的 task_id）：用 task_status 查询状态、task_result 获取结果、task_cancel 取消（会请求确认）。\
      需要查阅网页资料时用 fetch 抓取页面（返回 Markdown），需要实时信息时用 search_web 搜索后再 fetch 具体页面。\
      任务需要用户决定、确认或补充信息时用 ask_user 提问（问题会以卡片形式展示给用户）。\
      系统提示末尾列出了用户的技能库：任务与某技能相关时，先用 read_skill 读取该技能说明再严格按其执行；\
@@ -635,6 +654,11 @@ pub async fn agent_start_run(
             policy.confirm_tools.push("shell_background".into());
             policy.confirm_tools.push("shell_kill".into());
             policy.allowed_readonly.push("shell_status".into());
+            // 统一任务查询（TASK_SPEC D3）：status/result 只读 Allow，
+            // cancel 有副作用走 Confirm
+            policy.allowed_readonly.push("task_status".into());
+            policy.allowed_readonly.push("task_result".into());
+            policy.confirm_tools.push("task_cancel".into());
             // fetch 涉及外部网络访问，走确认弹窗（SSRF 门在工具内部始终生效）
             policy.confirm_tools.push("fetch".into());
             let mut system_prompt = req.system_prompt.unwrap_or_else(default_system_prompt);
@@ -683,6 +707,7 @@ pub async fn agent_start_run(
                 question_bridge,
                 settings_search_endpoint(&app),
                 Arc::clone(&state.processes),
+                Arc::clone(&state.tasks),
             );
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
             // ~/.astra/config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次

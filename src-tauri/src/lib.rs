@@ -1525,6 +1525,8 @@ pub fn run() {
             agent::agent_checkpoint_list,
             agent::agent_checkpoint_create,
             agent::agent_checkpoint_restore,
+            // Agent Artifacts（ARTIFACT_SPEC：产物元数据登记）
+            agent::agent_artifact_list,
             // Agent Sessions
             agent_sessions::list_agent_sessions,
             agent_sessions::save_agent_session,

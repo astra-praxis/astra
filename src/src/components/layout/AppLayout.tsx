@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Wrench,
   ScrollText,
+  Package,
   Settings,
   Activity,
   Square,
@@ -26,6 +27,7 @@ const menuItems = [
   { id: 'agent', label: 'Agent', path: '/agent', icon: Bot },
   { id: 'tools', label: '工具箱', path: '/tools', icon: Wrench },
   { id: 'logs', label: '日志', path: '/logs', icon: ScrollText },
+  { id: 'artifacts', label: '产物库', path: '/artifacts', icon: Package },
 ];
 
 export default function AppLayout() {

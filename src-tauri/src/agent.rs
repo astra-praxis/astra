@@ -467,6 +467,12 @@ pub async fn agent_start_run(
                 .or(Some(DEFAULT_AUTO_COMPACT_TOKENS))
                 .filter(|&t| t > 0);
             config.policy = policy;
+            // Artifact records share the threads sqlite file; a failure to
+            // open it keeps artifacts event-only (same degradation as before
+            // this wiring) instead of blocking the run.
+            if let Ok(artifacts) = threads.artifacts() {
+                config.artifact_registry = Some(artifacts);
+            }
             config.texts = std::sync::Arc::new(agent_core::TextPack::zh());
             config.thinking_enabled = req.thinking_enabled;
             config.thinking_effort = req.thinking_effort.clone();
@@ -743,6 +749,71 @@ pub fn agent_status(state: State<'_, AgentState>) -> AgentStatus {
             .unwrap_or_else(|e| e.into_inner())
             .clone(),
     }
+}
+
+// ===== Artifacts（Phase 4，ARTIFACT_SPEC：location-based 元数据登记）=====
+
+/// 前端可见的 artifact 记录。registry 只证明「写入时产物存在于 location」，
+/// 不保证文件现在仍在（spec §1：无内容快照/校验/回滚）。
+#[derive(Debug, Serialize)]
+pub struct AgentArtifactInfo {
+    pub id: String,
+    pub thread_id: String,
+    /// 逻辑身份，版本链锚点（v1 = location）
+    pub artifact_key: String,
+    pub kind: String,
+    /// 写入时刻的路径（相对项目根），不是存活声明
+    pub location: String,
+    pub preview: Option<String>,
+    pub metadata: Value,
+    pub version: u32,
+    pub previous_id: Option<String>,
+    pub created_at: u64,
+    pub status: String,
+}
+
+fn artifact_info(record: agent_core::artifact_registry::ArtifactRecord) -> AgentArtifactInfo {
+    AgentArtifactInfo {
+        id: record.id,
+        thread_id: record.thread_id,
+        artifact_key: record.artifact_key,
+        kind: serde_json::to_value(record.kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "generic".into()),
+        location: record.location,
+        preview: record.preview,
+        metadata: record.metadata,
+        version: record.version,
+        previous_id: record.previous_id,
+        created_at: record.created_at,
+        status: serde_json::to_value(record.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "ready".into()),
+    }
+}
+
+/// 列出一个会话的全部 artifact 记录（created_at 升序）。
+/// 版本链由前端按 artifact_key 自行分组（registry 无分页，spec §4）。
+#[tauri::command]
+pub async fn agent_artifact_list(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+) -> Result<Vec<AgentArtifactInfo>, String> {
+    let mut threads = state.threads.lock().await;
+    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    threads
+        .open(&directory, Arc::clone(&state.persistence_errors))
+        .await?;
+    let artifacts = threads.artifacts()?;
+    drop(threads);
+    let records = artifacts
+        .list(&session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(records.into_iter().map(artifact_info).collect())
 }
 
 // ===== Checkpoint（Phase 11.6，CHECKPOINT_SPEC §7/§8）=====

@@ -6,7 +6,8 @@ use std::{
 };
 
 use agent_core::{
-    astra_store_sqlite::{SqliteCheckpointStore, SqliteThreadStore},
+    artifact_registry::ArtifactRegistry,
+    astra_store_sqlite::{SqliteArtifactRegistry, SqliteCheckpointStore, SqliteThreadStore},
     ChatMessage, CheckpointStore, MessageRecord, ModelBackend, PermissionBridge, Thread,
     ThreadConfig, ThreadQuery, ThreadRecord, ThreadStore, ToolRegistry,
 };
@@ -74,6 +75,9 @@ pub struct AgentThreads {
     /// Checkpoint persistence shares the same sqlite file as `store`
     /// (CHECKPOINT_SPEC §9: separate trait, separate tables, no cascade).
     checkpoints: Option<Arc<dyn CheckpointStore>>,
+    /// Artifact registry shares the same sqlite file as `store`
+    /// (ARTIFACT_SPEC §1.3: same crate, separate tables, no cascade).
+    artifacts: Option<Arc<dyn ArtifactRegistry>>,
     pub threads: HashMap<String, Thread>,
     /// Terminal admission markers, including deletions whose cleanup must be retried.
     deleted: HashSet<String>,
@@ -103,12 +107,27 @@ impl AgentThreads {
                 .await
                 .map_err(|e| e.to_string())?;
             self.checkpoints = Some(Arc::new(checkpoints));
+            // Artifact records share the file too (ARTIFACT_SPEC §1.3).
+            // Fatal for artifact features only; threads/checkpoints above
+            // stay usable.
+            let artifacts = SqliteArtifactRegistry::open(&path)
+                .await
+                .map_err(|e| e.to_string())?;
+            self.artifacts = Some(agent_core::astra_store_sqlite::shared_artifact_registry(
+                artifacts,
+            ));
         }
         Ok(())
     }
 
     pub fn checkpoints(&self) -> Result<Arc<dyn CheckpointStore>, String> {
         self.checkpoints
+            .clone()
+            .ok_or_else(|| "Agent thread store is not open".into())
+    }
+
+    pub fn artifacts(&self) -> Result<Arc<dyn ArtifactRegistry>, String> {
+        self.artifacts
             .clone()
             .ok_or_else(|| "Agent thread store is not open".into())
     }

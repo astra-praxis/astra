@@ -6,6 +6,7 @@ import ToolsPage from './pages/ToolsPage';
 import DownloaderPage from './pages/DownloaderPage';
 import NmPage from './pages/NmPage';
 import LogsPage from './pages/LogsPage';
+import ArtifactsPage from './pages/ArtifactsPage';
 import ModelsPage from './pages/ModelsPage';
 import ModelDetailPage from './pages/ModelDetailPage';
 import ProvidersPage from './pages/ProvidersPage';
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/tools/downloader" element={<DownloaderPage />} />
           <Route path="/tools/nm" element={<NmPage />} />
           <Route path="/logs" element={<LogsPage />} />
+          <Route path="/artifacts" element={<ArtifactsPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/models/:id" element={<ModelDetailPage />} />
           <Route path="/providers" element={<ProvidersPage />} />

@@ -51,6 +51,7 @@ interface InstallResult {
 }
 
 type InstallState = 'idle' | 'installing' | 'installed' | 'error';
+type SkillFilter = 'all' | 'installed' | 'uninstalled';
 
 function formatInstalls(n: number): string {
   if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
@@ -82,6 +83,10 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
   const [installMessages, setInstallMessages] = useState<Record<string, string>>({});
   // skills.sh 远程条目描述懒加载缓存
   const [descMap, setDescMap] = useState<Record<string, string>>({});
+  // Skill 页过滤：全部 / 已安装 / 未安装
+  const [skillFilter, setSkillFilter] = useState<SkillFilter>('all');
+  // 在线搜索进行中（搜索反馈）
+  const [searching, setSearching] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -114,10 +119,11 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 搜索（Rust 侧空格分词 AND 匹配）
+  // 搜索（Rust 侧空格分词 AND 匹配；非空查询走 skills.sh 在线搜索）
   const searched = useMemo(() => {
     return async () => {
       try {
+        setSearching(true);
         if (kind === 'mcp') {
           setMcpEntries(
             await invoke<McpMarketEntry[]>('market_mcp_search', { query })
@@ -129,6 +135,8 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
         }
       } catch (e) {
         setError(`搜索失败: ${e}`);
+      } finally {
+        setSearching(false);
       }
     };
   }, [kind, query]);
@@ -204,6 +212,17 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
   const banners = RECO_BANNERS[kind];
   const isMcp = kind === 'mcp';
 
+  // Skill 过滤：已安装 = Rust 侧标记 或 本次会话刚装完
+  const skillInstalled = (e: SkillMarketEntry) =>
+    e.installed || installStates[e.id] === 'installed';
+  const installedCount = skillEntries.filter(skillInstalled).length;
+  const filteredSkillEntries =
+    skillFilter === 'installed'
+      ? skillEntries.filter(skillInstalled)
+      : skillFilter === 'uninstalled'
+        ? skillEntries.filter((e) => !skillInstalled(e))
+        : skillEntries;
+
   return (
     <div className={`market-page market-${kind}`}>
       <div className="page-header">
@@ -258,15 +277,48 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
         )}
       </div>
 
-      {/* 搜索框 */}
+      {/* 搜索框 + Skill 过滤 */}
       <div className="market-search">
         <Search size={16} strokeWidth={2.2} />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={isMcp ? '搜索扩展，如 浏览器 github' : '搜索技能，如 文档 前端'}
+          placeholder={
+            isMcp
+              ? '搜索扩展，如 浏览器 github'
+              : '搜索 skills.sh 生态，如 commit react 文档'
+          }
         />
+        {searching && <div className="searching-hint">搜索中…</div>}
       </div>
+
+      {!isMcp && (
+        <div className="filter-row">
+          <div className="filter-tabs">
+            <button
+              className={skillFilter === 'all' ? 'active' : ''}
+              onClick={() => setSkillFilter('all')}
+            >
+              全部 {skillEntries.length > 0 && `(${skillEntries.length})`}
+            </button>
+            <button
+              className={skillFilter === 'installed' ? 'active' : ''}
+              onClick={() => setSkillFilter('installed')}
+            >
+              已安装 {installedCount > 0 && `(${installedCount})`}
+            </button>
+            <button
+              className={skillFilter === 'uninstalled' ? 'active' : ''}
+              onClick={() => setSkillFilter('uninstalled')}
+            >
+              未安装
+            </button>
+          </div>
+          {query.trim() !== '' && (
+            <span className="result-count">共 {filteredSkillEntries.length} 个结果 · skills.sh</span>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div className="loading">
@@ -349,7 +401,7 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
             })}
 
           {!isMcp &&
-            skillEntries.map((e) => {
+            filteredSkillEntries.map((e) => {
               const st = installStates[e.id] ?? 'idle';
               const desc = e.description || descMap[e.id] || '';
               const installed = e.installed || st === 'installed';
@@ -419,11 +471,21 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
               );
             })}
 
-          {!isMcp && skillEntries.length === 0 && (
+          {!isMcp && filteredSkillEntries.length === 0 && (
             <div className="empty-state">
               <span className="empty-icon">🔍</span>
-              <h3>没有匹配的技能</h3>
-              <p>换个关键词试试</p>
+              <h3>
+                {skillFilter === 'installed' && query.trim() === ''
+                  ? '还没有已安装的技能'
+                  : skillFilter === 'installed'
+                    ? '搜索结果中没有已安装的技能'
+                    : '没有匹配的技能'}
+              </h3>
+              <p>
+                {skillFilter === 'installed' && query.trim() === ''
+                  ? '在下方或「全部」里挑一个安装，装完用 /技能名 调用'
+                  : '换个关键词试试'}
+              </p>
             </div>
           )}
           {isMcp && mcpEntries.length === 0 && (

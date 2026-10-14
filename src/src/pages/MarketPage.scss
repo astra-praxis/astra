@@ -149,6 +149,59 @@
         color: var(--text-muted);
       }
     }
+
+    .searching-hint {
+      flex-shrink: 0;
+      font-size: 12px;
+      color: var(--text-muted);
+      animation: market-pulse 1.2s ease-in-out infinite;
+    }
+  }
+
+  // 过滤行：全部 / 已安装 / 未安装 + 结果计数
+  .filter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: -8px 0 16px;
+
+    .filter-tabs {
+      display: inline-flex;
+      gap: 2px;
+      padding: 3px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-light);
+      border-radius: 9px;
+
+      button {
+        padding: 5px 14px;
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        background: transparent;
+        border: none;
+        border-radius: 7px;
+        cursor: pointer;
+        transition: all 0.15s;
+
+        &:hover {
+          color: var(--text-primary);
+        }
+
+        &.active {
+          color: var(--text-primary);
+          background: var(--bg-card);
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+      }
+    }
+
+    .result-count {
+      flex-shrink: 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
   }
 
   .loading {
@@ -453,5 +506,15 @@
 @keyframes market-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes market-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
   }
 }

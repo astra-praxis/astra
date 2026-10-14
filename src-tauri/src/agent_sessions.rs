@@ -118,6 +118,9 @@ pub async fn delete_agent_session(
     threads.delete(&id).await?;
     // 释放该会话登记的扩展 manager（MCP/ACP 子进程随 Arc 归零结束）。
     state.extensions.lock().await.remove(&id);
+    // 该会话的 MCP 任务连接随 manager 释放；后端路由表同步摘除，
+    // 在册任务下次 refresh 收敛 Failed（D7 有界失败）。
+    state.mcp_tasks.unregister_session(&id).await;
     // A failed JSON write can be retried; never permit a delayed save to resurrect it.
     deleted.insert(id.clone());
     state

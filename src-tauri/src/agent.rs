@@ -152,6 +152,9 @@ pub struct AgentState {
     /// adopt 收编进来，task_status/task_result/task_cancel 跨会话跟踪。
     /// v1 仅内存态（无 store、无事件通道），Run 永不挂起（D1）。
     pub(crate) tasks: Arc<agent_core::TaskManager>,
+    /// MCP 任务后端（TASK_SPEC D6 修订版）：MCP server 物化的任务经
+    /// adapter 收编进 tasks，路由回各会话的 McpManager 连接轮询。
+    pub(crate) mcp_tasks: Arc<astra_mcp::McpTaskBackend>,
     /// 运行中的扩展 manager（每会话一份，attach_extensions 时登记）：
     /// 保活让 ACP 崩溃降级 / 懒重连继续可用，并支撑运行状态查询。
     pub(crate) extensions: Arc<tokio::sync::Mutex<HashMap<String, SessionExtensions>>>,
@@ -167,6 +170,7 @@ pub(crate) struct SessionExtensions {
 impl Default for AgentState {
     fn default() -> Self {
         let processes = Arc::new(agent_core::shell_background::ProcessManager::new());
+        let mcp_tasks = Arc::new(astra_mcp::McpTaskBackend::new());
         Self {
             hub: Arc::new(PermissionHub::default()),
             questions: Arc::new(QuestionHub::default()),
@@ -180,6 +184,7 @@ impl Default for AgentState {
             processes: Arc::clone(&processes),
             tasks: Arc::new(
                 agent_core::TaskManager::new(agent_core::task::DEFAULT_MAX_TASKS, None)
+                    .with_backend(Arc::clone(&mcp_tasks) as Arc<dyn agent_core::TaskBackend>)
                     .with_backend(Arc::new(agent_core::ShellTaskBackend::new(
                         // root only serves direct backend.start (host path is
                         // adoption via shell_background); temp dir is a safe stub.
@@ -187,6 +192,7 @@ impl Default for AgentState {
                         processes,
                     ))),
             ),
+            mcp_tasks,
         }
     }
 }
@@ -343,6 +349,9 @@ async fn attach_extensions(
     mut registry: ToolRegistry,
     config: &mut ThreadConfig,
     handles: &mut SessionExtensions,
+    session_id: &str,
+    mcp_tasks: Arc<astra_mcp::McpTaskBackend>,
+    tasks: Arc<agent_core::TaskManager>,
 ) -> Result<ToolRegistry, String> {
     let cfg = match agent_core::astra_config::load() {
         Ok(c) => c,
@@ -354,9 +363,14 @@ async fn attach_extensions(
 
     // ===== MCP =====
     if cfg.mcp.servers.values().any(|s| s.enabled) {
+        // D6 修订版：接线统一任务收编——server 物化的任务（resultType:
+        // "task"）经 adapter adopt 进全局 TaskManager，模型拿统一 task_id
+        // 用 task_status/task_result 轮询；后端按 session 路由回本 manager。
         let manager = astra_mcp::McpManager::new(cfg.mcp.to_manager_configs())
-            .map_err(|e| format!("MCP 配置无效: {e}"))?;
+            .map_err(|e| format!("MCP 配置无效: {e}"))?
+            .with_task_tracking(session_id.to_string(), tasks);
         let manager = std::sync::Arc::new(manager);
+        mcp_tasks.register_session(session_id, &manager).await;
         let (reg, report) = manager.load_and_register(registry).await;
         registry = reg;
         for failed in &report.failed {
@@ -714,7 +728,15 @@ pub async fn agent_start_run(
             // registry；required 失败阻断启动，其余失败降级（工具不出现）。
             // manager 句柄登记到 state.extensions：运行状态查询 + ACP 懒重连。
             let mut ext = SessionExtensions::default();
-            registry = attach_extensions(registry, &mut config, &mut ext).await?;
+            registry = attach_extensions(
+                registry,
+                &mut config,
+                &mut ext,
+                &session_id,
+                Arc::clone(&state.mcp_tasks),
+                Arc::clone(&state.tasks),
+            )
+            .await?;
             state
                 .extensions
                 .lock()

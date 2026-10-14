@@ -254,6 +254,43 @@
     font-size: 13px;
     line-height: 1.55;
     color: var(--text-secondary);
+
+    &.is-loading {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: auto;
+
+    .btn-install,
+    .install-done {
+      margin-top: 0;
+    }
+  }
+
+  .btn-page {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-subtle);
+    }
   }
 
   .card-tags {

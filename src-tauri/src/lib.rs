@@ -1555,6 +1555,7 @@ pub fn run() {
             market::market_mcp_search,
             market::market_mcp_install,
             market::market_skill_search,
+            market::market_skill_detail,
             market::market_skill_install,
             market::market_status,
             // Dev Mode

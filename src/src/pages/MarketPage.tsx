@@ -4,7 +4,8 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Search, Download, Check, Star, RefreshCw, X } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { Search, Download, Check, Star, RefreshCw, X, ExternalLink } from 'lucide-react';
 import './MarketPage.scss';
 
 interface McpMarketEntry {
@@ -28,13 +29,14 @@ interface SkillMarketEntry {
   id: string;
   name: string;
   description: string;
-  tags: string[];
+  installs: number;
+  source: string;
+  skillId: string;
+  pageUrl: string;
   official: boolean;
   recommended: boolean;
   recommendReason: string;
-  repo: string;
-  subpath: string;
-  installName: string;
+  installed: boolean;
 }
 
 interface MarketStatus {
@@ -49,6 +51,12 @@ interface InstallResult {
 }
 
 type InstallState = 'idle' | 'installing' | 'installed' | 'error';
+
+function formatInstalls(n: number): string {
+  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
 
 const RECO_BANNERS = {
   mcp: [
@@ -72,6 +80,8 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
   const [error, setError] = useState('');
   const [installStates, setInstallStates] = useState<Record<string, InstallState>>({});
   const [installMessages, setInstallMessages] = useState<Record<string, string>>({});
+  // skills.sh 远程条目描述懒加载缓存
+  const [descMap, setDescMap] = useState<Record<string, string>>({});
 
   async function refresh() {
     setLoading(true);
@@ -128,6 +138,31 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
     return () => clearTimeout(t);
   }, [searched]);
 
+  // 远程条目描述懒加载：批量拉 SKILL.md frontmatter（失败静默，不占卡片）
+  useEffect(() => {
+    if (kind !== 'skill') return;
+    const missing = skillEntries.filter((e) => !e.description && !descMap[e.id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const results = await Promise.allSettled(
+        missing.map((e) => invoke<string>('market_skill_detail', { id: e.id }))
+      );
+      if (cancelled) return;
+      setDescMap((prev) => {
+        const next = { ...prev };
+        missing.forEach((e, i) => {
+          const r = results[i];
+          if (r.status === 'fulfilled' && r.value) next[e.id] = r.value;
+        });
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [skillEntries, kind, descMap]);
+
   async function doInstallMcp(entry: McpMarketEntry) {
     setInstallStates((p) => ({ ...p, [entry.id]: 'installing' }));
     setInstallMessages((p) => ({ ...p, [entry.id]: '' }));
@@ -149,6 +184,16 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
       const r = await invoke<InstallResult>('market_skill_install', { id: entry.id });
       setInstallStates((p) => ({ ...p, [entry.id]: r.ok ? 'installed' : 'error' }));
       setInstallMessages((p) => ({ ...p, [entry.id]: r.message }));
+      if (r.ok) {
+        // 重新搜索以刷新 installed 标记
+        try {
+          setSkillEntries(
+            await invoke<SkillMarketEntry[]>('market_skill_search', { query })
+          );
+        } catch {
+          /* 刷新失败不影响安装结果展示 */
+        }
+      }
     } catch (e) {
       setInstallStates((p) => ({ ...p, [entry.id]: 'error' }));
       setInstallMessages((p) => ({ ...p, [entry.id]: String(e) }));
@@ -306,20 +351,23 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
           {!isMcp &&
             skillEntries.map((e) => {
               const st = installStates[e.id] ?? 'idle';
+              const desc = e.description || descMap[e.id] || '';
+              const installed = e.installed || st === 'installed';
               return (
                 <div key={e.id} className={`market-card${e.recommended ? ' recommended' : ''}`}>
                   <div className="card-head">
-                    <h3 className="card-name">{e.name}</h3>
+                    <h3 className="card-name">/{e.name}</h3>
                     {e.recommended && <span className="badge-reco">推荐</span>}
                     {e.official && <span className="badge-official">官方</span>}
                   </div>
-                  <p className="card-desc">{e.description}</p>
+                  <p className={`card-desc${desc ? '' : ' is-loading'}`}>
+                    {desc || '描述加载中…'}
+                  </p>
                   <div className="card-tags">
-                    {e.tags.map((t) => (
-                      <span key={t} className="tag">
-                        {t}
-                      </span>
-                    ))}
+                    <span className="tag" title={`安装量 ${e.installs}`}>
+                      ⬇ {formatInstalls(e.installs)}
+                    </span>
+                    <span className="tag">{e.source}</span>
                   </div>
                   {e.recommended && (
                     <div className="reco-reason" title={e.recommendReason}>
@@ -327,32 +375,41 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                     </div>
                   )}
                   <div className="card-meta">
-                    <code className="cmd" title={`${e.repo} · ${e.subpath}`}>
-                      /{e.installName}
+                    <code className="cmd" title={`安装后用 /${e.skillId} 调用`}>
+                      /{e.skillId}
                     </code>
                   </div>
-                  <button
-                    className={`btn-install${st === 'error' ? ' has-error' : ''}`}
-                    disabled={st === 'installing'}
-                    onClick={() => void doInstallSkill(e)}
-                  >
-                    {st === 'installing' ? (
-                      <>
-                        <div className="spinner-small" />
-                        安装中...
-                      </>
-                    ) : st === 'installed' ? (
-                      <>
-                        <Check size={14} strokeWidth={2.5} />
-                        已安装
-                      </>
+                  <div className="card-footer">
+                    {installed ? (
+                      <div className="install-done">✓ 已安装</div>
                     ) : (
-                      <>
-                        <Download size={14} strokeWidth={2.5} />
-                        安装
-                      </>
+                      <button
+                        className={`btn-install${st === 'error' ? ' has-error' : ''}`}
+                        disabled={st === 'installing'}
+                        onClick={() => void doInstallSkill(e)}
+                      >
+                        {st === 'installing' ? (
+                          <>
+                            <div className="spinner-small" />
+                            安装中...
+                          </>
+                        ) : (
+                          <>
+                            <Download size={14} strokeWidth={2.5} />
+                            安装
+                          </>
+                        )}
+                      </button>
                     )}
-                  </button>
+                    <button
+                      className="btn-page"
+                      onClick={() => void openUrl(e.pageUrl)}
+                      title="在 skills.sh 查看详情"
+                    >
+                      <ExternalLink size={13} strokeWidth={2} />
+                      详情页
+                    </button>
+                  </div>
                   {installMessages[e.id] && st !== 'installing' && (
                     <div className={`install-msg${st === 'error' ? ' is-error' : ''}`}>
                       {installMessages[e.id]}

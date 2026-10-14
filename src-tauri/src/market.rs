@@ -1,16 +1,19 @@
 //! 扩展市场（MCP / Skill）：
 //!
-//! - 内置精选目录（curated catalog），前端按关键词过滤搜索；
-//!   不做网络目录抓取（目录随版本内置，来源标注清楚）
-//! - MCP 安装 = 下载预热（npm install -g）+ 把 [mcp.servers.<id>] /
+//! - MCP：内置精选目录（curated catalog，含 ACP agent），前端按关键词过滤搜索；
+//!   安装 = 下载预热（npm install -g）+ 把 [mcp.servers.<id>] /
 //!   [acp.agents.<id>] 段合并写入 ~/.astra/config.toml
 //!   （MCP_SPEC §11 / ACP_SPEC §11 冻结 schema；文本级合并，段已存在则跳过）
-//! - Skill 安装 = git clone --depth 1 到临时目录，拷贝子目录进应用技能库
-//!   （~/.config/astra/skills/<name>，与 user_skills / Agent read_skill 打通）
+//! - Skill：接入 skills.sh 开放生态在线搜索（Zed find-skills 同源）；
+//!   空查询返回精选目录（anthropics/skills，带中文说明与推荐位），
+//!   非空查询走 https://skills.sh/api/search 实时搜索，描述懒加载
+//!   （从 GitHub raw SKILL.md frontmatter 解析）；
+//!   安装 = git clone --depth 1 → 定位技能目录 → 拷进应用技能库
+//!   （~/.config/astra/skills/<skill_id>，与 user_skills / Agent read_skill 打通）
 //!
-//! 推荐：静态推荐位（recommended + reason），排序置顶；不做评分系统。
+//! 推荐：精选位静态推荐（recommended + reason）；远程结果按安装量排序。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 // ===== 数据模型 =====
@@ -39,21 +42,28 @@ pub struct McpMarketEntry {
     pub requires_env: Vec<String>,
 }
 
+/// Skill 市场条目：精选目录与 skills.sh 远程结果共用一套模型
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillMarketEntry {
+    /// 唯一标识：精选 = "<skill_id>"；远程 = skills.sh id "<owner>/<repo>/<skill>"
     pub id: String,
     pub name: String,
+    /// 描述（远程条目由前端懒加载，初始为空）
     pub description: String,
-    pub tags: Vec<String>,
+    /// skills.sh 生态累计安装量（精选为 0）
+    pub installs: u64,
+    /// GitHub 源 "<owner>/<repo>"
+    pub source: String,
+    /// 技能名（仓库内目录名 = 安装后的 /调用名）
+    pub skill_id: String,
+    /// skills.sh 详情页（精选页也在线上）
+    pub page_url: String,
     pub official: bool,
     pub recommended: bool,
     pub recommend_reason: String,
-    pub repo: String,
-    /// 仓库内技能目录相对路径
-    pub subpath: String,
-    /// 安装后的技能目录名（= /调用名）
-    pub install_name: String,
+    /// 已存在于本地技能库
+    pub installed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -213,8 +223,32 @@ fn mcp_catalog() -> Vec<McpMarketEntry> {
     ]
 }
 
+const CURATED_SKILL_SOURCE: &str = "anthropics/skills";
+
+/// 认定“官方”徽标的 owner 白名单（小写比较）
+const OFFICIAL_OWNERS: &[&str] = &[
+    "anthropics",
+    "vercel-labs",
+    "vercel",
+    "github",
+    "microsoft",
+    "google",
+    "google-labs",
+];
+
+fn is_official_source(source: &str) -> bool {
+    source
+        .split('/')
+        .next()
+        .map(|owner| OFFICIAL_OWNERS.contains(&owner.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn curated_skill_url(skill_id: &str) -> String {
+    format!("https://skills.sh/{CURATED_SKILL_SOURCE}/{skill_id}")
+}
+
 fn skill_catalog() -> Vec<SkillMarketEntry> {
-    let repo = "https://github.com/anthropics/skills".to_string();
     vec![
         SkillMarketEntry {
             id: "docx".into(),
@@ -222,110 +256,119 @@ fn skill_catalog() -> Vec<SkillMarketEntry> {
             description:
                 "创建、编辑、分析 Word 文档（跟踪修订、保留格式），配合 build_docx 交付正式文稿"
                     .into(),
-            tags: vec!["文档".into(), "office".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "docx".into(),
+            page_url: curated_skill_url("docx"),
             official: true,
             recommended: true,
             recommend_reason: "Anthropic 官方技能，与内置 build_docx 形成完整交付链路".into(),
-            repo: repo.clone(),
-            subpath: "skills/docx".into(),
-            install_name: "docx".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "pptx".into(),
             name: "pptx · PPT 演示文稿".into(),
             description: "创建、编辑、分析 PowerPoint；从大纲到成品幻灯片".into(),
-            tags: vec!["文档".into(), "office".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "pptx".into(),
+            page_url: curated_skill_url("pptx"),
             official: true,
             recommended: false,
             recommend_reason: String::new(),
-            repo: repo.clone(),
-            subpath: "skills/pptx".into(),
-            install_name: "pptx".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "xlsx".into(),
             name: "xlsx · Excel 表格".into(),
             description: "创建、编辑、分析带公式/图表的电子表格".into(),
-            tags: vec!["文档".into(), "office".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "xlsx".into(),
+            page_url: curated_skill_url("xlsx"),
             official: true,
             recommended: false,
             recommend_reason: String::new(),
-            repo: repo.clone(),
-            subpath: "skills/xlsx".into(),
-            install_name: "xlsx".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "pdf".into(),
             name: "pdf · PDF 处理".into(),
             description: "PDF 表单填写、文本/图片提取、拆分合并".into(),
-            tags: vec!["文档".into(), "pdf".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "pdf".into(),
+            page_url: curated_skill_url("pdf"),
             official: true,
             recommended: false,
             recommend_reason: String::new(),
-            repo: repo.clone(),
-            subpath: "skills/pdf".into(),
-            install_name: "pdf".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "frontend-design".into(),
             name: "frontend-design · 前端设计".into(),
             description: "提升前端产出的设计审美：排版、配色、组件质感，避免模板化审美".into(),
-            tags: vec!["前端".into(), "设计".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "frontend-design".into(),
+            page_url: curated_skill_url("frontend-design"),
             official: true,
             recommended: true,
             recommend_reason: "让 Agent 写页面质量明显提升的通用技能，推荐前端任务常备".into(),
-            repo: repo.clone(),
-            subpath: "skills/frontend-design".into(),
-            install_name: "frontend-design".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "webapp-testing".into(),
             name: "webapp-testing · Web 应用测试".into(),
             description: "用 Playwright 驱动真实浏览器做端到端验证与调试".into(),
-            tags: vec!["测试".into(), "浏览器".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "webapp-testing".into(),
+            page_url: curated_skill_url("webapp-testing"),
             official: true,
             recommended: false,
             recommend_reason: String::new(),
-            repo: repo.clone(),
-            subpath: "skills/webapp-testing".into(),
-            install_name: "webapp-testing".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "mcp-builder".into(),
             name: "mcp-builder · MCP 开发指南".into(),
             description: "指导创建高质量 MCP server：schema 设计、评测、最佳实践".into(),
-            tags: vec!["开发".into(), "mcp".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "mcp-builder".into(),
+            page_url: curated_skill_url("mcp-builder"),
             official: true,
             recommended: false,
             recommend_reason: String::new(),
-            repo: repo.clone(),
-            subpath: "skills/mcp-builder".into(),
-            install_name: "mcp-builder".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "skill-creator".into(),
             name: "skill-creator · 技能创作".into(),
             description: "指导创建自定义技能：结构、描述写法、打包规范（配合「我的 Skills」）"
                 .into(),
-            tags: vec!["技能".into(), "开发".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "skill-creator".into(),
+            page_url: curated_skill_url("skill-creator"),
             official: true,
             recommended: false,
             recommend_reason: String::new(),
-            repo: repo.clone(),
-            subpath: "skills/skill-creator".into(),
-            install_name: "skill-creator".into(),
+            installed: false,
         },
         SkillMarketEntry {
             id: "canvas-design".into(),
             name: "canvas-design · 视觉设计".into(),
             description: "海报/视觉设计的专业设计原则：构图、色彩、字体层级".into(),
-            tags: vec!["设计".into(), "视觉".into()],
+            installs: 0,
+            source: CURATED_SKILL_SOURCE.into(),
+            skill_id: "canvas-design".into(),
+            page_url: curated_skill_url("canvas-design"),
             official: true,
             recommended: false,
             recommend_reason: String::new(),
-            repo: repo.clone(),
-            subpath: "skills/canvas-design".into(),
-            install_name: "canvas-design".into(),
+            installed: false,
         },
     ]
 }
@@ -346,8 +389,209 @@ fn mcp_sort(a: &McpMarketEntry, b: &McpMarketEntry) -> std::cmp::Ordering {
     b.recommended.cmp(&a.recommended).then(a.name.cmp(&b.name))
 }
 
+// ===== Skill 在线搜索（skills.sh 开放生态，Zed find-skills 同源） =====
+
+const SKILLS_SH_API: &str = "https://skills.sh/api/search";
+
+#[derive(Debug, Deserialize)]
+struct SkillsShResponse {
+    skills: Vec<SkillsShItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillsShItem {
+    id: String,
+    source: String,
+    skill_id: String,
+    name: String,
+    installs: u64,
+}
+
+/// 解析技能标识：
+/// - 精选目录："docx" → ("anthropics/skills", "docx")
+/// - skills.sh 生态："<owner>/<repo>/<skill>" → ("<owner>/<repo>", "<skill>")
+fn parse_skill_id(id: &str) -> Result<(String, String), String> {
+    if id.contains('/') {
+        let parts: Vec<&str> = id.split('/').collect();
+        if parts.len() < 3 {
+            return Err(format!("无效的技能标识: {id}（应为 owner/repo/skill）"));
+        }
+        Ok((
+            parts[..parts.len() - 1].join("/"),
+            parts[parts.len() - 1].to_string(),
+        ))
+    } else {
+        Ok((CURATED_SKILL_SOURCE.to_string(), id.to_string()))
+    }
+}
+
+/// 已安装到本地技能库的技能名（目录存在且含 SKILL.md）
+fn installed_skill_ids() -> Vec<String> {
+    let lib = skills_lib_dir().unwrap_or_default();
+    std::fs::read_dir(&lib)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.path().join("SKILL.md").is_file())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 解析 SKILL.md YAML frontmatter 中的 description（支持单行与缩进续行）
+fn parse_frontmatter_description(md: &str) -> Option<String> {
+    let rest = md.strip_prefix("---")?;
+    let end = rest.find("\n---")?;
+    let fm = &rest[..end];
+    let mut lines: Vec<String> = vec![];
+    let mut capturing = false;
+    for line in fm.lines() {
+        if line.starts_with("description:") {
+            capturing = true;
+            let inline = line["description:".len()..]
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'');
+            if !inline.is_empty() && inline != "|" && inline != ">" {
+                lines.push(inline.to_string());
+                break;
+            }
+        } else if capturing {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                lines.push(line.trim().to_string());
+            } else {
+                break;
+            }
+        }
+    }
+    let joined = lines.join(" ");
+    if joined.is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
+}
+
+#[tauri::command]
+pub async fn market_skill_search(query: Option<String>) -> Result<Vec<SkillMarketEntry>, String> {
+    let q = query.unwrap_or_default();
+    let installed = installed_skill_ids();
+
+    // 空查询 → 精选目录（含中文说明与推荐位）
+    if q.trim().is_empty() {
+        let mut list = skill_catalog();
+        for e in &mut list {
+            e.installed = installed.contains(&e.skill_id);
+        }
+        list.sort_by(skill_sort);
+        return Ok(list);
+    }
+
+    // 非空查询 → skills.sh 实时搜索，按安装量排序
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
+    let resp: SkillsShResponse = client
+        .get(SKILLS_SH_API)
+        .query(&[("q", q.trim()), ("limit", "24")])
+        .send()
+        .await
+        .map_err(|e| format!("skills.sh 搜索失败: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("解析 skills.sh 响应失败: {e}"))?;
+
+    let mut list: Vec<SkillMarketEntry> = resp
+        .skills
+        .into_iter()
+        .map(|item| SkillMarketEntry {
+            page_url: format!("https://skills.sh/{}", item.id),
+            official: is_official_source(&item.source),
+            description: String::new(),
+            recommended: false,
+            recommend_reason: String::new(),
+            installed: installed.contains(&item.skill_id),
+            id: item.id,
+            name: item.name,
+            installs: item.installs,
+            source: item.source,
+            skill_id: item.skill_id,
+        })
+        .collect();
+    list.sort_by(skill_sort);
+    Ok(list)
+}
+
+/// 懒加载技能描述：优先从 GitHub raw 的 SKILL.md frontmatter 解析（main/master ×
+/// skills/<skill>/<skill> 四种路径），raw 不可达时回退 GitHub contents API
+/// （base64）。找不到返回空串。
+#[tauri::command]
+pub async fn market_skill_detail(id: String) -> Result<String, String> {
+    let (source, skill_id) = parse_skill_id(&id)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
+    for branch in ["main", "master"] {
+        for layout in [format!("skills/{skill_id}"), skill_id.clone()] {
+            let url =
+                format!("https://raw.githubusercontent.com/{source}/{branch}/{layout}/SKILL.md");
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(md) = resp.text().await {
+                        if let Some(desc) = parse_frontmatter_description(&md) {
+                            return Ok(desc);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // raw 被墙/超时的回退：GitHub contents API（返回 base64）
+    for layout in [format!("skills/{skill_id}"), skill_id.clone()] {
+        let url = format!("https://api.github.com/repos/{source}/contents/{layout}/SKILL.md");
+        if let Ok(resp) = client
+            .get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "astra-market")
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                if let Ok(item) = resp.json::<GithubContentItem>().await {
+                    if item.encoding == "base64" {
+                        use base64::Engine;
+                        let clean: String = item
+                            .content
+                            .chars()
+                            .filter(|c| !c.is_whitespace())
+                            .collect();
+                        if let Ok(md) = base64::engine::general_purpose::STANDARD.decode(&clean) {
+                            let md = String::from_utf8_lossy(&md);
+                            if let Some(desc) = parse_frontmatter_description(&md) {
+                                return Ok(desc);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(String::new())
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubContentItem {
+    content: String,
+    encoding: String,
+}
+
 fn skill_sort(a: &SkillMarketEntry, b: &SkillMarketEntry) -> std::cmp::Ordering {
-    b.recommended.cmp(&a.recommended).then(a.name.cmp(&b.name))
+    b.recommended
+        .cmp(&a.recommended)
+        .then(b.installs.cmp(&a.installs))
+        .then(a.name.cmp(&b.name))
 }
 
 #[tauri::command]
@@ -363,22 +607,6 @@ pub fn market_mcp_search(query: Option<String>) -> Vec<McpMarketEntry> {
         })
         .collect();
     list.sort_by(mcp_sort);
-    list
-}
-
-#[tauri::command]
-pub fn market_skill_search(query: Option<String>) -> Vec<SkillMarketEntry> {
-    let q = query.unwrap_or_default();
-    let mut list: Vec<SkillMarketEntry> = skill_catalog()
-        .into_iter()
-        .filter(|e| {
-            matches(
-                &q,
-                &[e.name.clone(), e.description.clone(), e.tags.join(" ")],
-            )
-        })
-        .collect();
-    list.sort_by(skill_sort);
     list
 }
 
@@ -571,13 +799,34 @@ fn skills_lib_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// 在克隆的仓库里定位技能目录（生态布局不固定，按常见路径 + 浅层搜索）
+fn find_skill_dir(repo_root: &Path, skill_id: &str) -> Option<PathBuf> {
+    for dir in [
+        repo_root.join("skills").join(skill_id),
+        repo_root.join(skill_id),
+    ] {
+        if dir.join("SKILL.md").is_file() {
+            return Some(dir);
+        }
+    }
+    // 浅层搜一层子目录：<dir>/<skill_id>/SKILL.md
+    if let Ok(rd) = std::fs::read_dir(repo_root) {
+        for entry in rd.filter_map(|e| e.ok()) {
+            let cand = entry.path().join(skill_id);
+            if cand.join("SKILL.md").is_file() {
+                return Some(cand);
+            }
+        }
+    }
+    // 单技能仓库：SKILL.md 在仓库根
+    if repo_root.join("SKILL.md").is_file() {
+        return Some(repo_root.to_path_buf());
+    }
+    None
+}
+
 #[tauri::command]
 pub async fn market_skill_install(id: String) -> Result<InstallResult, String> {
-    let entry = skill_catalog()
-        .into_iter()
-        .find(|e| e.id == id)
-        .ok_or_else(|| format!("未知技能: {id}"))?;
-
     if which::which("git").is_err() {
         return Ok(InstallResult {
             ok: false,
@@ -585,20 +834,28 @@ pub async fn market_skill_install(id: String) -> Result<InstallResult, String> {
         });
     }
 
+    let (source, skill_id) = parse_skill_id(&id)?;
     let lib = skills_lib_dir()?;
-    let target = lib.join(&entry.install_name);
-    if target.exists() {
+    let target = lib.join(&skill_id);
+    if target.join("SKILL.md").is_file() {
         return Ok(InstallResult {
             ok: true,
-            message: format!("技能 '{}' 已存在于技能库，无需重复安装", entry.install_name),
+            message: format!("技能 '{skill_id}' 已在技能库中，无需重复安装"),
         });
     }
 
-    // clone --depth 1 到临时目录，再拷贝子目录（skill 可能是仓库的子目录）
-    let tmp = std::env::temp_dir().join(format!("astra-skill-{}", std::process::id()));
+    let repo_url = format!("https://github.com/{source}");
+    let tmp = std::env::temp_dir().join(format!(
+        "astra-skill-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    ));
     let _ = std::fs::remove_dir_all(&tmp);
     let output = tokio::process::Command::new("git")
-        .args(["clone", "--depth", "1", &entry.repo])
+        .args(["clone", "--depth", "1", &repo_url])
         .arg(&tmp)
         .output()
         .await
@@ -608,7 +865,7 @@ pub async fn market_skill_install(id: String) -> Result<InstallResult, String> {
         return Ok(InstallResult {
             ok: false,
             message: format!(
-                "克隆仓库失败: {}",
+                "克隆仓库 {repo_url} 失败: {}",
                 String::from_utf8_lossy(&output.stderr)
                     .lines()
                     .next()
@@ -617,27 +874,20 @@ pub async fn market_skill_install(id: String) -> Result<InstallResult, String> {
         });
     }
 
-    let source = tmp.join(&entry.subpath);
-    if !source.is_dir() || !source.join("SKILL.md").is_file() {
+    let Some(skill_dir) = find_skill_dir(&tmp, &skill_id) else {
         let _ = std::fs::remove_dir_all(&tmp);
         return Ok(InstallResult {
             ok: false,
-            message: format!(
-                "仓库中未找到技能目录 {}（上游目录结构可能已调整）",
-                entry.subpath
-            ),
+            message: format!("仓库 {source} 中未找到技能目录 '{skill_id}'（含 SKILL.md）"),
         });
-    }
+    };
 
-    copy_dir_recursive(&source, &target)?;
+    copy_dir_recursive(&skill_dir, &target)?;
     let _ = std::fs::remove_dir_all(&tmp);
 
     Ok(InstallResult {
         ok: true,
-        message: format!(
-            "技能 '{}' 已安装到技能库，Agent 中用 /{} 直接调用",
-            entry.install_name, entry.install_name
-        ),
+        message: format!("技能 '{skill_id}' 已安装到技能库，Agent 中用 /{skill_id} 直接调用"),
     })
 }
 
@@ -672,6 +922,53 @@ mod tests {
     #[test]
     fn test_catalog_nonempty() {
         assert!(mcp_catalog().len() >= 6);
-        assert!(skill_catalog().len() >= 6);
+        let skills = skill_catalog();
+        assert!(skills.len() >= 6);
+        // 精选目录字段完整性
+        for e in &skills {
+            assert_eq!(e.source, CURATED_SKILL_SOURCE);
+            assert_eq!(e.id, e.skill_id);
+            assert!(e.page_url.starts_with("https://skills.sh/"));
+        }
+    }
+
+    #[test]
+    fn test_parse_skill_id() {
+        // 精选：纯技能名
+        assert_eq!(
+            parse_skill_id("docx").unwrap(),
+            ("anthropics/skills".to_string(), "docx".to_string())
+        );
+        // 远程：owner/repo/skill
+        assert_eq!(
+            parse_skill_id("getsentry/skills/commit").unwrap(),
+            ("getsentry/skills".to_string(), "commit".to_string())
+        );
+        // 残缺标识报错
+        assert!(parse_skill_id("a/b").is_err());
+    }
+
+    #[test]
+    fn test_frontmatter_description() {
+        let md = "---\nname: commit\ndescription: Create clean git commits.\n---\n\n# body";
+        assert_eq!(
+            parse_frontmatter_description(md).as_deref(),
+            Some("Create clean git commits.")
+        );
+        // 多行（YAML 块标量）
+        let md2 = "---\ndescription: |\n  line one\n  line two\nname: x\n---\nbody";
+        assert_eq!(
+            parse_frontmatter_description(md2).as_deref(),
+            Some("line one line two")
+        );
+        // 无 frontmatter
+        assert!(parse_frontmatter_description("no frontmatter").is_none());
+    }
+
+    #[test]
+    fn test_official_source() {
+        assert!(is_official_source("anthropics/skills"));
+        assert!(is_official_source("vercel-labs/agent-skills"));
+        assert!(!is_official_source("someone/random-repo"));
     }
 }

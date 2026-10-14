@@ -137,15 +137,12 @@ fn set_keys_in_section(
     let (start, end) =
         section_bounds(&lines, header).ok_or_else(|| format!("配置中未找到段 {header}"))?;
 
-    // 逐键处理：先在段内找目标键，替换或记录为"需插入"
+    // 逐键处理：新值插段首，段内所有同名键行全部吞掉（含历史重复行，可自愈）
     let mut out: Vec<String> = lines[..start].iter().map(|s| s.to_string()).collect();
     out.push(header.to_string());
-    let mut pending: Vec<(String, String)> = keys
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.clone()))
-        .collect();
-    // 不存在的键插在段首（紧跟 header），保证新增键总是显式可见
-    for (k, v) in &pending {
+    let managed: std::collections::HashSet<&str> = keys.iter().map(|(k, _)| *k).collect();
+    // 新键插在段首（紧跟 header）；同名旧键后面全部吞掉（含历史重复行，可自愈）
+    for (k, v) in keys {
         out.push(format!("{k} = {v}"));
     }
 
@@ -154,9 +151,8 @@ fn set_keys_in_section(
         let line = lines[i];
         let trimmed = line.trim();
         let key_of = trimmed.split('=').next().unwrap_or("").trim().to_string();
-        if let Some(pos) = pending.iter().position(|(k, _)| k == &key_of) {
-            // 命中：吞掉跨行数组（直到方括号配平），整块替换
-            let (_, value) = &pending[pos];
+        if managed.contains(key_of.as_str()) {
+            // 同名旧键：新值已插在段首，这里只吞掉原行（含跨行数组，含历史重复行）
             let mut depth =
                 trimmed.matches('[').count() as i32 - trimmed.matches(']').count() as i32;
             let mut consumed = 1;
@@ -165,8 +161,6 @@ fn set_keys_in_section(
                 depth += l.matches('[').count() as i32 - l.matches(']').count() as i32;
                 consumed += 1;
             }
-            out.push(format!("{key_of} = {value}"));
-            pending.remove(pos);
             i += consumed;
         } else {
             out.push(line.to_string());
@@ -358,5 +352,20 @@ mod tests {
     #[test]
     fn test_remove_missing_section_errors() {
         assert!(remove_section(SAMPLE, "[mcp.servers.nope]").is_err());
+    }
+
+    #[test]
+    fn test_duplicate_key_self_heal() {
+        // 模拟历史 bug 造成的段内重复键：set 后所有旧键行都应被吞掉，只留一个
+        let sample = "[mcp.servers.browser]\nenabled = false\ncommand = \"npx\"\nenabled = false\n";
+        let out = set_keys_in_section(
+            sample,
+            "[mcp.servers.browser]",
+            &[("enabled", "true".into())],
+        )
+        .unwrap();
+        assert_eq!(out.matches("enabled").count(), 1);
+        assert!(out.contains("enabled = true"));
+        assert!(out.contains("command = \"npx\""));
     }
 }

@@ -116,7 +116,9 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 name = "astra"
 version = "0.1.0"
 dependencies = [
+ "astra-acp",
  "astra-agent",
+ "astra-mcp",
  "async-trait",
  "chrono",
  "dirs 5.0.1",

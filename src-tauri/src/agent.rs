@@ -302,6 +302,101 @@ fn build_registry(
     }
 }
 
+/// MCP/ACP 扩展装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：读
+/// `~/.astra/config.toml`（`ASTRA_HOME` 可覆盖）的 [mcp]/[acp] 段，
+/// 加载外部能力并注册进本次 registry。规则：
+/// - required 失败阻断本次启动；其余失败降级（工具不出现，日志报错）
+/// - 配置文件缺失或无效 = 无扩展，不阻断普通对话（配置错误经日志暴露）
+/// - 工具集合建 Thread 时冻结：仅新会话生效，与「切项目/模型后需新会话」一致
+/// - 每个 Thread 一份独立 manager，避免共享 manager 重载时拆掉其他会话
+///   仍在用的连接（v1 简化，代价是同 server 随会话数多开进程）
+async fn attach_extensions(
+    mut registry: ToolRegistry,
+    config: &mut ThreadConfig,
+) -> Result<ToolRegistry, String> {
+    let cfg = match agent_core::astra_config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[extensions] 配置无效，本次运行不加载 MCP/ACP: {e}");
+            return Ok(registry);
+        }
+    };
+
+    // ===== MCP =====
+    if cfg.mcp.servers.values().any(|s| s.enabled) {
+        let manager = astra_mcp::McpManager::new(cfg.mcp.to_manager_configs())
+            .map_err(|e| format!("MCP 配置无效: {e}"))?;
+        let manager = std::sync::Arc::new(manager);
+        let (reg, report) = manager.load_and_register(registry).await;
+        registry = reg;
+        for failed in &report.failed {
+            eprintln!(
+                "[extensions] MCP server '{}' 加载失败: {}",
+                failed.id, failed.error
+            );
+            if failed.required {
+                return Err(format!(
+                    "MCP server '{}' 为 required，加载失败: {}",
+                    failed.id, failed.error
+                ));
+            }
+        }
+        for dropped in &report.dropped_tools {
+            eprintln!(
+                "[extensions] MCP 工具被丢弃: {}/{} ({})",
+                dropped.server, dropped.tool, dropped.reason
+            );
+        }
+        // manager 由 rule_provider 持有保活；权限规则按发现结果逐工具生成，
+        // 未列出的默认 Confirm（MCP_SPEC §9.2），经 ThreadConfig 进入权限管线。
+        let permissions: std::collections::HashMap<
+            String,
+            agent_core::astra_config::McpPermissions,
+        > = cfg
+            .mcp
+            .servers
+            .iter()
+            .filter(|(_, e)| e.enabled)
+            .map(|(id, e)| (id.clone(), e.permissions.clone()))
+            .collect();
+        config.rule_provider = Some(std::sync::Arc::new(
+            agent_core::astra_config::McpRuleProvider::new(manager, permissions),
+        ));
+        eprintln!(
+            "[extensions] MCP: {} server(s) 已注册（见上方失败日志，如有）",
+            report.loaded.len()
+        );
+    }
+
+    // ===== ACP =====
+    if cfg.acp.agents.values().any(|a| a.enabled) {
+        let manager = astra_acp::AcpManager::new(cfg.acp.to_specs())
+            .map_err(|e| format!("ACP 配置无效: {e}"))?;
+        let (reg, report) = manager.load_and_register(registry).await;
+        registry = reg;
+        for failed in &report.failed {
+            eprintln!(
+                "[extensions] ACP agent '{}' 加载失败: {}",
+                failed.id, failed.error
+            );
+            if failed.required {
+                return Err(format!(
+                    "ACP agent '{}' 为 required，加载失败: {}",
+                    failed.id, failed.error
+                ));
+            }
+        }
+        eprintln!(
+            "[extensions] ACP: {} agent(s) 已注册（见上方失败日志，如有）",
+            report.loaded.len()
+        );
+        // manager 随作用域释放：adapter 持有连接，调用不受影响；
+        // 仅崩溃降级/懒重连不再可用（v1 简化）。
+    }
+
+    Ok(registry)
+}
+
 fn default_system_prompt() -> String {
     "你是星野的 Agent 助手，可以读取、检索和写入项目内文件来完成任务。\
      用户消息中的「@相对路径」是对当前项目内文件的引用，处理前可先用 read_file 查看内容。\
@@ -487,19 +582,19 @@ pub async fn agent_start_run(
                     app: app.clone(),
                     session_id: session_id.clone(),
                 });
+            let mut registry = build_registry(
+                project_root.as_ref(),
+                skills_dir.as_deref(),
+                question_bridge,
+                settings_search_endpoint(&app),
+                Arc::clone(&state.processes),
+            );
+            // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
+            // ~/.astra/config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
+            // registry；required 失败阻断启动，其余失败降级（工具不出现）。
+            registry = attach_extensions(registry, &mut config).await?;
             threads
-                .load_or_create(
-                    config,
-                    backend,
-                    build_registry(
-                        project_root.as_ref(),
-                        skills_dir.as_deref(),
-                        question_bridge,
-                        settings_search_endpoint(&app),
-                        Arc::clone(&state.processes),
-                    ),
-                    bridge,
-                )
+                .load_or_create(config, backend, registry, bridge)
                 .await?;
         }
     }

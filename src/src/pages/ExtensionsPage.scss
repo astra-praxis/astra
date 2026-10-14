@@ -337,6 +337,38 @@
     font-family: var(--font-mono, monospace);
   }
 
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    background: #dc2626;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+  }
+
+  .confirm-text {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+
+  .confirm-hint {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+}
+
 // 编辑弹窗内骑在 Radix Portal（body 下，不在 .extensions-page 内），必须顶层定义；
 // 前缀 ext- 防止与其他页面全局类名冲突（Vite 全局打包）
 .ext-edit-form {
@@ -393,38 +425,6 @@
   &:disabled {
     opacity: 0.6;
     cursor: default;
-  }
-}
-
-  .btn-danger {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    background: #dc2626;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-
-    &:disabled {
-      opacity: 0.6;
-      cursor: default;
-    }
-  }
-
-  .confirm-text {
-    margin: 0 0 8px;
-    font-size: 14px;
-    color: var(--text-primary);
-  }
-
-  .confirm-hint {
-    margin: 0;
-    font-size: 12.5px;
-    color: var(--text-muted);
   }
 }
 

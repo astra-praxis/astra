@@ -1230,4 +1230,116 @@ mod tests {
         assert_eq!(payload["options"], json!([]));
         assert_eq!(payload["allow_free_text"], false);
     }
+
+    /// 宿主层闭环（TASK_SPEC §六）：AgentState::default 的共享 ProcessManager
+    /// 接线 → build_registry → shell_background spawn → adopt → task_status
+    /// 轮询 → task_result。全程走 registry 里的真实工具，不碰 manager 内部。
+    #[tokio::test]
+    async fn shell_background_adopts_into_task_tools_end_to_end() {
+        struct AllowBridge;
+        #[async_trait::async_trait]
+        impl PermissionBridge for AllowBridge {
+            async fn request(&self, _req: PermissionRequest) -> Decision {
+                Decision::Allow
+            }
+        }
+
+        struct NoQuestions;
+        #[async_trait::async_trait]
+        impl agent_core::UserQuestionBridge for NoQuestions {
+            async fn ask(
+                &self,
+                _question: String,
+                _options: Vec<String>,
+                _allow_free_text: bool,
+            ) -> Result<String, String> {
+                Err("test bridge".into())
+            }
+        }
+
+        let state = AgentState::default();
+        let root = std::env::temp_dir().join(format!(
+            "astra-host-e2e-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let registry = build_registry(
+            Some(&root),
+            None,
+            Arc::new(NoQuestions) as Arc<dyn agent_core::UserQuestionBridge>,
+            None,
+            Arc::clone(&state.processes),
+            Arc::clone(&state.tasks),
+        );
+        let names = registry.names();
+        for required in [
+            "shell_background",
+            "task_status",
+            "task_result",
+            "task_cancel",
+        ] {
+            assert!(names.contains(&required.into()), "missing tool: {required}");
+        }
+
+        let ctx = agent_core::ToolContext {
+            project_root: Some(root.clone()),
+            bridge: Arc::new(AllowBridge),
+            cancelled: tokio_util::sync::CancellationToken::new(),
+        };
+
+        // 1. shell_background 启动短命令
+        let bg = registry.get("shell_background").expect("bg tool");
+        let out = bg
+            .call(json!({ "command": "echo adopted-e2e; exit 0" }), &ctx)
+            .await
+            .expect("shell_background call");
+        assert!(
+            out.content.contains("已纳入统一任务跟踪 task_id=task_"),
+            "summary should surface unified task id: {}",
+            out.content
+        );
+        let unified_id = out
+            .content
+            .split("已纳入统一任务跟踪 task_id=")
+            .nth(1)
+            .and_then(|s| s.split(&['：', ' '][..]).next())
+            .expect("unified task id")
+            .to_string();
+
+        // 2. task_status 轮询到终态
+        let status_tool = registry.get("task_status").expect("task_status tool");
+        let mut final_label = String::new();
+        for _ in 0..50 {
+            let out = status_tool
+                .call(json!({ "task_id": unified_id }), &ctx)
+                .await
+                .expect("task_status call");
+            if out.content.contains("已终态") {
+                final_label = out.content;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            final_label.contains("已完成") || final_label.contains("completed"),
+            "task_status should reach completed: {final_label}"
+        );
+
+        // 3. task_result 取回进程输出
+        let result_tool = registry.get("task_result").expect("task_result tool");
+        let out = result_tool
+            .call(json!({ "task_id": unified_id }), &ctx)
+            .await
+            .expect("task_result call");
+        assert!(
+            out.content.contains("任务完成") && out.content.contains("adopted-e2e"),
+            "task_result should carry process output: {}",
+            out.content
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

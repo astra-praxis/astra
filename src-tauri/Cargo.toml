@@ -37,6 +37,9 @@ libc = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
 
+[dev-dependencies]
+tokio-util = "0.7"
+
 # Keep proc-macro dylibs unstripped to avoid macOS LINKEDIT loader failures.
 [profile.release.build-override]
 debug = 0

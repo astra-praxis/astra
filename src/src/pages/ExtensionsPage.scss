@@ -337,63 +337,64 @@
     font-family: var(--font-mono, monospace);
   }
 
-  // 编辑表单
-  .edit-form {
+// 编辑弹窗内骑在 Radix Portal（body 下，不在 .extensions-page 内），必须顶层定义；
+// 前缀 ext- 防止与其他页面全局类名冲突（Vite 全局打包）
+.ext-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  label {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
 
-    label {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      font-size: 12.5px;
-      font-weight: 500;
-      color: var(--text-secondary);
+    input[type='text'],
+    input:not([type]),
+    textarea {
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: var(--font-mono, monospace);
+      color: var(--text-primary);
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      outline: none;
+      resize: vertical;
 
-      input[type='text'],
-      input:not([type]),
-      textarea {
-        padding: 8px 10px;
-        font-size: 13px;
-        font-family: var(--font-mono, monospace);
-        color: var(--text-primary);
-        background: var(--bg-subtle);
-        border: 1px solid var(--border);
-        border-radius: 7px;
-        outline: none;
-        resize: vertical;
-
-        &:focus {
-          border-color: var(--accent, #6366f1);
-        }
+      &:focus {
+        border-color: var(--accent, #6366f1);
       }
     }
-
-    .checkbox-row {
-      flex-direction: row;
-      align-items: center;
-      gap: 8px;
-      font-weight: 400;
-      cursor: pointer;
-    }
   }
 
-  .btn-primary {
-    padding: 8px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    background: var(--accent, #6366f1);
-    border: none;
-    border-radius: 8px;
+  .checkbox-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-weight: 400;
     cursor: pointer;
-
-    &:disabled {
-      opacity: 0.6;
-      cursor: default;
-    }
   }
+}
+
+.ext-btn-primary {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent, #6366f1);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
 
   .btn-danger {
     display: inline-flex;

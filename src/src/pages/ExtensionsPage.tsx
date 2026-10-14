@@ -316,13 +316,13 @@ export default function ExtensionsPage() {
         title={edit ? `编辑 ${kindLabel(edit.kind)}：${edit.id}` : ''}
         closeOnOverlay={false}
         footer={
-          <button className="btn-primary" disabled={busyId !== null} onClick={() => void doUpdate()}>
+          <button className="ext-btn-primary" disabled={busyId !== null} onClick={() => void doUpdate()}>
             {busyId !== null ? '保存中…' : '保存'}
           </button>
         }
       >
         {edit && (
-          <div className="edit-form">
+          <div className="ext-edit-form">
             <label>
               启动命令
               <input

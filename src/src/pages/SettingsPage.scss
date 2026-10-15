@@ -238,6 +238,39 @@
   }
 }
 
+// 图片生成配置（generate_image）：多行字段 + 保存按钮
+.agent-gen-fields {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 280px;
+
+  .agent-perm-input {
+    width: 100%;
+  }
+}
+
+.agent-perm-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+
+  &:hover {
+    border-color: var(--accent, var(--brand-500));
+    color: var(--text-primary);
+  }
+}
+
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

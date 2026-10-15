@@ -11,6 +11,14 @@ import { useThemeStore, type ThemeMode } from '@/lib/theme';
 import { useAgentStore } from '@/stores/agent';
 import './SettingsPage.scss';
 
+/** 生成供应商配置（与后端 agent_generation.rs GenerationConfig 对齐） */
+interface GenerationConfigState {
+  enabled: boolean;
+  base_url: string;
+  api_key: string;
+  model_id: string;
+}
+
 interface EditorSetting {
   name: string;
   command: string;
@@ -69,6 +77,15 @@ export default function SettingsPage() {
   const setImageRecognition = useAgentStore((s) => s.setImageRecognition);
   // Agent search_web 的 SearXNG 实例地址（可选；空 = 用 DuckDuckGo）
   const [searchEndpoint, setSearchEndpoint] = useState('');
+  // 图片生成（generate_image 工具）：OpenAI Images 兼容网关配置
+  //（保存后新会话生效；api_key 仅存本机 generation.json）
+  const [genConfig, setGenConfig] = useState<GenerationConfigState>({
+    enabled: false,
+    base_url: 'https://api.openai.com/v1',
+    api_key: '',
+    model_id: 'gpt-image-1',
+  });
+  const [genSaved, setGenSaved] = useState(false);
 
   // ===== 加载设置 =====
   useEffect(() => {
@@ -76,9 +93,10 @@ export default function SettingsPage() {
 
     (async () => {
       try {
-        const [settings, presetEditors] = await Promise.all([
+        const [settings, presetEditors, gen] = await Promise.all([
           invoke<AppSettings>('get_settings'),
           invoke<EditorSetting[]>('get_preset_editors'),
+          invoke<GenerationConfigState>('generation_get_config'),
         ]);
         if (disposed) return;
 
@@ -87,6 +105,7 @@ export default function SettingsPage() {
         setActiveWorkspace(settings.active_workspace);
         setScanDepth(settings.scan_depth || 3);
         setSearchEndpoint(settings.search_endpoint ?? '');
+        setGenConfig((prev) => ({ ...prev, ...gen }));
 
         // 检查当前设置是否在预设中
         const match = presetEditors.find((e) => e.command === settings.editor.command);
@@ -518,6 +537,78 @@ export default function SettingsPage() {
             onChange={(e) => setSearchEndpoint(e.target.value)}
           />
         </div>
+        <div className="agent-perm-row">
+          <div className="agent-perm-text">
+            <span className="agent-perm-title">图片生成（generate_image）</span>
+            <span className="agent-perm-desc">
+              开启后 Agent 获得 generate_image 工具，可提交图片生成任务（付费外部调用，每次提交都会弹出确认卡）。
+              填写 OpenAI Images 兼容网关地址与模型（如 gpt-image-1）；API Key 仅保存在本机，不上传。保存后新会话生效。
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={genConfig.enabled}
+            className={`agent-perm-switch${genConfig.enabled ? ' is-on' : ''}`}
+            title={genConfig.enabled ? '已开启：新会话注册 generate_image 工具' : '已关闭：点击开启'}
+            onClick={() => setGenConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+          >
+            <span className="agent-perm-knob" />
+          </button>
+        </div>
+        {genConfig.enabled && (
+          <div className="agent-perm-row">
+            <div className="agent-perm-text">
+              <span className="agent-perm-title">生成网关与模型</span>
+              <span className="agent-perm-desc">
+                地址以 /v1 结尾（如 https://api.openai.com/v1）；模型为供应商的图片生成型号。未经真实网关验证前请先用小图试跑。
+              </span>
+            </div>
+            <div className="agent-gen-fields">
+              <input
+                type="text"
+                value={genConfig.base_url}
+                placeholder="https://api.openai.com/v1"
+                className="agent-perm-input agent-perm-input--wide"
+                aria-label="生成网关地址"
+                onChange={(e) => setGenConfig((prev) => ({ ...prev, base_url: e.target.value }))}
+              />
+              <input
+                type="text"
+                value={genConfig.model_id}
+                placeholder="gpt-image-1"
+                className="agent-perm-input"
+                aria-label="生成模型"
+                onChange={(e) => setGenConfig((prev) => ({ ...prev, model_id: e.target.value }))}
+              />
+              <input
+                type="password"
+                value={genConfig.api_key}
+                placeholder="API Key（仅存本机）"
+                className="agent-perm-input"
+                aria-label="API Key"
+                autoComplete="off"
+                onChange={(e) => setGenConfig((prev) => ({ ...prev, api_key: e.target.value }))}
+              />
+              <button
+                type="button"
+                className="agent-perm-save"
+                onClick={async () => {
+                  try {
+                    await invoke('generation_set_config', { config: genConfig });
+                    setGenSaved(true);
+                    window.setTimeout(() => setGenSaved(false), 2000);
+                  } catch (e) {
+                    console.error('保存生成配置失败:', e);
+                  }
+                }}
+              >
+                {genSaved ? <Check size={14} /> : <Save size={14} />}
+                {genSaved ? '已保存' : '保存生成配置'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 编辑器设置卡片 */}

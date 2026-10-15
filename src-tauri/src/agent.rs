@@ -117,22 +117,119 @@ impl PermissionHub {
 /// PermissionBridge 宿主实现：注册 oneshot 并等待前端决定。
 /// 发送端被清理（重置会话）时返回 Deny，保证不会挂死运行循环。
 /// 开启「放权模式」时所有 Confirm 直接 Allow 跳过弹窗（Deny 不经此桥，不受影响）。
-struct HubBridge(Arc<PermissionHub>);
+///
+/// 工具内部权限（ToolContext::request_permission，如 generate_image 的付费
+/// 确认，MULTIMODAL_SPEC §10）不经 run_loop 发事件：本层补发一条可见的
+/// agent-event Envelope，前端复用既有确认卡渲染与 agent_permission_decide
+/// 回传（同 QuestionBridge 自己发 agent-question 的模式），无需前端改动。
+struct HubBridge {
+    hub: Arc<PermissionHub>,
+    app: AppHandle,
+    session_id: String,
+}
+
+/// 工具内部权限请求的可见 id / 序号（与 run_loop 的 tc-* call id 区分）
+static IN_TOOL_PERM_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn in_tool_permission_id() -> String {
+    let seq = IN_TOOL_PERM_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("perm-tool-{seq}")
+}
+
+/// 工具内部权限事件的 Envelope 载荷（纯函数便于单测）。run_id 为空：
+/// 请求发生在工具执行中，宿主侧无法拿到 run 上下文；sequence 用独立
+/// 大序号避免与 run_loop 每 Run 从 1 重启的序号混淆。
+fn permission_envelope(session_id: &str, event: Value) -> Value {
+    let seq = IN_TOOL_PERM_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let mut env = json!({
+        "schema_version": agent_core::events::EVENT_SCHEMA_VERSION,
+        "event_id": format!("evt_in_tool_{seq}"),
+        "timestamp": chrono::Utc::now().timestamp_millis(),
+        "session_id": session_id,
+        "run_id": "",
+        "sequence": seq,
+    });
+    if let (Some(base), Some(obj)) = (env.as_object_mut(), event.as_object()) {
+        for (k, v) in obj {
+            base.insert(k.clone(), v.clone());
+        }
+    }
+    env
+}
+
+fn in_tool_permission_event(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    summary: &str,
+) -> Value {
+    permission_envelope(
+        session_id,
+        json!({
+            "type": "permission_requested",
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "summary": summary,
+        }),
+    )
+}
+
+fn decision_str(d: Decision) -> &'static str {
+    match d {
+        Decision::Allow => "allow",
+        Decision::Confirm => "confirm",
+        Decision::Deny => "deny",
+    }
+}
+
+fn in_tool_permission_decided_event(
+    session_id: &str,
+    tool_call_id: &str,
+    decision: Decision,
+) -> Value {
+    permission_envelope(
+        session_id,
+        json!({
+            "type": "permission_decided",
+            "tool_call_id": tool_call_id,
+            "decision": decision_str(decision),
+        }),
+    )
+}
 
 #[async_trait::async_trait]
 impl PermissionBridge for HubBridge {
     async fn request(&self, req: PermissionRequest) -> Decision {
         use std::sync::atomic::Ordering;
-        if self.0.auto_all.load(Ordering::Relaxed) {
+        if self.hub.auto_all.load(Ordering::Relaxed) {
             return Decision::Allow;
         }
-        // tool_call_id 由 run_loop 生成并已通过 PermissionRequested 事件告知前端
-        let id = req.tool_call_id;
-        let rx = self.0.register(id);
-        match rx.await {
+        // 循环级请求自带 call.id（PermissionRequested 事件已由 run_loop 发出）；
+        // 工具内部请求（tool_call_id 为空）需要本层补发可见事件。
+        let in_tool = req.tool_call_id.is_empty();
+        let id = if in_tool {
+            let id = in_tool_permission_id();
+            let _ = self.app.emit(
+                "agent-event",
+                in_tool_permission_event(&self.session_id, &id, &req.tool_name, &req.summary),
+            );
+            id
+        } else {
+            req.tool_call_id
+        };
+        let rx = self.hub.register(id.clone());
+        let decision = match rx.await {
             Ok(d) => d,
             Err(_) => Decision::Deny,
+        };
+        // 回执 permission_decided：前端确认卡落定（复用既有渲染）
+        if in_tool {
+            let _ = self.app.emit(
+                "agent-event",
+                in_tool_permission_decided_event(&self.session_id, &id, decision),
+            );
         }
+        decision
     }
 }
 
@@ -160,6 +257,10 @@ pub struct AgentState {
     /// 运行中的扩展 manager（每会话一份，attach_extensions 时登记）：
     /// 保活让 ACP 崩溃降级 / 懒重连继续可用，并支撑运行状态查询。
     pub(crate) extensions: Arc<tokio::sync::Mutex<HashMap<String, SessionExtensions>>>,
+    /// 多模态 M5（MULTIMODAL_SPEC §10）：generation 栈。backend 在构造期
+    /// 一次性注册进 tasks；provider 按配置懒构建/懒切换（agent_start_run
+    /// 每次 sync，新会话生效），disabled 时工具不注册、不阻塞会话。
+    pub(crate) generation: crate::agent_generation::GenerationStack,
 }
 
 /// 一次会话装配产生的扩展 manager 句柄（Arc 保活）。
@@ -173,6 +274,7 @@ impl Default for AgentState {
     fn default() -> Self {
         let processes = Arc::new(agent_core::shell_background::ProcessManager::new());
         let mcp_tasks = Arc::new(astra_mcp::McpTaskBackend::new());
+        let generation = crate::agent_generation::GenerationStack::new();
         Self {
             hub: Arc::new(PermissionHub::default()),
             questions: Arc::new(QuestionHub::default()),
@@ -192,9 +294,14 @@ impl Default for AgentState {
                         // adoption via shell_background); temp dir is a safe stub.
                         std::env::temp_dir(),
                         processes,
-                    ))),
+                    )))
+                    // 多模态 M5：generation 后端一次性注册（TASK_SOURCE kind
+                    // "generation" 路由）；provider 是否可用由配置决定，
+                    // disabled 时无工具入口，后端闲置不产生任何任务。
+                    .with_backend(generation.task_backend() as Arc<dyn agent_core::TaskBackend>),
             ),
             mcp_tasks,
+            generation,
         }
     }
 }
@@ -307,17 +414,34 @@ impl agent_core::UserQuestionBridge for QuestionBridge {
 // ===== 工具注册（全部实现在 agent-core，本层只做组装） =====
 
 fn build_registry(
+    session_id: &str,
     project_root: Option<&PathBuf>,
     skills_dir: Option<&Path>,
     question_bridge: Arc<dyn agent_core::UserQuestionBridge>,
     search_endpoint: Option<String>,
     processes: Arc<agent_core::shell_background::ProcessManager>,
     tasks: Arc<agent_core::TaskManager>,
+    generation: Option<(
+        Arc<agent_core::task::GenerationTaskBackend>,
+        Arc<dyn agent_core::astra_generation::GenerationProvider>,
+    )>,
 ) -> ToolRegistry {
     // 网络工具 + ask_user 不依赖项目根，纯聊天也可用；任务查询工具同全局
     let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search_endpoint)
         .register(agent_core::AskUserTool::new(question_bridge));
     let reg = agent_core::task_tools::register(reg, tasks.clone());
+    // 多模态 M5：enabled 且配置完整时注册 generate_image（付费生成，
+    // MULTIMODAL_SPEC §10）；disabled / 缺配置时不注册、不报错。
+    let reg = match generation {
+        Some((backend, provider)) => agent_core::generation_tools::register(
+            reg,
+            tasks.clone(),
+            backend,
+            provider,
+            session_id,
+        ),
+        None => reg,
+    };
     let reg = match skills_dir {
         Some(dir) => agent_core::skill_tools::register(reg, dir),
         None => reg,
@@ -719,6 +843,14 @@ pub async fn agent_start_run(
         .bind_image_config(&session_id, req.image_recognition, &base_url, &model_name)
         .await?;
 
+    // 2.6 多模态 M5（MULTIMODAL_SPEC §10）：读取生成配置并按需构建 provider。
+    // enabled 且配置完整 → build_registry 注册 generate_image；
+    // disabled / 缺配置 / 构建失败 → None（不注册、不报错、不阻塞会话）。
+    // 配置变更只对新会话生效（已开 Thread 的工具集合冻结）。
+    let generation = state
+        .generation
+        .sync(&directory, crate::agent_generation::load_config(&app));
+
     // 3. 取或建 Thread（绑定 root/backend/policy；历史保留在消息序列里）
     {
         if dest_changed && threads.threads.contains_key(&session_id) {
@@ -754,6 +886,10 @@ pub async fn agent_start_run(
             policy.allowed_readonly.push("task_status".into());
             policy.allowed_readonly.push("task_result".into());
             policy.confirm_tools.push("task_cancel".into());
+            // 付费生成（MULTIMODAL_SPEC §10）：循环层直接放行，付费确认由
+            // 工具内部 request_permission 完成（批准仅针对固定请求，换参数
+            // 会重新弹窗）——避免循环层 Confirm + 工具内确认双重弹窗。
+            policy.allowed_readonly.push("generate_image".into());
             // fetch 涉及外部网络访问，走确认弹窗（SSRF 门在工具内部始终生效）
             policy.confirm_tools.push("fetch".into());
             let mut system_prompt = req.system_prompt.unwrap_or_else(default_system_prompt);
@@ -789,7 +925,11 @@ pub async fn agent_start_run(
                 RigBackend::new(base_url, api_key, model_name)
                     .with_image_encoding(image_encoding(req.image_recognition)),
             );
-            let bridge: Arc<dyn PermissionBridge> = Arc::new(HubBridge(Arc::clone(&state.hub)));
+            let bridge: Arc<dyn PermissionBridge> = Arc::new(HubBridge {
+                hub: Arc::clone(&state.hub),
+                app: app.clone(),
+                session_id: session_id.clone(),
+            });
             let question_bridge: Arc<dyn agent_core::UserQuestionBridge> =
                 Arc::new(QuestionBridge {
                     hub: Arc::clone(&state.questions),
@@ -797,12 +937,14 @@ pub async fn agent_start_run(
                     session_id: session_id.clone(),
                 });
             let mut registry = build_registry(
+                &session_id,
                 project_root.as_ref(),
                 skills_dir.as_deref(),
                 question_bridge,
                 settings_search_endpoint(&app),
                 Arc::clone(&state.processes),
                 Arc::clone(&state.tasks),
+                generation,
             );
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
             // ~/.astra/config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
@@ -1400,6 +1542,141 @@ mod tests {
         assert_eq!(payload["allow_free_text"], false);
     }
 
+    /// 多模态 M5：工具内部权限事件的 Envelope 载荷（前端复用既有确认卡）
+    #[test]
+    fn in_tool_permission_event_carries_session_and_call_id() {
+        let id = in_tool_permission_id();
+        assert!(id.starts_with("perm-tool-"));
+        let env = in_tool_permission_event("sess-9", &id, "generate_image", "生成 1 张图");
+        assert_eq!(env["session_id"], "sess-9");
+        assert_eq!(env["type"], "permission_requested");
+        assert_eq!(env["tool_call_id"], id);
+        assert_eq!(env["tool_name"], "generate_image");
+        assert_eq!(env["summary"], "生成 1 张图");
+        assert!(env["event_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("evt_in_tool_"));
+
+        let decided = in_tool_permission_decided_event("sess-9", &id, Decision::Allow);
+        assert_eq!(decided["type"], "permission_decided");
+        assert_eq!(decided["tool_call_id"], id);
+        assert_eq!(decided["decision"], "allow");
+    }
+
+    /// 多模态 M5：build_registry 在 enabled/disabled 下的 generate_image
+    /// 注册差异（disabled/缺配置 → 工具不出现，其余工具不受影响）
+    #[test]
+    fn build_registry_registers_generate_image_only_when_enabled() {
+        struct NoQuestions2;
+        #[async_trait::async_trait]
+        impl agent_core::UserQuestionBridge for NoQuestions2 {
+            async fn ask(
+                &self,
+                _question: String,
+                _options: Vec<String>,
+                _allow_free_text: bool,
+            ) -> std::result::Result<String, String> {
+                Err("no questions in test".into())
+            }
+        }
+        struct StubProvider;
+        #[async_trait::async_trait]
+        impl agent_core::astra_generation::GenerationProvider for StubProvider {
+            fn id(&self) -> &str {
+                "stub"
+            }
+            fn descriptor(
+                &self,
+                _model_id: &str,
+            ) -> Option<agent_core::model::capability::ModelDescriptor> {
+                None
+            }
+            async fn submit(
+                &self,
+                _request: &agent_core::astra_generation::GenerationRequest,
+                _client_request_id: &str,
+            ) -> std::result::Result<
+                agent_core::astra_generation::SubmitOutcome,
+                agent_core::astra_generation::GenerationError,
+            > {
+                Err(
+                    agent_core::astra_generation::GenerationError::ProviderRejected {
+                        message: "stub".into(),
+                    },
+                )
+            }
+            async fn status(
+                &self,
+                _handle: &agent_core::astra_generation::ProviderTaskHandle,
+            ) -> std::result::Result<
+                agent_core::astra_generation::ProviderObservation,
+                agent_core::astra_generation::GenerationError,
+            > {
+                Err(
+                    agent_core::astra_generation::GenerationError::ProviderRejected {
+                        message: "stub".into(),
+                    },
+                )
+            }
+            async fn result(
+                &self,
+                _handle: &agent_core::astra_generation::ProviderTaskHandle,
+            ) -> std::result::Result<
+                Vec<agent_core::astra_generation::GenerationOutput>,
+                agent_core::astra_generation::GenerationError,
+            > {
+                Err(
+                    agent_core::astra_generation::GenerationError::ProviderRejected {
+                        message: "stub".into(),
+                    },
+                )
+            }
+            async fn cancel(
+                &self,
+                _handle: &agent_core::astra_generation::ProviderTaskHandle,
+            ) -> std::result::Result<
+                agent_core::astra_generation::CancelOutcome,
+                agent_core::astra_generation::GenerationError,
+            > {
+                Err(
+                    agent_core::astra_generation::GenerationError::ProviderRejected {
+                        message: "stub".into(),
+                    },
+                )
+            }
+        }
+        let registry_with = |generation| {
+            build_registry(
+                "sess-gen",
+                None,
+                None,
+                Arc::new(NoQuestions2),
+                None,
+                Arc::new(agent_core::shell_background::ProcessManager::new()),
+                Arc::new(agent_core::TaskManager::new(8, None)),
+                generation,
+            )
+        };
+
+        // disabled：不注册 generate_image，任务查询工具不受影响
+        let reg = registry_with(None);
+        assert!(reg.get("generate_image").is_none());
+        assert!(reg.get("task_status").is_some());
+
+        // enabled：generate_image 注册，归到 Confirm 之外的本工具付费确认
+        let backend = Arc::new(agent_core::task::GenerationTaskBackend::new(
+            Arc::new(StubProvider) as Arc<dyn agent_core::astra_generation::GenerationProvider>,
+            Arc::new(crate::agent_generation::MediaStore::new(
+                std::env::temp_dir().join("astra-agent-gen-test"),
+            )) as Arc<dyn agent_core::task::AssetStore>,
+        ));
+        let provider: Arc<dyn agent_core::astra_generation::GenerationProvider> =
+            Arc::new(StubProvider);
+        let reg = registry_with(Some((Arc::clone(&backend), provider)));
+        assert!(reg.get("generate_image").is_some());
+    }
+
     /// 宿主层闭环（TASK_SPEC §六）：AgentState::default 的共享 ProcessManager
     /// 接线 → build_registry → shell_background spawn → adopt → task_status
     /// 轮询 → task_result。全程走 registry 里的真实工具，不碰 manager 内部。
@@ -1436,12 +1713,14 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         let registry = build_registry(
+            "sess-e2e",
             Some(&root),
             None,
             Arc::new(NoQuestions) as Arc<dyn agent_core::UserQuestionBridge>,
             None,
             Arc::clone(&state.processes),
             Arc::clone(&state.tasks),
+            None,
         );
         let names = registry.names();
         for required in [

@@ -1,4 +1,5 @@
 mod agent;
+mod agent_generation;
 mod agent_images;
 mod agent_sessions;
 mod agent_threads;
@@ -1525,6 +1526,9 @@ pub fn run() {
             agent::agent_reset_session,
             agent::agent_status,
             agent::agent_recent_events,
+            // Agent Generation（多模态 M5：生成供应商配置）
+            agent_generation::generation_get_config,
+            agent_generation::generation_set_config,
             // Agent Checkpoints
             agent::agent_checkpoint_list,
             agent::agent_checkpoint_create,

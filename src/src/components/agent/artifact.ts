@@ -21,6 +21,7 @@ const kindLabels: Record<string, string> = {
   document: '文档',
   pdf: 'PDF 文档',
   image: '图片',
+  video: '视频',
   command_output: '命令输出',
   data: '数据',
   generic: '产物',
@@ -61,6 +62,16 @@ export function describeArtifact(artifact: Artifact) {
     if (width && height) statistics.push(`${width} × ${height} px`);
     if (bytes !== undefined) statistics.push(`${bytes} 编码字节`);
   }
+  // 生成资产（task_result 的媒体输出）：metadata 带 asset_id/mime_type/byte_size
+  const assetId = typeof metadata.asset_id === 'string' && metadata.asset_id
+    ? metadata.asset_id : undefined;
+  if (assetId) {
+    if (typeof metadata.mime_type === 'string' && metadata.mime_type) {
+      statistics.push(metadata.mime_type);
+    }
+    const bytes = count(metadata.byte_size);
+    if (bytes !== undefined) statistics.push(`${bytes} 字节`);
+  }
   return {
     location: sdk ? artifact.location : artifact.path,
     label: labelFor(kindLabels, artifact.kind) ?? '未知类型',
@@ -69,5 +80,6 @@ export function describeArtifact(artifact: Artifact) {
     from: fileChange && typeof metadata.from === 'string' ? metadata.from : undefined,
     statistics,
     preview: sdk && typeof artifact.preview === 'string' ? artifact.preview : undefined,
+    assetId,
   };
 }

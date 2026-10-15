@@ -21,6 +21,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use base64::Engine as _;
+
 use agent_core::astra_generation::error::rejected;
 use agent_core::astra_generation::openai_images::ImageSink;
 use agent_core::astra_generation::{
@@ -289,6 +291,168 @@ impl ImageSink for MediaStore {
     }
 }
 
+// ===== 媒体资产读取/打开（前端预览与系统查看，MULTIMODAL_SPEC §10）=====
+
+/// 预览 data URL 的字节上限：生成图片通常几 MB；超过 20 MiB 的资产仍可
+/// 「打开」查看，但不再内联预览（避免 IPC 大字符串拖慢 WebView）。
+const PREVIEW_MAX_BYTES: usize = 20 * 1024 * 1024;
+
+impl MediaStore {
+    /// 校验 asset_id 并解析到媒体目录下的文件路径。
+    /// asset_id 一律由本进程 UUID 生成；外部传入的值必须是不含路径分隔符
+    /// 的短字母数字串，防止路径穿越。
+    fn resolve_asset(&self, asset_id: &str) -> Result<PathBuf, String> {
+        let valid = !asset_id.is_empty()
+            && asset_id.len() <= 64
+            && asset_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !valid {
+            return Err("非法的 asset_id".to_string());
+        }
+        Ok(self.current_dir().join(asset_id))
+    }
+
+    /// 供测试断言路径解析（命令层走 read_asset）。
+    #[cfg(test)]
+    pub fn asset_path(&self, asset_id: &str) -> Result<PathBuf, String> {
+        self.resolve_asset(asset_id)
+    }
+
+    /// 读取资产字节（落盘时已限 100 MiB，此处再按上限复核）。
+    pub async fn read_asset(&self, asset_id: &str) -> Result<Vec<u8>, String> {
+        let path = self.resolve_asset(asset_id)?;
+        let meta = tokio::fs::metadata(&path)
+            .await
+            .map_err(|_| format!("媒体资产不存在: {asset_id}"))?;
+        if !meta.is_file() {
+            return Err(format!("媒体资产不是文件: {asset_id}"));
+        }
+        if meta.len() as usize > MAX_ASSET_BYTES {
+            return Err(format!(
+                "媒体资产超过 {} MiB 上限",
+                MAX_ASSET_BYTES / (1024 * 1024)
+            ));
+        }
+        tokio::fs::read(&path)
+            .await
+            .map_err(|e| format!("读取媒体资产失败: {e}"))
+    }
+}
+
+/// 魔数嗅探 MIME（资产文件名无扩展名，MIME 存在 MediaRef 里不落盘）。
+/// 仅识别本系统产出的类型；未知返回 octet-stream。
+fn sniff_mime(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(PNG_MAGIC) {
+        "image/png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"AVI " {
+        "video/x-msvideo"
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        "video/mp4"
+    } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        "video/webm"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+#[derive(Serialize)]
+pub struct MediaAssetPayload {
+    pub data_url: String,
+    pub mime_type: String,
+    pub byte_size: usize,
+}
+
+/// 读取资产并编码为 data URL（前端 <img> 内联预览用）。
+#[tauri::command]
+pub async fn media_read_asset(
+    app: AppHandle,
+    asset_id: String,
+) -> Result<MediaAssetPayload, String> {
+    let media = app.state::<crate::agent::AgentState>().generation.media();
+    let bytes = media.read_asset(&asset_id).await?;
+    if bytes.len() > PREVIEW_MAX_BYTES {
+        return Err(format!(
+            "资产超过预览上限（{} MiB），请用「打开」查看",
+            PREVIEW_MAX_BYTES / (1024 * 1024)
+        ));
+    }
+    let mime_type = sniff_mime(&bytes).to_string();
+    Ok(MediaAssetPayload {
+        data_url: format!(
+            "data:{mime_type};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        ),
+        mime_type,
+        byte_size: bytes.len(),
+    })
+}
+
+/// 用系统默认应用打开资产：文件无扩展名，先按嗅探到的 MIME 复制到临时
+/// 文件（带扩展名）再交给系统打开。
+#[tauri::command]
+pub async fn media_open_asset(app: AppHandle, asset_id: String) -> Result<(), String> {
+    let media = app.state::<crate::agent::AgentState>().generation.media();
+    let bytes = media.read_asset(&asset_id).await?;
+    let mime = sniff_mime(&bytes);
+    let ext = match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        "video/x-msvideo" => "avi",
+        _ => "bin",
+    };
+    let tmp = std::env::temp_dir().join(format!("astra-asset-{asset_id}.{ext}"));
+    tokio::fs::write(&tmp, &bytes)
+        .await
+        .map_err(|e| format!("写入临时文件失败: {e}"))?;
+    open_with_system(&tmp)
+}
+
+/// 跨平台系统打开（与 downloader.rs 同一套模式）。
+fn open_with_system(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("打开文件失败: {e}"))?
+            .wait()
+            .map_err(|e| format!("等待打开进程失败: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("打开文件失败: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("打开文件失败: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        let _ = path;
+        Err("当前平台不支持打开文件".to_string())
+    }
+}
+
 // ===== 供应商装配（按配置懒构建 / 懒切换） =====
 
 /// 当前生效的 provider 及其构建时的配置指纹（用于「配置没变就不重建」）
@@ -445,6 +609,11 @@ impl GenerationStack {
     /// TaskManager 构造期一次性注册用
     pub fn task_backend(&self) -> Arc<GenerationTaskBackend> {
         Arc::clone(&self.backend)
+    }
+
+    /// 资产读取/打开命令用（media_read_asset / media_open_asset）
+    pub fn media(&self) -> Arc<MediaStore> {
+        Arc::clone(&self.media)
     }
 
     /// 读取配置并按需构建/替换 provider。返回 Some((backend, provider)) 表示
@@ -651,6 +820,39 @@ mod tests {
         assert!(ensure_within_limit(0).is_ok());
         assert!(ensure_within_limit(MAX_ASSET_BYTES).is_ok());
         assert!(ensure_within_limit(MAX_ASSET_BYTES + 1).is_err());
+    }
+
+    #[tokio::test]
+    async fn read_asset_rejects_bad_ids_and_missing_files() {
+        let store = MediaStore::new(tmp_dir("read-asset"));
+        for bad in ["", "../etc/passwd", "a/b", "a b", "x../..", &"a".repeat(65)] {
+            assert!(
+                store.read_asset(bad).await.is_err(),
+                "should reject {bad:?}"
+            );
+        }
+        assert!(store
+            .read_asset("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn read_asset_round_trips_and_sniffs_mime() {
+        let dir = tmp_dir("sniff");
+        let store = MediaStore::new(std::path::PathBuf::clone(&dir));
+        tokio::fs::write(dir.join("asset-1"), tiny_png())
+            .await
+            .unwrap();
+        let bytes = store.read_asset("asset-1").await.expect("read");
+        assert_eq!(bytes, tiny_png());
+        assert_eq!(sniff_mime(&bytes), "image/png");
+        assert_eq!(sniff_mime(b"GIF89a....."), "image/gif");
+        assert_eq!(sniff_mime(&[0xFF, 0xD8, 0xFF, 0xE0]), "image/jpeg");
+        let mut mp4 = vec![0u8; 16];
+        mp4[4..8].copy_from_slice(b"ftyp");
+        assert_eq!(sniff_mime(&mp4), "video/mp4");
+        assert_eq!(sniff_mime(b"plain text"), "application/octet-stream");
     }
 
     // ===== 配置 round-trip =====

@@ -58,6 +58,17 @@
   &__feedback { display: block; }
   &__feedback:not(:empty) { margin-top: 4px; }
   &__preview { margin-top: 6px; }
+  &__media { margin-top: 6px; }
+  &__media-error { margin-top: 6px; color: var(--danger, #c0392b); }
+
+  &__image, &__video {
+    display: block;
+    margin-top: 6px;
+    max-width: 100%;
+    max-height: 320px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+  }
 
   &__text {
     max-height: 240px;

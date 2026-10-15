@@ -61,3 +61,16 @@ test('copy and move expose origin; unrelated kinds do not show file statistics',
   assert.equal(describeArtifact(sdk({ metadata: { mode: 'copy' } })).mode, '复制');
   assert.deepEqual(describeArtifact(sdk({ kind: 'data', metadata: { insertions: 9 } })).statistics, []);
 });
+
+test('generation media artifacts expose asset id with mime and size', () => {
+  const result = describeArtifact(sdk({ kind: 'image', location: 'asset:stored-a1', metadata: {
+    asset_id: 'stored-a1', mime_type: 'image/png', byte_size: 2048,
+  } }));
+  assert.equal(result.assetId, 'stored-a1');
+  assert.deepEqual(result.statistics, ['image/png', '2048 字节']);
+  assert.equal(describeArtifact(sdk({ kind: 'image' })).assetId, undefined);
+  assert.equal(
+    describeArtifact(sdk({ kind: 'video', metadata: { asset_id: '', mime_type: 3 } })).assetId,
+    undefined,
+  );
+});

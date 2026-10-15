@@ -1529,6 +1529,8 @@ pub fn run() {
             // Agent Generation（多模态 M5：生成供应商配置）
             agent_generation::generation_get_config,
             agent_generation::generation_set_config,
+            agent_generation::media_read_asset,
+            agent_generation::media_open_asset,
             // Agent Checkpoints
             agent::agent_checkpoint_list,
             agent::agent_checkpoint_create,

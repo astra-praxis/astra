@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { describeArtifact, type Artifact } from './artifact';
 import './ArtifactList.scss';
 
@@ -9,9 +10,87 @@ export interface ArtifactListProps {
 }
 
 type CopyStatus = 'idle' | 'pending' | 'success' | 'error';
+type OpenStatus = 'idle' | 'pending' | 'error';
+
+/** 生成资产（image/video）内联预览：data URL 经 media_read_asset 惰性加载 */
+function MediaPreview({ assetId, mediaKind }: { assetId: string; mediaKind: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const previewId = useId();
+  const [expanded, setExpanded] = useState(false);
+
+  async function toggle() {
+    const next = !expanded;
+    setExpanded(next);
+    if (!next || url || error) return;
+    try {
+      const payload = await invoke<{ data_url: string }>('media_read_asset', { assetId });
+      setUrl(payload.data_url);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <div className="artifact-list__media">
+      <button
+        type="button"
+        className="artifact-list__toggle"
+        aria-expanded={expanded}
+        aria-controls={previewId}
+        onClick={toggle}
+      >
+        {expanded ? '收起预览' : '展开预览'}
+      </button>
+      <div id={previewId} hidden={!expanded}>
+        {url && mediaKind === 'image' ? (
+          <img className="artifact-list__image" src={url} alt="生成图片预览" />
+        ) : null}
+        {url && mediaKind === 'video' ? (
+          <video className="artifact-list__video" src={url} controls preload="metadata" />
+        ) : null}
+        {error ? <div className="artifact-list__media-error">预览加载失败：{error}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function OpenAssetButton({ assetId }: { assetId: string }) {
+  const [status, setStatus] = useState<OpenStatus>('idle');
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  async function open() {
+    if (status === 'pending') return;
+    setStatus('pending');
+    try {
+      await invoke('media_open_asset', { assetId });
+      if (mounted.current) setStatus('idle');
+    } catch {
+      if (mounted.current) setStatus('error');
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className="artifact-list__copy"
+        onClick={open}
+        disabled={status === 'pending'}
+      >
+        {status === 'pending' ? '打开中…' : '打开'}
+      </button>
+      <span className="artifact-list__feedback" role="status" aria-live="polite">
+        {status === 'error' ? '打开失败，请重试。' : null}
+      </span>
+    </>
+  );
+}
 
 function ArtifactItem({ artifact }: { artifact: Artifact }) {
-  const { location, label, mode, from, statistics, preview } = describeArtifact(artifact);
+  const { location, label, mode, from, statistics, preview, assetId } = describeArtifact(artifact);
   const [expanded, setExpanded] = useState(false);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
   const previewId = useId();
@@ -44,6 +123,7 @@ function ArtifactItem({ artifact }: { artifact: Artifact }) {
       <div className="artifact-list__header">
         <span className="artifact-list__kind" title={artifact.kind}>{label}</span>
         {mode ? <span className="artifact-list__mode">{mode}</span> : null}
+        {assetId ? <OpenAssetButton assetId={assetId} /> : null}
         <button
           type="button"
           className="artifact-list__copy"
@@ -79,6 +159,9 @@ function ArtifactItem({ artifact }: { artifact: Artifact }) {
             {expanded ? <pre className="artifact-list__text" tabIndex={0} aria-label="产物纯文本预览">{preview}</pre> : null}
           </div>
         </div>
+      ) : null}
+      {assetId && (artifact.kind === 'image' || artifact.kind === 'video') ? (
+        <MediaPreview assetId={assetId} mediaKind={artifact.kind} />
       ) : null}
     </li>
   );

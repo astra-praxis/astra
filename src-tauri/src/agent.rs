@@ -642,12 +642,20 @@ pub async fn agent_start_run(
         .map(crate::user_skills::summary_in)
         .unwrap_or_default();
 
-    threads
+    let dest_changed = threads
         .bind_image_config(&session_id, req.image_recognition, &base_url, &model_name)
         .await?;
 
     // 3. 取或建 Thread（绑定 root/backend/policy；历史保留在消息序列里）
     {
+        if dest_changed && threads.threads.contains_key(&session_id) {
+            // 模型来源切换：卸载缓存 Thread 后按新 backend 重建。历史消息
+            // 已持久化在 SQLite，Thread::load 会恢复；存在持久化错误（未
+            // 落盘尾部）时卸载会失败，此处明确报错而不是静默丢消息。
+            threads
+                .unload(&session_id, &state.persistence_errors)
+                .map_err(|e| format!("切换模型来源失败：{e}"))?;
+        }
         if !threads.threads.contains_key(&session_id) {
             // 在默认策略上追加 pandoc 工具：转换是只读产物生成（Allow），
             // 构建 docx 会覆盖/创建交付文件（Confirm）

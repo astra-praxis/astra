@@ -391,6 +391,40 @@ async fn image_consent_is_bound_before_cache_and_survives_restart() {
 }
 
 #[tokio::test]
+async fn text_session_allows_model_switch_but_images_stay_bound() {
+    let database = Database::new();
+    let mut host = AgentThreads::default();
+    host.open(&database.0, errors()).await.unwrap();
+    // 纯文本会话：模型来源可自由切换，切换时报告目的地变化（调用方重建 Thread）。
+    assert!(!host
+        .bind_image_config("text", false, "https://gateway/v1", "m1")
+        .await
+        .unwrap());
+    assert!(host
+        .bind_image_config("text", false, "https://gateway/v1", "m2")
+        .await
+        .unwrap());
+    assert!(!host
+        .bind_image_config("text", false, "https://gateway/v1", "m2")
+        .await
+        .unwrap());
+    // 用已记录目的地中途开启图片识别：consent 由用户显式开关给出。
+    assert!(!host
+        .bind_image_config("text", true, "https://gateway/v1", "m2")
+        .await
+        .unwrap());
+    // 开启后目的地冻结：关闭或换模型都必须新建会话。
+    assert!(host
+        .bind_image_config("text", false, "https://gateway/v1", "m2")
+        .await
+        .is_err());
+    assert!(host
+        .bind_image_config("text", true, "https://gateway/v1", "m3")
+        .await
+        .is_err());
+}
+
+#[tokio::test]
 async fn restart_restores_complete_tool_history_to_model_request() {
     let database = Database::new();
     let mut host = AgentThreads::default();

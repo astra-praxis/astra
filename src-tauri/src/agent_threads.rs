@@ -140,13 +140,20 @@ impl AgentThreads {
 
     /// Bind consent and destination durably before consulting the cached Thread.
     /// Legacy sessions have no image consent and therefore remain disabled.
+    ///
+    /// 语义（图片隐私边界只保护"图片流向"，不钉死纯文本会话的模型来源）：
+    /// - 开启图片识别：目的地（endpoint+model）必须与已记录一致，否则要求
+    ///   新建会话——历史图片可能随上下文重放到新模型，属于 consent 违约；
+    /// - 关闭图片识别的会话不允许关闭（同上，防"关-换-重开"绕过绑定）；
+    /// - 纯文本会话（两侧均关闭）：目的地可自由切换，返回 true 表示
+    ///   目的地相对已缓存 Thread 的 backend 发生变化（调用方需重建 Thread）。
     pub async fn bind_image_config(
         &self,
         id: &str,
         enabled: bool,
         endpoint: &str,
         model: &str,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         if id.trim().is_empty() || self.deleted.contains(id) {
             return Err("Invalid or deleted agent session ID".into());
         }
@@ -156,11 +163,27 @@ impl AgentThreads {
             "enabled": enabled, "endpoint": endpoint, "model": model,
         });
         if let Some(mut record) = existing {
+            let mut dest_changed = false;
             match record.metadata.get("host_image_config") {
-                Some(saved) if saved != &requested => {
-                    return Err("图片识别或模型来源与本会话绑定配置不一致；请恢复原设置，或新建会话使设置生效。".into());
+                Some(saved) if saved == &requested => return Ok(false),
+                Some(saved) => {
+                    let saved_enabled = saved["enabled"].as_bool().unwrap_or(false);
+                    let same_dest = saved["endpoint"].as_str() == Some(endpoint)
+                        && saved["model"].as_str() == Some(model);
+                    if enabled {
+                        // 图片将流向新目的地：必须与已记录绑定一致。
+                        if !same_dest {
+                            return Err("图片识别或模型来源与本会话绑定配置不一致；请恢复原设置，或新建会话使设置生效。".into());
+                        }
+                    } else if saved_enabled {
+                        // 已开启的会话不允许关闭：防止"关闭→换模型→重开"
+                        // 把历史图片随上下文送到新目的地。
+                        return Err("图片识别或模型来源与本会话绑定配置不一致；请恢复原设置，或新建会话使设置生效。".into());
+                    } else {
+                        // 纯文本会话：图片从未流动，模型来源可自由切换。
+                        dest_changed = !same_dest;
+                    }
                 }
-                Some(_) => return Ok(()),
                 None if enabled => {
                     return Err(
                         "此历史会话未开启图片识别；请关闭图片识别后续聊，或新建会话开启。".into(),
@@ -172,6 +195,7 @@ impl AgentThreads {
                 .metadata
                 .insert("host_image_config".into(), requested);
             store.update(record).await.map_err(|e| e.to_string())?;
+            Ok(dest_changed)
         } else {
             let mut metadata = serde_json::Map::new();
             metadata.insert("host_image_config".into(), requested);
@@ -187,8 +211,8 @@ impl AgentThreads {
                 })
                 .await
                 .map_err(|e| e.to_string())?;
+            Ok(false)
         }
-        Ok(())
     }
 
     pub async fn load_or_create(

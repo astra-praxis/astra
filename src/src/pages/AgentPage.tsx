@@ -523,6 +523,18 @@ export default function AgentPage() {
   // 气泡内 @文件 chip 解析用的文件集合（files 变化时重建）
   const fileSet = useMemo(() => new Set(files), [files]);
 
+  // 输入框内 /技能 与 @文件 的高亮 token（镜像层据此画 chip 底色）
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const inputTokens = useMemo(() => tokenizeInput(input, skills, fileSet), [input, skills, fileSet]);
+  const syncMirrorScroll = useCallback(() => {
+    const el = textareaRef.current;
+    const mirror = mirrorRef.current;
+    if (el && mirror) {
+      mirror.scrollTop = el.scrollTop;
+      mirror.scrollLeft = el.scrollLeft;
+    }
+  }, []);
+
   // ===== 历史面板开关（持久化，重启后保持上次的开合状态） =====
   const [historyOpen, setHistoryOpen] = useState(() => localStorage.getItem('astra.history.open') === '1');
   const toggleHistory = useCallback(() => {
@@ -1241,40 +1253,59 @@ export default function AgentPage() {
                   ))}
                 </div>
               )}
-              <textarea
-                ref={textareaRef}
-                className="agent-dock__input"
-                value={input}
-                placeholder={
-                  running
-                    ? 'Agent 正在回答…Enter 排队发送 · Ctrl/⌘+Enter 打断并优先发送'
-                    : projectPath
-                      ? '描述任务，例如：读取 @需求.md 并生成方案保存为 txt…'
-                      : '纯聊天模式，顶部选择项目后可用 @ 引用文件 · / 调用技能…'
-                }
-                onChange={handleTextareaChange}
-                onKeyDown={(e) => {
-                  // @ 提及 / / 技能弹出时优先处理导航；处理过的按键不再走发送
-                  if (mention.handleKeydown(e)) return;
-                  if (slash.handleKeydown(e)) return;
-                  // Zed 式：输入框为空时按 ↑ 把队尾消息拉回编辑器（等价 move_to_main_editor）
-                  if (e.key === 'ArrowUp' && input.length === 0 && queuedHere.length > 0) {
-                    e.preventDefault();
-                    editQueued(queuedHere[queuedHere.length - 1]);
-                    return;
+              {/* 高亮镜像层：把已选中的 /技能 与 @文件 画成 chip 底色（Zed 式，文字仍由上层 textarea 呈现） */}
+              <div className="agent-dock__inputwrap">
+                <div
+                  ref={mirrorRef}
+                  className="agent-dock__mirror"
+                  aria-hidden
+                >
+                  {inputTokens.map((t, i) =>
+                    t.chip ? (
+                      <span key={i} className={`agent-dock__hl agent-dock__hl--${t.chip}`}>
+                        {t.text}
+                      </span>
+                    ) : (
+                      <span key={i}>{t.text}</span>
+                    ),
+                  )}
+                </div>
+                <textarea
+                  ref={textareaRef}
+                  className="agent-dock__input"
+                  value={input}
+                  placeholder={
+                    running
+                      ? 'Agent 正在回答…Enter 排队发送 · Ctrl/⌘+Enter 打断并优先发送'
+                      : projectPath
+                        ? '描述任务，例如：读取 @需求.md 并生成方案保存为 txt…'
+                        : '纯聊天模式，顶部选择项目后可用 @ 引用文件 · / 调用技能…'
                   }
-                  if (isSendEnter(e)) {
-                    e.preventDefault();
-                    if (e.metaKey || e.ctrlKey) {
-                      void handleInterruptSend();
-                    } else if (running) {
-                      handleQueueSend();
-                    } else {
-                      void handleSend();
+                  onChange={handleTextareaChange}
+                  onScroll={syncMirrorScroll}
+                  onKeyDown={(e) => {
+                    // @ 提及 / / 技能弹出时优先处理导航；处理过的按键不再走发送
+                    if (mention.handleKeydown(e)) return;
+                    if (slash.handleKeydown(e)) return;
+                    // Zed 式：输入框为空时按 ↑ 把队尾消息拉回编辑器（等价 move_to_main_editor）
+                    if (e.key === 'ArrowUp' && input.length === 0 && queuedHere.length > 0) {
+                      e.preventDefault();
+                      editQueued(queuedHere[queuedHere.length - 1]);
+                      return;
                     }
-                  }
-                }}
-              />
+                    if (isSendEnter(e)) {
+                      e.preventDefault();
+                      if (e.metaKey || e.ctrlKey) {
+                        void handleInterruptSend();
+                      } else if (running) {
+                        handleQueueSend();
+                      } else {
+                        void handleSend();
+                      }
+                    }
+                  }}
+                />
+              </div>
               {/* 底栏（Zed thread_view 式 justify-between 两组）：左 = 上下文/思考模式，右 = 用量 + 模型 + 发送 */}
               <div className="agent-dock__bar">
                 <div className="agent-dock__bar-left">
@@ -1410,6 +1441,57 @@ function parseUserRefs(
   });
 
   return { refs, body: body.trim() };
+}
+
+interface InputToken {
+  text: string;
+  chip: 'skill' | 'file' | null;
+}
+
+/**
+ * 输入框镜像层用 token 化：规则与 parseUserRefs 一致（/技能名仅前缀、@文件任意位置），
+ * 但只标注不消解——未命中已知技能/项目文件的 token 原样保留为纯文本。
+ */
+function tokenizeInput(text: string, skills: UserSkillLite[], fileSet: Set<string>): InputToken[] {
+  const tokens: InputToken[] = [];
+  let plain = '';
+  const flush = () => {
+    if (plain) {
+      tokens.push({ text: plain, chip: null });
+      plain = '';
+    }
+  };
+
+  let rest = text;
+  // 前缀 /技能名（须命中已知技能才提为 chip，与 parseUserRefs 同规则）
+  const sm = rest.match(/^\/([\w\u4e00-\u9fff.-]+)/);
+  if (sm && skills.some((s) => s.name === sm[1])) {
+    tokens.push({ text: sm[0], chip: 'skill' });
+    rest = rest.slice(sm[0].length);
+  }
+
+  // @文件路径 token（须命中项目文件列表；贪婪匹配吞掉的尾点留在正文）
+  while (rest) {
+    const m = rest.match(/@([\w\u4e00-\u9fff./-]+)/);
+    if (!m) {
+      plain += rest;
+      break;
+    }
+    plain += rest.slice(0, m.index);
+    const name = m[1];
+    const bare = name.replace(/\.+$/, '');
+    const hit = fileSet.has(name) ? name : fileSet.has(bare) ? bare : null;
+    if (hit) {
+      flush();
+      tokens.push({ text: `@${hit}`, chip: 'file' });
+      rest = rest.slice((m.index ?? 0) + 1 + hit.length);
+    } else {
+      plain += m[0];
+      rest = rest.slice((m.index ?? 0) + m[0].length);
+    }
+  }
+  flush();
+  return tokens;
 }
 
 /** 圆点悬停预览：压成单行、限 60 字符 */

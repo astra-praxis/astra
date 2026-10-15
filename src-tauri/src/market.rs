@@ -846,7 +846,7 @@ pub async fn market_mcp_install(id: String) -> Result<InstallResult, String> {
     Ok(InstallResult {
         ok: true,
         message: format!(
-            "{} 安装完成（{kind_label} '{}' 已写入 ~/.astra/config.toml）{}。新建会话后生效。",
+            "{} 安装完成（{kind_label} '{}' 已写入 ~/.astra/config.toml）{}。新建会话生效；老会话可在扩展页点「重载扩展」后生效。",
             entry.name, entry.id, download_note
         ),
     })

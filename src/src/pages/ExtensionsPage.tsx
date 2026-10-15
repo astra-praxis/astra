@@ -2,7 +2,8 @@
  * 扩展管理页：查看 / 启停 / 编辑 / 删除已配置的 MCP Server 与 ACP Agent
  *
  * 配置本体在 astra.toml（[mcp.servers.*] / [acp.agents.*]），
- * 本页是它的可视化管理面；所有修改仅对新会话生效（工具集合建 Thread 时冻结）。
+ * 本页是它的可视化管理面；修改默认对新会话生效，
+ * 老会话可通过运行状态区的「重载扩展」按钮卸载内存后重建（历史保留）。
  */
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -15,6 +16,7 @@ import {
   RefreshCw,
   FileWarning,
   ToggleLeft,
+  RotateCw,
 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import './ExtensionsPage.scss';
@@ -112,6 +114,8 @@ export default function ExtensionsPage() {
   const [edit, setEdit] = useState<EditTarget | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
   const [runtime, setRuntime] = useState<SessionRuntimeStatus[] | null>(null);
+  const [reloadingId, setReloadingId] = useState<string | null>(null);
+  const [reloadedId, setReloadedId] = useState<string | null>(null);
 
   const refreshRuntime = useCallback(async () => {
     try {
@@ -142,6 +146,27 @@ export default function ExtensionsPage() {
     const timer = setInterval(() => void refreshRuntime(), 5000);
     return () => clearInterval(timer);
   }, [refresh, refreshRuntime]);
+
+  // 老会话拿新装扩展：卸载内存 Thread（历史保留在 sqlite），下次对话
+  // 走重建分支重新 load ~/.astra/config.toml 并装配 MCP/ACP。
+  // 正在运行的会话会被后端拒绝（try_lock 失败），展示错误即可。
+  const reloadSession = useCallback(
+    async (sessionId: string) => {
+      setReloadingId(sessionId);
+      setReloadedId(null);
+      try {
+        await invoke('agent_reset_session', { sessionId });
+        setReloadedId(sessionId);
+      } catch (e) {
+        setReloadedId(null);
+        setError(`重载失败: ${String(e)}`);
+      } finally {
+        setReloadingId(null);
+        void refreshRuntime();
+      }
+    },
+    [refreshRuntime],
+  );
 
   const toggleEnabled = async (kind: Kind, id: string, enabled: boolean) => {
     const key = `${kind}/${id}`;
@@ -320,9 +345,25 @@ export default function ExtensionsPage() {
         ) : (
           runtime.map((session) => (
             <div key={session.sessionId} className="runtime-session">
-              <div className="runtime-session-id" title={session.sessionId}>
-                {session.sessionId}
+              <div className="runtime-session-head">
+                <div className="runtime-session-id" title={session.sessionId}>
+                  {session.sessionId}
+                </div>
+                <button
+                  className="runtime-reload-btn"
+                  disabled={reloadingId === session.sessionId}
+                  title="卸载会话内存并重新装配扩展（历史记录保留，下次对话生效）"
+                  onClick={() => void reloadSession(session.sessionId)}
+                >
+                  <RotateCw size={12} className={reloadingId === session.sessionId ? 'spin' : ''} />
+                  {reloadingId === session.sessionId ? '重载中...' : '重载扩展'}
+                </button>
               </div>
+              {reloadedId === session.sessionId && (
+                <div className="runtime-reload-hint">
+                  已卸载会话内存，下次对话时自动重新装配扩展（历史记录保留）
+                </div>
+              )}
               {session.mcp.length === 0 && session.acp.length === 0 && (
                 <div className="runtime-empty">该会话未配置扩展</div>
               )}

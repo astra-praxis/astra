@@ -364,6 +364,14 @@
     border: 1px solid var(--border-light);
     border-radius: 10px;
 
+    .runtime-session-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
     .runtime-session-id {
       font-size: 12px;
       font-family: var(--font-mono, monospace);
@@ -371,6 +379,48 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      min-width: 0;
+    }
+
+    .runtime-reload-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid var(--border-light);
+      border-radius: 7px;
+      cursor: pointer;
+      transition:
+        color 0.15s,
+        border-color 0.15s,
+        background 0.15s;
+
+      &:hover:not(:disabled) {
+        color: var(--text-primary);
+        border-color: var(--border-strong, var(--border-light));
+        background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .spin {
+        animation: ext-spin 0.8s linear infinite;
+      }
+    }
+
+    .runtime-reload-hint {
+      font-size: 12px;
+      color: var(--text-tertiary, var(--text-secondary));
+      padding: 6px 10px;
+      background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+      border-radius: 7px;
     }
   }
 

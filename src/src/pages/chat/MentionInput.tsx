@@ -98,13 +98,27 @@ function tokenize(value: string, skills: UserSkillLite[], fileSet: Set<string>):
 
 const CHIP_CLASS = 'minput__chip';
 
+
+
+// 零宽空格光标锚点：chip 是 contenteditable=false，紧贴其后没有真实文本时
+// WebKit 无法可靠落点/删除（光标被归一化、原生删除拒绝作用于不可编辑节点）。
+// 锚点在序列化与偏移换算中长度记 0，对值与光标计算无影响。
+const ZWSP = '\u200B';
+const ZWSP_RE = /\u200B/g;
+
+function isZwspText(n: Node | null): n is Text {
+  return !!n && n.nodeType === Node.TEXT_NODE && n.textContent === ZWSP;
+}
+
 function isChipEl(n: Node | null): n is HTMLElement {
   return !!n && n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).classList.contains(CHIP_CLASS);
 }
 
 /** 节点的纯文本长度（chip 记作 token 长度、br 记 1，保证与序列化值一一对应） */
+
 function nodeLen(n: Node): number {
-  if (n.nodeType === Node.TEXT_NODE) return n.textContent?.length ?? 0;
+
+  if (n.nodeType === Node.TEXT_NODE) return (n.textContent ?? '').replace(ZWSP_RE, '').length;
   if (n.nodeType !== Node.ELEMENT_NODE) return 0;
   const el = n as Element;
   if (el.tagName === 'BR') return 1;
@@ -125,7 +139,8 @@ function serializeEl(root: HTMLElement): string {
 }
 
 function nodeToText(n: Node): string {
-  if (n.nodeType === Node.TEXT_NODE) return n.textContent ?? '';
+
+  if (n.nodeType === Node.TEXT_NODE) return (n.textContent ?? '').replace(ZWSP_RE, '');
   if (n.nodeType !== Node.ELEMENT_NODE) return '';
   const el = n as Element;
   if (el.tagName === 'BR') return '\n';
@@ -145,17 +160,30 @@ function offsetIn(root: HTMLElement, container: Node, offset: number): number {
     return sum;
   }
   if (container.nodeType === Node.TEXT_NODE) {
+
     let sum = 0;
+
     let cur: Node | null = container;
+
     while (cur && cur !== root) {
+
       let sib = cur.previousSibling;
+
       while (sib) {
+
         sum += nodeLen(sib);
+
         sib = sib.previousSibling;
+
       }
+
       cur = cur.parentNode;
+
     }
-    return sum + offset;
+
+    // 文本内偏移按「光标前有效字符数」计（剔除 ZWSP，锚点不占值空间）
+    return sum + (container.textContent ?? '').slice(0, offset).replace(ZWSP_RE, '').length;
+
   }
   const parent = container.parentNode;
   if (!parent) return 0;
@@ -179,9 +207,27 @@ function placeCaret(root: HTMLElement, target: number): void {
   const walk = (n: Node): void => {
     if (found) return;
     if (n.nodeType === Node.TEXT_NODE) {
-      const len = n.textContent?.length ?? 0;
+      const raw = n.textContent ?? '';
+      const len = raw.replace(ZWSP_RE, '').length;
+      // 零宽锚点（有效长度 0）：target 恰在边界时落进锚点内部，让光标
+      // 始终处于真实文本节点中，避开 WebKit 对贴着不可编辑元素的光标归一化
+      if (raw === ZWSP && acc >= target) {
+        found = { node: n, offset: 0 };
+        return;
+      }
       if (acc + len >= target) {
-        found = { node: n, offset: target - acc };
+        // 找第 target-acc 个非 ZWSP 字符的原始偏移
+        let k = target - acc;
+        for (let i = 0; i < raw.length; i++) {
+          if (raw[i] !== ZWSP) {
+            if (k === 0) {
+              found = { node: n, offset: i };
+              return;
+            }
+            k--;
+          }
+        }
+        found = { node: n, offset: raw.length };
         return;
       }
       acc += len;
@@ -219,13 +265,17 @@ function placeCaret(root: HTMLElement, target: number): void {
 /** 由值字符串重建 DOM（chip-ify 已命中的 token），外部值同步的唯一入口 */
 function rebuildDOM(root: HTMLElement, value: string, skills: UserSkillLite[], fileSet: Set<string>): void {
   root.replaceChildren();
-  for (const seg of tokenize(value, skills, fileSet)) {
+  const segs = tokenize(value, skills, fileSet);
+  segs.forEach((seg, i) => {
     if (seg.chip) {
       root.appendChild(buildChip(seg.chip, seg.text));
+      // chip 后没有真实文本段时补零宽锚点，保证光标有可落的文本节点
+      const next = segs[i + 1];
+      if (!next || next.chip) root.appendChild(document.createTextNode(ZWSP));
     } else {
       root.appendChild(document.createTextNode(seg.text));
     }
-  }
+  });
 }
 
 const CHIP_ICONS: Record<'skill' | 'file', string> = {
@@ -446,21 +496,93 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
         return;
       }
 
-      // 3) Backspace 删除紧贴光标前的 chip（原子删除）
-      if (e.key === 'Backspace') {
+      // 3) Backspace / Forward-Delete 原子删 chip。WebKit 会把贴着
+      //    contenteditable=false 元素的光标归一化到不可靠位置，原生删除
+      //    也经常拒绝对不可编辑节点生效，因此不依赖单一几何判断：向删除
+      //    方向找邻居（可跨越 ZWSP 锚点与纯空白分隔符），命中 chip 则连同
+      //    分隔空格一并移除（Slack 式原子删除）。
+      if (e.key === 'Backspace' || e.key === 'Delete') {
         const s = window.getSelection();
-        if (s && s.rangeCount > 0 && s.isCollapsed) {
+        if (s && s.rangeCount > 0 && !s.isCollapsed) {
+          // WebKit 首次 Backspace 会把不可编辑 chip 变为「选中」而非删除：
+          // 选区恰好覆盖顶层 chip 时直接原子移除
           const range = s.getRangeAt(0);
-          let prev: Node | null = null;
-          if (range.startContainer === el && range.startOffset > 0) {
-            prev = el.childNodes[range.startOffset - 1] ?? null;
-          } else if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset === 0) {
-            prev = range.startContainer.previousSibling;
+          if (range.startContainer === el && range.endContainer === el) {
+            for (let i = range.startOffset; i < range.endOffset; i++) {
+              const n = el.childNodes[i];
+              if (isChipEl(n)) {
+                e.preventDefault();
+                const nx = n.nextSibling;
+                if (isZwspText(nx)) nx.remove();
+                n.remove();
+                onChangeRef.current(serializeEl(el));
+                return;
+              }
+            }
           }
-          if (isChipEl(prev)) {
+        } else if (s && s.rangeCount > 0 && s.isCollapsed) {
+          const range = s.getRangeAt(0);
+          const { startContainer, startOffset } = range;
+          const back = e.key === 'Backspace';
+          let node: Node | null = null;
+          let anchor: Text | null = null;
+          if (startContainer === el) {
+            node = el.childNodes[startOffset + (back ? -1 : 0)] ?? null;
+          } else if (startContainer.nodeType === Node.TEXT_NODE) {
+            const t = startContainer as Text;
+            const raw = t.textContent ?? '';
+            const nearRaw = back ? raw.slice(0, startOffset) : raw.slice(startOffset);
+            const near = nearRaw.replace(ZWSP_RE, '');
+            if (back && startOffset === 0) {
+              node = t.previousSibling;
+            } else if (!back && startOffset === raw.length) {
+              node = t.nextSibling;
+            } else if (near.length === 0 && nearRaw.length > 0) {
+              // 光标紧贴零宽锚点：跨过它找 chip，删除时顺带清掉这段 ZWSP
+              anchor = t;
+              node = back ? t.previousSibling : t.nextSibling;
+            } else if (near.length > 0 && !/\S/.test(near)) {
+              // 光标与 chip 之间只有空白（pickToken 的分隔空格）：原子删除
+              anchor = t;
+              node = back ? t.previousSibling : t.nextSibling;
+            }
+          }
+          if (node && isZwspText(node)) {
+            anchor = node;
+            node = back ? node.previousSibling : node.nextSibling;
+          }
+          if (isChipEl(node)) {
             e.preventDefault();
-            prev.remove();
+            // chip 在值空间的起点（删除后光标回到这里）
+            let chipStart = 0;
+            for (const c of Array.from(el.childNodes)) {
+              if (c === node) break;
+              chipStart += nodeLen(c);
+            }
+            if (anchor) {
+              if (anchor.textContent === ZWSP) {
+                anchor.remove();
+              } else if (anchor === startContainer) {
+                // 只剥掉光标到 chip 之间的空白/ZWSP，保留真实文本
+                anchor.textContent = back
+                  ? (anchor.textContent ?? '').slice(startOffset)
+                  : (anchor.textContent ?? '').slice(0, startOffset);
+              }
+            }
+            // 清掉 chip 自身尾随的分隔空格，避免删除后出现双空格
+            const next = node.nextSibling;
+            if (
+              next &&
+              next !== anchor &&
+              next.nodeType === Node.TEXT_NODE &&
+              (next.textContent ?? '').startsWith(' ')
+            ) {
+              (next as Text).textContent = (next.textContent ?? '').slice(1);
+            }
+            node.remove();
+            caretRef.current = chipStart;
             onChangeRef.current(serializeEl(el));
+            placeCaret(el, chipStart);
             return;
           }
         }
@@ -479,7 +601,15 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
     if (!target || !el) return;
     e.preventDefault();
     e.stopPropagation();
-    target.closest(`.${CHIP_CLASS}`)?.remove();
+    const chip = target.closest(`.${CHIP_CLASS}`);
+    if (!chip) return;
+    // 同步清掉 chip 的尾随分隔（锚点 / 单个空格），避免删除后双空格
+    const nx = chip.nextSibling;
+    if (isZwspText(nx)) nx.remove();
+    else if (nx && nx.nodeType === Node.TEXT_NODE && (nx.textContent ?? '').startsWith(' ')) {
+      (nx as Text).textContent = (nx.textContent ?? '').slice(1);
+    }
+    chip.remove();
     onChangeRef.current(serializeEl(el));
   }, []);
 

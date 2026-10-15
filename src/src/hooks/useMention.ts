@@ -14,14 +14,14 @@
 import { useState, type RefObject } from 'react';
 
 /** 检测用正则：@ 后跟字母/数字/中文/点/连字符/斜杠（停止在空格、换行等处） */
-const MENTION_DETECT_RE = /(?:^|\s)@([\w\u4e00-\u9fff./-]*)$/;
+export const MENTION_DETECT_RE = /(?:^|\s)@([\w\u4e00-\u9fff./-]*)$/;
 
 /**
  * 是否为「发送」Enter。
  * 中文输入法确认时 macOS WKWebView 会发 keyCode 229 的 Enter
  * （isComposing 可能已是 false），两个条件都要拦，否则选字回车会直接发送。
  */
-export function isSendEnter(e: React.KeyboardEvent<HTMLTextAreaElement>): boolean {
+export function isSendEnter(e: React.KeyboardEvent<HTMLElement>): boolean {
   return e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229;
 }
 

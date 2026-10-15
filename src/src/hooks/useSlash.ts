@@ -15,7 +15,7 @@ export interface UserSkillLite {
 }
 
 /** 检测用正则：/ 后跟字母/数字/中文/点/连字符（停止在空格、换行等处） */
-const SLASH_DETECT_RE = /(?:^|\s)\/([\w\u4e00-\u9fff.-]*)$/;
+export const SLASH_DETECT_RE = /(?:^|\s)\/([\w\u4e00-\u9fff.-]*)$/;
 
 export interface UseSlashResult {
   active: boolean;

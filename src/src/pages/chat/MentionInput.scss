@@ -1,0 +1,111 @@
+// ============================================================
+// Agent 输入框（contenteditable chip 编辑器）
+// 排版沿用原 .agent-dock__input（字号/行高/高度约束一致）；
+// chip 配色沿用气泡 .aentry__ref 的语义色（技能 warning / 文件 brand）。
+// ============================================================
+
+.minput {
+  position: relative;
+  width: 100%;
+
+  // 弹层：绝对定位浮在输入框上方（不再把 dock 顶下去，Slack/Zed 式 overlay）
+  &__popups {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+
+    .mention-popup {
+      margin: 0;
+    }
+  }
+
+  &__editor {
+    width: 100%;
+    min-height: 44px;
+    max-height: 160px;
+    overflow-y: auto;
+    padding: 2px;
+    font-size: 14.5px;
+    font-family: inherit;
+    line-height: 1.5;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    outline: none;
+    caret-color: var(--brand-500);
+    cursor: text;
+
+    // 空内容占位（清空后残留 <br> 由组件归一化移除，保证 :empty 命中）
+    &:empty::before {
+      content: attr(data-placeholder);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+  }
+
+  // 内联 tag：图标 + 名称 + 删除按钮
+  &__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 7px;
+    margin: 0 1px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+    border-radius: 999px;
+    vertical-align: baseline;
+    user-select: none;
+    cursor: default;
+    transition: box-shadow 0.12s ease;
+
+    svg {
+      flex-shrink: 0;
+    }
+
+    &--skill {
+      color: var(--warning-700);
+      background: var(--warning-50);
+      border: 1px solid var(--warning-200);
+
+      &:hover {
+        box-shadow: 0 0 0 2px var(--warning-100, var(--warning-50));
+      }
+    }
+
+    &--file {
+      color: var(--brand-700);
+      background: var(--brand-50);
+      border: 1px solid var(--brand-200);
+
+      &:hover {
+        box-shadow: 0 0 0 2px var(--brand-100);
+      }
+    }
+  }
+
+  &__chip-label {
+    // 文件路径可能较长：chip 内截断，避免撑破输入框
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__chip-x {
+    display: inline-flex;
+    align-items: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    opacity: 0.5;
+    cursor: pointer;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+}

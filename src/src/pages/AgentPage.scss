@@ -1211,8 +1211,14 @@ body .content:has(.agent-root) {
     white-space: nowrap;
   }
 
-  &__queue-remove {
+  &__queue-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
     flex-shrink: 0;
+  }
+
+  &__queue-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1226,8 +1232,23 @@ body .content:has(.agent-root) {
     transition: background 0.12s ease, color 0.12s ease;
 
     &:hover {
+      background: var(--bg-mention, rgba(0, 0, 0, 0.06));
+      color: var(--text-primary);
+    }
+
+    &.is-send:hover {
+      background: var(--brand-100);
+      color: var(--brand-600);
+    }
+
+    &.is-danger:hover {
       background: var(--danger-50, rgba(220, 38, 38, 0.1));
       color: var(--danger-500, #dc2626);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
     }
   }
 

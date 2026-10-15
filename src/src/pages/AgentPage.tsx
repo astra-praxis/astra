@@ -31,6 +31,7 @@ import {
   MonitorUp,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   RotateCcw,
   Copy,
@@ -50,6 +51,7 @@ import {
   THINKING_EFFORTS,
   type AgentUsage,
   type Entry,
+  type QueuedMessage,
   type ThinkingEffort,
 } from '@/stores/agent';
 import { useWorkspaceStore } from '@/stores/workspace';
@@ -726,6 +728,40 @@ export default function AgentPage() {
     }
   }, [input, parseSendInput, enqueueMessage, setInput, setError, busySessionId, sessionId]);
 
+  /** 编辑排队消息（Zed move_queued_message_to_main_editor 语义）：
+   *  从队列移除，原文回填主输入框并聚焦到末尾，改完再自行发送 */
+  const editQueued = useCallback((q: QueuedMessage) => {
+    removeQueued(q.id);
+    setInput(q.raw);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(q.raw.length, q.raw.length);
+    });
+  }, [removeQueued, setInput]);
+
+  /** 立即发送指定排队消息（Zed send_queued_message_now 语义）：
+   *  空闲时直接发；本会话运行中则取消当前 Run 后立即发（消息插队首，
+   *  settled 后由续发 effect 发出）；别的会话占用后端时仅插队不打断 */
+  const sendQueuedNow = useCallback(async (q: QueuedMessage) => {
+    const st = useAgentStore.getState();
+    const interruptible = st.running && !st.settling && (busySessionId === null || busySessionId === q.sessionId);
+    removeQueued(q.id);
+    if (interruptible) {
+      enqueueMessage(q.raw, q.text, q.skill, { front: true });
+      try {
+        await invoke('agent_cancel');
+      } catch (error) {
+        setError(`停止失败：${String(error)}`);
+      }
+    } else if (!st.running && !st.settling && !st.sessionBusy) {
+      void doSend(q.raw, q.skill, q.text);
+    } else {
+      enqueueMessage(q.raw, q.text, q.skill, { front: true });
+    }
+  }, [busySessionId, removeQueued, enqueueMessage, doSend, setError]);
+
   // ===== 队列续发：Run 结束后自动发出当前会话的队首消息。
   //  上一条以 failed 终态收尾时暂停自动续发（防模型配置错误时连环烧完队列），
   //  用户手动发送成功一次后恢复。后端在 settled 事件前已释放准入锁，无需重试。
@@ -1166,15 +1202,40 @@ export default function AgentPage() {
                     <div key={q.id} className="agent-dock__queue-item" role="listitem">
                       <span className="agent-dock__queue-badge">{i === 0 ? '下一条' : `#${i + 1}`}</span>
                       <span className="agent-dock__queue-text" title={q.raw}>{q.text || q.raw}</span>
-                      <button
-                        type="button"
-                        className="agent-dock__queue-remove"
-                        onClick={() => removeQueued(q.id)}
-                        aria-label="移除排队消息"
-                        title="移除"
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
+                      <div className="agent-dock__queue-actions">
+                        <button
+                          type="button"
+                          className="agent-dock__queue-btn"
+                          onClick={() => editQueued(q)}
+                          aria-label="编辑排队消息"
+                          title="编辑（放回输入框）"
+                        >
+                          <Pencil size={12} strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-dock__queue-btn is-send"
+                          disabled={settling}
+                          onClick={() => void sendQueuedNow(q)}
+                          aria-label="立即发送"
+                          title={
+                            running && (busySessionId === null || busySessionId === q.sessionId)
+                              ? '打断当前回答并立即发送'
+                              : '立即发送'
+                          }
+                        >
+                          <ArrowRight size={12} strokeWidth={2.2} />
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-dock__queue-btn is-danger"
+                          onClick={() => removeQueued(q.id)}
+                          aria-label="移除排队消息"
+                          title="移除"
+                        >
+                          <X size={12} strokeWidth={2} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1195,6 +1256,12 @@ export default function AgentPage() {
                   // @ 提及 / / 技能弹出时优先处理导航；处理过的按键不再走发送
                   if (mention.handleKeydown(e)) return;
                   if (slash.handleKeydown(e)) return;
+                  // Zed 式：输入框为空时按 ↑ 把队尾消息拉回编辑器（等价 move_to_main_editor）
+                  if (e.key === 'ArrowUp' && input.length === 0 && queuedHere.length > 0) {
+                    e.preventDefault();
+                    editQueued(queuedHere[queuedHere.length - 1]);
+                    return;
+                  }
                   if (isSendEnter(e)) {
                     e.preventDefault();
                     if (e.metaKey || e.ctrlKey) {

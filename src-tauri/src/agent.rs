@@ -436,6 +436,16 @@ async fn attach_extensions(
             "[extensions] ACP: {} agent(s) 已注册（见上方失败日志，如有）",
             report.loaded.len()
         );
+        // D7.1：调用外部 Agent 本身复用既有 decide 管线——装配期对每个注册
+        // 成功的 agent 生成 Confirm 规则（risk=High 不降级，未配置即 Confirm）。
+        // [acp.agents.*].permission 只管第二层 request_permission 应答，
+        // 不驱动本层。名字必须与 adapter 注册名一致（normalize_tool_name）。
+        for id in &report.loaded {
+            config
+                .policy
+                .confirm_tools
+                .push(astra_acp::normalize_tool_name(id));
+        }
         // manager 保活在 state.extensions：adapter 持有连接不影响调用，
         // 保活额外让崩溃降级 / 懒重连 / 运行状态查询可用。
         handles.acp.push(std::sync::Arc::new(manager));

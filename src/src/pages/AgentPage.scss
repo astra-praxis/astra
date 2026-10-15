@@ -496,6 +496,26 @@ body .content:has(.agent-root) {
       white-space: pre-wrap;
       word-break: break-word;
     }
+
+    // 附图网格（多模态 M1）：规范 PNG 缩略图，点击无交互（数据已在会话内）
+    .aentry__imgs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+
+      &:not(:last-child) {
+        margin-bottom: 8px;
+      }
+    }
+
+    .aentry__img {
+      max-width: 220px;
+      max-height: 160px;
+      object-fit: contain;
+      border-radius: 8px;
+      border: 1px solid var(--user-bubble-border);
+      background: var(--bg-surface-soft);
+    }
   }
 
   &--assistant {
@@ -1192,6 +1212,53 @@ body .content:has(.agent-root) {
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
+  }
+
+  // 附图预览条（多模态 M1）：发送前可移除的单张缩略图
+  &__attach {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  &__attach-item {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface-soft);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+  }
+
+  &__attach-remove {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--bg-body) 78%, transparent);
+    color: var(--text-secondary);
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    transition: background 0.12s ease, color 0.12s ease;
+
+    &:hover {
+      background: var(--danger-50);
+      color: var(--danger-600);
+    }
   }
 
   // 图标按钮：对齐 dock__iconbtn 的比例（28px 规范下取 24px 适配队列行高）

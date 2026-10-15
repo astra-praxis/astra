@@ -124,6 +124,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "futures-util",
+ "image",
  "libc",
  "reqwest 0.12.28",
  "rusqlite",
@@ -163,6 +164,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "astra-config",
  "astra-core",
+ "astra-generation",
  "astra-store-sqlite",
  "astra-workspace",
 ]
@@ -225,6 +227,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-generation"
+version = "1.0.0-rc.1"
+dependencies = [
+ "astra-error",
+ "astra-model",
+ "async-trait",
+ "base64 0.22.1",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "astra-local"
+version = "1.0.0-rc.1"
+
+[[package]]
 name = "astra-mcp"
 version = "1.0.0-rc.1"
 dependencies = [
@@ -251,6 +272,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -261,6 +283,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "astra-error",
  "astra-events",
+ "astra-local",
  "async-trait",
  "glob",
  "serde",
@@ -300,6 +323,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "astra-error",
  "astra-events",
+ "astra-generation",
  "async-trait",
  "serde",
  "serde_json",
@@ -313,6 +337,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "astra-error",
  "astra-events",
+ "astra-generation",
  "astra-model",
  "astra-permission",
  "astra-skill",

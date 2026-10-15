@@ -635,3 +635,25 @@ test('message queue: deleting or closing a session drops its queued messages', a
   mod.getState().closeTab(mod.getState().sessionId);
   assert.equal(mod.getState().queue.length, 0);
 });
+
+test('multimodal: pushUser and enqueueMessage carry attached images', () => {
+  const store = load().useAgentStore;
+  const img = { data: 'aGk=', width: 1, height: 1 };
+  // 无图时不写 images 字段：旧会话 JSON 形状不变
+  store.getState().pushUser('纯文本');
+  const plain = store.getState().entries.at(-1);
+  assert.equal(plain.kind, 'user');
+  assert.ok(!('images' in plain));
+  // 纯图片消息合法（文本为空）
+  store.getState().pushUser('', [img]);
+  const withImg = store.getState().entries.at(-1);
+  assert.deepEqual(withImg.images, [img]);
+  assert.equal(withImg.text, '');
+  // 排队消息同样携带附图，出队续发时可达 doSend
+  store.getState().enqueueMessage('排队', '排队', null, undefined, [img]);
+  const queued = store.getState().queue.at(-1);
+  assert.deepEqual(queued.images, [img]);
+  // 无图排队不写字段
+  store.getState().enqueueMessage('排队2', '排队2', null);
+  assert.ok(!('images' in store.getState().queue.at(-1)));
+});

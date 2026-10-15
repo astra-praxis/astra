@@ -15,12 +15,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use agent_core::model::ImageContent;
 use agent_core::skill_tools::truncate_desc;
 use agent_core::{
-    ChatMessage, Decision, Envelope, ModelBackend, PermissionBridge, PermissionRequest, RigBackend,
-    Role, RunHandle, ThreadConfig, ToolPolicy, ToolRegistry, DEFAULT_AUTO_COMPACT_TOKENS,
-    DEFAULT_MAX_TURNS,
+    ChatMessage, Decision, Envelope, MessageContent, ModelBackend, PermissionBridge,
+    PermissionRequest, RigBackend, Role, RunHandle, ThreadConfig, ToolPolicy, ToolRegistry,
+    DEFAULT_AUTO_COMPACT_TOKENS, DEFAULT_MAX_TURNS,
 };
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -565,6 +567,14 @@ fn image_encoding(enabled: bool) -> agent_core::model::ImageEncoding {
 
 // ===== 命令 =====
 
+/// 用户附带图片的传输形状（与 astra-core `ImageContent` 对齐：base64 规范 PNG）
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentImageInput {
+    pub data: String,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AgentStartReq {
     /// API 来源：provider_id 与 model_port 二选一
@@ -584,6 +594,10 @@ pub struct AgentStartReq {
     /// 前端生成的会话 id（同会话复用 Thread 与历史）
     pub session_id: String,
     pub user_text: String,
+    /// 用户附带的图片（规范 PNG 的 base64 与尺寸，经 agent_normalize_image 归一化）。
+    /// 需要后端 vision 能力（image_recognition 开启）；与文本保持顺序（文本在前）。
+    #[serde(default)]
+    pub images: Vec<AgentImageInput>,
     /// Explicit consent for image-capable model/gateway requests. Never inferred from names.
     #[serde(default)]
     pub image_recognition: bool,
@@ -593,6 +607,55 @@ pub struct AgentStartReq {
     /// Reasoning effort level (e.g. low/medium/high); requires a thinking-capable model.
     #[serde(default)]
     pub thinking_effort: Option<String>,
+}
+
+/// 单条消息最多附带图片数（与 core 的 MAX_IMAGES_PER_REQUEST 一致；
+/// 工具图与本图共享该预算，超限时由 core 二次校验明确拒绝）
+const MAX_ATTACHED_IMAGES: usize = agent_core::model::image::MAX_IMAGES_PER_REQUEST;
+
+/// 组装用户输入内容块（多模态 M1）。
+///
+/// 顺序：文本块在前（技能包装只影响文本），图片块随后。纯图片消息允许
+/// （文本为空时不产生空文本块）；core 的 `try_send_content` 做最终准入校验
+/// （vision 能力、预算、PNG 有效性），此处只做宿主侧的快速失败。
+fn build_user_content(
+    user_text: &str,
+    images: &[AgentImageInput],
+    skill: Option<&str>,
+    skills_dir: &Option<std::path::PathBuf>,
+) -> Result<Vec<MessageContent>, String> {
+    if images.len() > MAX_ATTACHED_IMAGES {
+        return Err(format!("单条消息最多附带 {MAX_ATTACHED_IMAGES} 张图片"));
+    }
+    let text = match skill {
+        None => user_text.to_string(),
+        Some(skill_name) => {
+            let dir = skills_dir
+                .as_ref()
+                .ok_or_else(|| format!("技能库不可用，无法加载技能 '{skill_name}'"))?;
+            let content = crate::user_skills::read_skill_content(dir, skill_name, None)
+                .map_err(|e| e.to_string())?;
+            format!(
+                "【用户通过 /{skill_name} 指定了技能，请先阅读以下技能说明并严格按其执行】\n\n{content}\n\n---\n\n用户任务：{user_text}"
+            )
+        }
+    };
+    let mut content = Vec::new();
+    if !text.trim().is_empty() {
+        content.push(MessageContent::text(text));
+    }
+    for img in images {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(img.data.as_bytes())
+            .map_err(|_| "图片数据不是合法的 base64".to_string())?;
+        let image = ImageContent::from_png(&bytes, img.width, img.height)
+            .map_err(|e| format!("图片未通过规范校验：{e}"))?;
+        content.push(MessageContent::Image { image });
+    }
+    if content.is_empty() {
+        return Err("消息内容为空".into());
+    }
+    Ok(content)
 }
 
 /// 启动一次 Run（多轮对话中的一轮）。事件经 `agent-event` 流出。
@@ -767,19 +830,9 @@ pub async fn agent_start_run(
     }
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Envelope>(1024);
-    // /技能名 指定：技能内容注入本次用户消息（Thread 按会话复用，不能靠 system prompt）
-    let user_text = match &req.skill {
-        None => user_text,
-        Some(skill_name) => {
-            let dir = skills_dir
-                .as_ref()
-                .ok_or_else(|| format!("技能库不可用，无法加载技能 '{skill_name}'"))?;
-            let content = crate::user_skills::read_skill_content(dir, skill_name, None)?;
-            format!(
-                "【用户通过 /{skill_name} 指定了技能，请先阅读以下技能说明并严格按其执行】\n\n{content}\n\n---\n\n用户任务：{user_text}"
-            )
-        }
-    };
+    // 多模态 M1：组装用户输入内容块（文本在前、图片随后，保持原始顺序）。
+    // /技能名 指定：技能内容只包装文本块（技能匹配从不接触图片数据）。
+    let content = build_user_content(&user_text, &req.images, req.skill.as_deref(), &skills_dir)?;
     let thread = threads
         .threads
         .get(&session_id)
@@ -797,7 +850,7 @@ pub async fn agent_start_run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&session_id);
-    let handle = match thread.try_send(user_text, tx) {
+    let handle = match thread.try_send_content(content, tx) {
         Ok(handle) => handle,
         Err(error) => {
             if let Some(previous_error) = previous_error {
@@ -1265,6 +1318,50 @@ fn _assert_types(_: ChatMessage, _: Role) {}
 mod tests {
     use super::*;
 
+    /// 多模态 M1：内容块组装（文本在前图片随后，纯图片合法，空输入拒绝）
+    #[test]
+    fn build_user_content_orders_text_and_images() {
+        let png: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xDD, 0x8D,
+            0xB0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let img = |data: &str| AgentImageInput {
+            data: data.into(),
+            width: 1,
+            height: 1,
+        };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+        let no_dir: Option<std::path::PathBuf> = None;
+
+        // 纯文本：单 Text 块（与旧 try_send 行为一致）
+        let content = build_user_content("hello", &[], None, &no_dir).unwrap();
+        assert_eq!(content.len(), 1);
+        assert!(matches!(&content[0], MessageContent::Text { text } if text == "hello"));
+
+        // 文本 + 图片：顺序保持，图片为合法 Image 块
+        let content = build_user_content("看图", &[img(&b64)], None, &no_dir).unwrap();
+        assert_eq!(content.len(), 2);
+        assert!(matches!(&content[0], MessageContent::Text { .. }));
+        assert!(matches!(&content[1], MessageContent::Image { .. }));
+
+        // 纯图片：允许（无空文本块）
+        let content = build_user_content("", &[img(&b64)], None, &no_dir).unwrap();
+        assert_eq!(content.len(), 1);
+        assert!(matches!(&content[0], MessageContent::Image { .. }));
+
+        // 空输入拒绝；非法 base64 / 坏 PNG 拒绝
+        assert!(build_user_content("", &[], None, &no_dir).is_err());
+        assert!(build_user_content("hi", &[img("!!!")], None, &no_dir).is_err());
+        let bad = base64::engine::general_purpose::STANDARD.encode(b"broken png bytes");
+        assert!(build_user_content("hi", &[img(&bad)], None, &no_dir).is_err());
+
+        // 技能无技能库时明确报错（不静默降级为纯文本）
+        assert!(build_user_content("hi", &[], Some("demo"), &no_dir).is_err());
+    }
+
     #[test]
     fn image_recognition_defaults_off_and_configures_capability() {
         let req: AgentStartReq = serde_json::from_value(json!({
@@ -1369,15 +1466,16 @@ mod tests {
             .await
             .expect("shell_background call");
         assert!(
-            out.content.contains("已纳入统一任务跟踪 task_id=task_"),
+            out.content
+                .contains("Adopted into unified task tracking as task_id=task_"),
             "summary should surface unified task id: {}",
             out.content
         );
         let unified_id = out
             .content
-            .split("已纳入统一任务跟踪 task_id=")
+            .split("Adopted into unified task tracking as task_id=")
             .nth(1)
-            .and_then(|s| s.split(&['：', ' '][..]).next())
+            .and_then(|s| s.split(&['：', ':', ' '][..]).next())
             .expect("unified task id")
             .to_string();
 
@@ -1389,14 +1487,14 @@ mod tests {
                 .call(json!({ "task_id": unified_id }), &ctx)
                 .await
                 .expect("task_status call");
-            if out.content.contains("已终态") {
+            if out.content.contains("(terminal") {
                 final_label = out.content;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         assert!(
-            final_label.contains("已完成") || final_label.contains("completed"),
+            final_label.contains("completed"),
             "task_status should reach completed: {final_label}"
         );
 
@@ -1407,7 +1505,7 @@ mod tests {
             .await
             .expect("task_result call");
         assert!(
-            out.content.contains("任务完成") && out.content.contains("adopted-e2e"),
+            out.content.contains("task completed") && out.content.contains("adopted-e2e"),
             "task_result should carry process output: {}",
             out.content
         );

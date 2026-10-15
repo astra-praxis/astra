@@ -36,6 +36,8 @@ uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
+# 用户图片归一化（agent_images.rs）：与 astra-tools 同版本同特性集
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 [dev-dependencies]
 tokio-util = "0.7"

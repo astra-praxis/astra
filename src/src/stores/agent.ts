@@ -65,7 +65,7 @@ export type PermState = 'pending' | 'allowed' | 'denied' | 'expired';
 
 export type Entry =
   | { kind: 'notice'; text: string }
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; images?: UserImage[] }
   | { kind: 'assistant'; text: string; streaming: boolean }
   | {
       /** 模型思考过程（reasoning），流式追加；参考 Zed 的 thinking 块 */
@@ -109,6 +109,18 @@ export type Entry =
     }
   | { kind: 'terminal'; outcome: 'completed' | 'failed' | 'cancelled'; text?: string };
 
+/** 用户附带图片（规范 PNG 的 base64 与尺寸，与后端 AgentImageInput / NormalizedImage 对齐） */
+export interface UserImage {
+  data: string;
+  width: number;
+  height: number;
+}
+
+/** 组装预览用 data URL（规范 PNG 恒定，data 与尺寸在会话回放时同样可用） */
+export function userImageUrl(img: UserImage): string {
+  return `data:image/png;base64,${img.data}`;
+}
+
 export function newSessionId(): string {
   return `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -122,6 +134,8 @@ export interface QueuedMessage {
   text: string;
   skill: string | null;
   sessionId: string;
+  /** 附带图片（多模态 M1；排队时随消息一起走） */
+  images?: UserImage[];
 }
 
 /** 取指定会话队首（全局队列按会话子队列 FIFO，互不阻塞） */
@@ -462,7 +476,7 @@ interface AgentState extends RunWindow {
   /** Run 进行中排队的消息（按会话子队列 FIFO；发送调用留在页面组件，见文件头职责边界） */
   queue: QueuedMessage[];
   /** 排队消息（opts.front = 插到同会话子队首，供「打断并优先发送」用） */
-  enqueueMessage: (raw: string, text: string, skill: string | null, opts?: { front?: boolean }) => void;
+  enqueueMessage: (raw: string, text: string, skill: string | null, opts?: { front?: boolean }, images?: UserImage[]) => void;
   removeQueued: (id: string) => void;
   setProjectPath: (v: string) => void;
   /** 切换放权模式（同步到后端 + localStorage 持久化） */
@@ -472,7 +486,7 @@ interface AgentState extends RunWindow {
   /** 设置自动压缩阈值（localStorage 持久化，0 = 关闭） */
   setAutoCompactTokens: (v: number) => void;
   setRunState: (running: boolean, status: string | null) => void;
-  pushUser: (text: string) => void;
+  pushUser: (text: string, images?: UserImage[]) => void;
   /** checkpoint 恢复后用后端回传的历史重建条目（仅当会话一致且无运行中任务） */
   restoreEntries: (sessionId: string, entries: Entry[]) => void;
   pushTerminal: (outcome: 'completed' | 'failed' | 'cancelled', text?: string) => void;
@@ -554,7 +568,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   setInput: (v) => set({ input: v }),
   queue: [],
-  enqueueMessage: (raw, text, skill, opts) =>
+  enqueueMessage: (raw, text, skill, opts, images) =>
     set((s) => {
       const item: QueuedMessage = {
         id: newSessionId(),
@@ -562,6 +576,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         text,
         skill,
         sessionId: s.sessionId,
+        ...(images && images.length > 0 ? { images } : {}),
       };
       if (opts?.front) {
         // 插到同会话子队首（其他会话的排队不动，互不阻塞）
@@ -609,9 +624,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         : {}),
     })),
-  pushUser: (text) =>
+  pushUser: (text, images) =>
     set((s) => ({
-      entries: [...s.entries, { kind: 'user', text }],
+      entries: [
+        ...s.entries,
+        // 纯图片消息合法；无图时不写字段，保持旧会话 JSON 形状不变
+        ...(images && images.length > 0 ? [{ kind: 'user' as const, text, images }] : [{ kind: 'user' as const, text }]),
+      ],
       isDraft: false,
       // 首条消息触发：隐式草稿补上 tab 转正
       openTabs: s.openTabs.includes(s.sessionId) ? s.openTabs : [...s.openTabs, s.sessionId],

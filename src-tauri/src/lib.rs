@@ -1,4 +1,5 @@
 mod agent;
+mod agent_images;
 mod agent_sessions;
 mod agent_threads;
 mod chat;
@@ -1516,6 +1517,7 @@ pub fn run() {
             chat::stop_chat,
             // Agent
             agent::agent_start_run,
+            agent_images::agent_normalize_image,
             agent::agent_cancel,
             agent::agent_permission_decide,
             agent::agent_question_answer,

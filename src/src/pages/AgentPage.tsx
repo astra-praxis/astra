@@ -37,6 +37,7 @@ import {
   Copy,
   Sparkles,
   Square,
+  Trash,
   Wrench,
   X,
 } from 'lucide-react';
@@ -1210,11 +1211,20 @@ export default function AgentPage() {
                           aria-label="编辑排队消息"
                           title="编辑（放回输入框）"
                         >
-                          <Pencil size={12} strokeWidth={2} />
+                          <Pencil size={14} strokeWidth={1.8} />
                         </button>
                         <button
                           type="button"
-                          className="agent-dock__queue-btn is-send"
+                          className="agent-dock__queue-btn is-danger"
+                          onClick={() => removeQueued(q.id)}
+                          aria-label="移除排队消息"
+                          title="移除"
+                        >
+                          <Trash size={14} strokeWidth={1.8} />
+                        </button>
+                        <button
+                          type="button"
+                          className={`agent-dock__queue-send${i === 0 ? ' is-next' : ''}`}
                           disabled={settling}
                           onClick={() => void sendQueuedNow(q)}
                           aria-label="立即发送"
@@ -1224,16 +1234,7 @@ export default function AgentPage() {
                               : '立即发送'
                           }
                         >
-                          <ArrowRight size={12} strokeWidth={2.2} />
-                        </button>
-                        <button
-                          type="button"
-                          className="agent-dock__queue-btn is-danger"
-                          onClick={() => removeQueued(q.id)}
-                          aria-label="移除排队消息"
-                          title="移除"
-                        >
-                          <X size={12} strokeWidth={2} />
+                          立即发送
                         </button>
                       </div>
                     </div>

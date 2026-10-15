@@ -1184,7 +1184,7 @@ body .content:has(.agent-root) {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 8px 5px 10px;
+    padding: 4px 6px 4px 10px;
     background: var(--bg-body);
     border: 1px solid var(--border-color);
     border-radius: 10px;
@@ -1214,41 +1214,73 @@ body .content:has(.agent-root) {
   &__queue-actions {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
   }
 
+  // 图标按钮：对齐 dock__iconbtn 的比例（28px 规范下取 24px 适配队列行高）
   &__queue-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     border: none;
-    border-radius: 6px;
+    border-radius: 7px;
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
     transition: background 0.12s ease, color 0.12s ease;
 
     &:hover {
-      background: var(--bg-mention, rgba(0, 0, 0, 0.06));
-      color: var(--text-primary);
-    }
-
-    &.is-send:hover {
-      background: var(--brand-100);
+      background: var(--brand-50);
       color: var(--brand-600);
     }
 
     &.is-danger:hover {
-      background: var(--danger-50, rgba(220, 38, 38, 0.1));
-      color: var(--danger-500, #dc2626);
+      background: var(--danger-50);
+      color: var(--danger-600);
     }
 
     &:disabled {
       opacity: 0.5;
-      cursor: default;
+      cursor: not-allowed;
+    }
+  }
+
+  // Zed "Send Now" 同构：小号描边文字按钮；队首用品牌描边强调（Outlined）
+  &__queue-send {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+
+    &:hover:not(:disabled) {
+      border-color: var(--brand-400);
+      color: var(--brand-600);
+      background: var(--brand-50);
+    }
+
+    &.is-next {
+      border-color: var(--brand-300);
+      color: var(--brand-600);
+
+      &:hover:not(:disabled) {
+        border-color: var(--brand-400);
+      }
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
   }
 

@@ -589,3 +589,49 @@ test('multi-session: draft semantics, openDraftForProject and activateSession fr
   assert.equal(store.getState().isDraft, false);
   assert.ok(store.getState().openTabs.includes('h1'));
 });
+
+test('message queue: enqueue appends to session sub-queue, remove deletes, front inserts at head', () => {
+  const store = load().useAgentStore;
+  const sid = store.getState().sessionId;
+  assert.equal(store.getState().queue.length, 0);
+  store.getState().enqueueMessage('/demo 任务一', '任务一', 'demo');
+  store.getState().enqueueMessage('任务二', '任务二', null);
+  store.getState().enqueueMessage('任务三', '任务三', null);
+  let queue = store.getState().queue;
+  assert.equal(queue.length, 3);
+  assert.equal(queue[0].sessionId, sid);
+  assert.equal(queue[0].skill, 'demo');
+  assert.equal(queue[0].raw, '/demo 任务一');
+  assert.equal(queue[0].text, '任务一');
+  // front：插到同会话子队首
+  store.getState().enqueueMessage('插队', '插队', null, { front: true });
+  queue = store.getState().queue;
+  assert.equal(queue.length, 4);
+  assert.equal(queue[0].text, '插队');
+  // nextQueuedFor：取指定会话队首
+  const head = api.nextQueuedFor(store.getState().queue, sid);
+  assert.equal(head.text, '插队');
+  assert.equal(api.nextQueuedFor(store.getState().queue, 'no-such-session'), null);
+  // removeQueued：按 id 删除
+  store.getState().removeQueued(queue[0].id);
+  queue = store.getState().queue;
+  assert.equal(queue.length, 3);
+  assert.equal(queue[0].text, '任务一');
+});
+
+test('message queue: deleting or closing a session drops its queued messages', async () => {
+  const mod = load(
+    async () => () => {},
+    async (cmd) => (cmd === 'list_agent_sessions' ? [] : null),
+  ).useAgentStore;
+  const first = mod.getState().sessionId;
+  mod.getState().enqueueMessage('任务一', '任务一', null);
+  // 删除当前会话：转正为新草稿，旧会话的排队消息被清
+  await mod.getState().deleteSession(first);
+  assert.equal(mod.getState().queue.length, 0);
+  // 关闭最后一个 tab：重置为隐式草稿，该会话排队消息一并丢弃
+  mod.getState().enqueueMessage('任务二', '任务二', null);
+  assert.equal(mod.getState().queue.length, 1);
+  mod.getState().closeTab(mod.getState().sessionId);
+  assert.equal(mod.getState().queue.length, 0);
+});

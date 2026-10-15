@@ -46,6 +46,7 @@ import {
   ensureAgentListeners,
   refreshAgentStatus,
   runningSessionId,
+  nextQueuedFor,
   THINKING_EFFORTS,
   type AgentUsage,
   type Entry,
@@ -456,6 +457,11 @@ export default function AgentPage() {
   const pushUser = useAgentStore((s) => s.pushUser);
   const pushTerminal = useAgentStore((s) => s.pushTerminal);
   const setRunState = useAgentStore((s) => s.setRunState);
+  const queue = useAgentStore((s) => s.queue);
+  const enqueueMessage = useAgentStore((s) => s.enqueueMessage);
+  const removeQueued = useAgentStore((s) => s.removeQueued);
+  /** 当前会话的排队消息（队列全局共享，切 tab 回来仍可见） */
+  const queuedHere = useMemo(() => queue.filter((q) => q.sessionId === sessionId), [queue, sessionId]);
 
   // 事件监听为模块级单例：首次进入本页时挂载，卸载后不拆除（切页对话继续）
   useEffect(() => {
@@ -598,86 +604,148 @@ export default function AgentPage() {
     updateActiveDot();
   }, [sessionId, entries.length, updateActiveDot]);
 
+  /** /技能名 前缀解析：命中已知技能 → 剥离前缀；/xxx 非法 → 提示并返回 null */
+  const parseSendInput = useCallback(
+    (raw: string): { text: string; skill: string | null } | null => {
+      if (!raw.startsWith('/')) return { text: raw, skill: null };
+      const parsed = parseSlashCommand(raw, skills);
+      if (parsed) {
+        if (!parsed.rest) {
+          setError('请输入任务内容，例如 /demo 把需求整理成方案');
+          return null;
+        }
+        return { text: parsed.rest, skill: parsed.skill };
+      }
+      const name = raw.match(/^\/([\w\u4e00-\u9fff.-]+)/)?.[1] ?? '';
+      setError(`未知技能 /${name}（可在 设置 → 我的 Skills 页面创建或导入）`);
+      return null;
+    },
+    [skills, setError],
+  );
+
+  /** 实际发送（队列续发与手动发送共用）：onAdmitted 在全部守卫通过、
+   *  即将开跑时调用 —— 队列路径借此保证「先准入后出队」，守卫拦截时消息不丢 */
+  const doSend = useCallback(
+    async (raw: string, skillName: string | null, text: string, onAdmitted?: () => void) => {
+      const st = useChatToolbarStore.getState();
+      if (st.sourceType === 'model' && !st.selectedModelPort) {
+        setError('请先在标题栏选择一个运行中的本地模型');
+        return;
+      }
+      if (st.sourceType === 'provider') {
+        const provider = st.providers.find((p) => p.id === st.selectedProviderId) ?? null;
+        const name = st.overrideModelName ?? provider?.active_model ?? null;
+        if (!provider) {
+          setError('请先在输入框下方选择一个 API 提供者');
+          return;
+        }
+        if (!name) {
+          setError('请先在输入框下方选择模型');
+          return;
+        }
+      }
+
+      try {
+        await ensureAgentListeners();
+      } catch (error) {
+        setError(`事件监听失败：${String(error)}`);
+        return;
+      }
+      if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId || runningSessionId(useAgentStore.getState()) !== null) return;
+      outputScroll.resume();
+      setInput('');
+      setError('');
+      onAdmitted?.();
+      pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
+      setRunState(true, 'analyzing');
+
+      try {
+        await invoke('agent_start_run', {
+          req: {
+            session_id: sessionId,
+            user_text: text,
+            skill: skillName,
+            provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
+            model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
+            model:
+              st.sourceType === 'provider'
+                ? (st.overrideModelName ?? selectedProvider?.active_model ?? null)
+                : null,
+            project_root: projectPath || null,
+            system_prompt: systemPrompt.trim() || null,
+            max_turns: useAgentStore.getState().maxTurns,
+            auto_compact_tokens: useAgentStore.getState().autoCompactTokens,
+            image_recognition: useAgentStore.getState().imageRecognition,
+            thinking_enabled: useAgentStore.getState().thinkingEnabled,
+            thinking_effort: useAgentStore.getState().thinkingEffort,
+          },
+        });
+      } catch (e) {
+        setRunState(false, null);
+        pushTerminal('failed', String(e));
+      }
+    },
+    [projectPath, selectedProvider, systemPrompt, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, outputScroll],
+  );
+
   const handleSend = useCallback(async () => {
     const raw = input.trim();
     if (!raw || running) return;
+    const parsed = parseSendInput(raw);
+    if (!parsed) return;
+    await doSend(raw, parsed.skill, parsed.text);
+  }, [input, running, parseSendInput, doSend]);
 
-    // /技能名 解析：命中已知技能 → 剥离前缀，后端注入技能内容；/xxx 非法 → 提示
-    let text = raw;
-    let skillName: string | null = null;
-    if (raw.startsWith('/')) {
-      const parsed = parseSlashCommand(raw, skills);
-      if (parsed) {
-        skillName = parsed.skill;
-        text = parsed.rest;
-        if (!text) {
-          setError('请输入任务内容，例如 /demo 把需求整理成方案');
-          return;
-        }
-      } else {
-        const name = raw.match(/^\/([\w\u4e00-\u9fff.-]+)/)?.[1] ?? '';
-        setError(`未知技能 /${name}（可在 设置 → 我的 Skills 页面创建或导入）`);
-        return;
-      }
-    }
-
-    const st = useChatToolbarStore.getState();
-    if (st.sourceType === 'model' && !st.selectedModelPort) {
-      setError('请先在标题栏选择一个运行中的本地模型');
-      return;
-    }
-    if (st.sourceType === 'provider') {
-      const provider = st.providers.find((p) => p.id === st.selectedProviderId) ?? null;
-      const name = st.overrideModelName ?? provider?.active_model ?? null;
-      if (!provider) {
-        setError('请先在输入框下方选择一个 API 提供者');
-        return;
-      }
-      if (!name) {
-        setError('请先在输入框下方选择模型');
-        return;
-      }
-    }
-
-    try {
-      await ensureAgentListeners();
-    } catch (error) {
-      setError(`事件监听失败：${String(error)}`);
-      return;
-    }
-    if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId || runningSessionId(useAgentStore.getState()) !== null) return;
-    outputScroll.resume();
+  /** Run 进行中把输入排队（回答结束后由队列续发 effect 自动发出） */
+  const handleQueueSend = useCallback(() => {
+    const raw = input.trim();
+    if (!raw) return;
+    const parsed = parseSendInput(raw);
+    if (!parsed) return;
+    enqueueMessage(raw, parsed.text, parsed.skill);
     setInput('');
-    setError('');
-    pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
-    setRunState(true, 'analyzing');
+  }, [input, parseSendInput, enqueueMessage, setInput]);
 
-    try {
-      await invoke('agent_start_run', {
-        req: {
-          session_id: sessionId,
-          user_text: text,
-          skill: skillName,
-          provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
-          model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
-          model:
-            st.sourceType === 'provider'
-              ? (st.overrideModelName ?? selectedProvider?.active_model ?? null)
-              : null,
-          project_root: projectPath || null,
-          system_prompt: systemPrompt.trim() || null,
-          max_turns: useAgentStore.getState().maxTurns,
-          auto_compact_tokens: useAgentStore.getState().autoCompactTokens,
-          image_recognition: useAgentStore.getState().imageRecognition,
-          thinking_enabled: useAgentStore.getState().thinkingEnabled,
-          thinking_effort: useAgentStore.getState().thinkingEffort,
-        },
-      });
-    } catch (e) {
-      setRunState(false, null);
-      pushTerminal('failed', String(e));
+  /** 打断并优先发送：当前 Run 取消 + 本条插到会话队首，settle 后立即续发。
+   *  别的会话占用后端时不能打断（cancel 是全局单活动 Run），退化为普通排队 */
+  const handleInterruptSend = useCallback(async () => {
+    const raw = input.trim();
+    if (!raw) return;
+    const parsed = parseSendInput(raw);
+    if (!parsed) return;
+    const st = useAgentStore.getState();
+    const interruptible = st.running && !st.settling && (busySessionId === null || busySessionId === sessionId);
+    enqueueMessage(raw, parsed.text, parsed.skill, { front: interruptible });
+    setInput('');
+    if (interruptible) {
+      try {
+        await invoke('agent_cancel');
+      } catch (error) {
+        setError(`停止失败：${String(error)}`);
+      }
     }
-  }, [input, running, projectPath, selectedProvider, systemPrompt, skills, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, outputScroll]);
+  }, [input, parseSendInput, enqueueMessage, setInput, setError, busySessionId, sessionId]);
+
+  // ===== 队列续发：Run 结束后自动发出当前会话的队首消息。
+  //  上一条以 failed 终态收尾时暂停自动续发（防模型配置错误时连环烧完队列），
+  //  用户手动发送成功一次后恢复。后端在 settled 事件前已释放准入锁，无需重试。
+  const lastEntry = entries[entries.length - 1];
+  const lastFailed = lastEntry?.kind === 'terminal' && lastEntry.outcome === 'failed';
+  const doSendRef = useRef(doSend);
+  doSendRef.current = doSend;
+  useEffect(() => {
+    if (running || settling || busySessionId !== null || lastFailed) return;
+    const head = nextQueuedFor(useAgentStore.getState().queue, sessionId);
+    if (!head) return;
+    const timer = setTimeout(() => {
+      const st = useAgentStore.getState();
+      if (st.running || st.settling || st.sessionBusy || runningSessionId(st) !== null) return;
+      if (st.queue.find((q) => q.id === head.id) == null) return; // 排队期间被删除
+      st.removeQueued(head.id);
+      void doSendRef.current(head.raw, head.skill, head.text);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [running, settling, busySessionId, queue, sessionId, lastFailed]);
 
   const handleStop = useCallback(async () => {
     if (useAgentStore.getState().settling || useAgentStore.getState().sessionBusy) return;
@@ -1092,16 +1160,36 @@ export default function AgentPage() {
               />
             )}
             <div className="agent-dock">
+              {queuedHere.length > 0 && (
+                <div className="agent-dock__queue" role="list" aria-label="排队消息">
+                  {queuedHere.map((q, i) => (
+                    <div key={q.id} className="agent-dock__queue-item" role="listitem">
+                      <span className="agent-dock__queue-badge">{i === 0 ? '下一条' : `#${i + 1}`}</span>
+                      <span className="agent-dock__queue-text" title={q.raw}>{q.text || q.raw}</span>
+                      <button
+                        type="button"
+                        className="agent-dock__queue-remove"
+                        onClick={() => removeQueued(q.id)}
+                        aria-label="移除排队消息"
+                        title="移除"
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <textarea
                 ref={textareaRef}
                 className="agent-dock__input"
                 value={input}
                 placeholder={
-                  projectPath
-                    ? '描述任务，例如：读取 @需求.md 并生成方案保存为 txt…'
-                    : '纯聊天模式，顶部选择项目后可用 @ 引用文件 · / 调用技能…'
+                  running
+                    ? 'Agent 正在回答…Enter 排队发送 · Ctrl/⌘+Enter 打断并优先发送'
+                    : projectPath
+                      ? '描述任务，例如：读取 @需求.md 并生成方案保存为 txt…'
+                      : '纯聊天模式，顶部选择项目后可用 @ 引用文件 · / 调用技能…'
                 }
-                disabled={running}
                 onChange={handleTextareaChange}
                 onKeyDown={(e) => {
                   // @ 提及 / / 技能弹出时优先处理导航；处理过的按键不再走发送
@@ -1109,7 +1197,13 @@ export default function AgentPage() {
                   if (slash.handleKeydown(e)) return;
                   if (isSendEnter(e)) {
                     e.preventDefault();
-                    void handleSend();
+                    if (e.metaKey || e.ctrlKey) {
+                      void handleInterruptSend();
+                    } else if (running) {
+                      handleQueueSend();
+                    } else {
+                      void handleSend();
+                    }
                   }
                 }}
               />
@@ -1162,10 +1256,28 @@ export default function AgentPage() {
                   <ContextUsage usage={usage} />
                   <ModelPicker />
                   {running ? (
-                    <button type="button" className="agent-dock__stop" disabled={settling} onClick={() => void handleStop()}>
-                      <span className="agent-dock__stop-square" />
-                      停止
-                    </button>
+                    <>
+                      {input.trim() && (
+                        <button
+                          type="button"
+                          className="agent-dock__send"
+                          disabled={settling || (busySessionId !== null && busySessionId !== sessionId)}
+                          onClick={handleQueueSend}
+                          aria-label="排队发送"
+                          title={
+                            busySessionId !== null && busySessionId !== sessionId
+                              ? `会话 ${busySessionId.slice(-4)} 正在运行，结束后自动续发`
+                              : '排队发送，回答结束后自动发出 · Ctrl/⌘+Enter 打断并优先发送'
+                          }
+                        >
+                          <ArrowRight size={16} strokeWidth={2.5} />
+                        </button>
+                      )}
+                      <button type="button" className="agent-dock__stop" disabled={settling} onClick={() => void handleStop()}>
+                        <span className="agent-dock__stop-square" />
+                        停止
+                      </button>
+                    </>
                   ) : (
                     <button
                       type="button"

@@ -113,6 +113,22 @@ export function newSessionId(): string {
   return `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Run 进行中排队待发的消息（Zed 式队列：回答结束后自动续发） */
+export interface QueuedMessage {
+  id: string;
+  /** 原始输入（含 /技能名 前缀），发送时 pushUser 保留原文可读 */
+  raw: string;
+  /** 剥离技能前缀后的任务文本 */
+  text: string;
+  skill: string | null;
+  sessionId: string;
+}
+
+/** 取指定会话队首（全局队列按会话子队列 FIFO，互不阻塞） */
+export function nextQueuedFor(queue: QueuedMessage[], sessionId: string): QueuedMessage | null {
+  return queue.find((q) => q.sessionId === sessionId) ?? null;
+}
+
 /** 解析自动压缩阈值：null/非法 → 默认 60000；'0' 合法（= 关闭） */
 function parseAutoCompact(raw: string | null | undefined): number {
   if (raw === null || raw === undefined || raw === '') return 60000;
@@ -443,6 +459,11 @@ interface AgentState extends RunWindow {
 
   setInput: (v: string) => void;
   setError: (v: string) => void;
+  /** Run 进行中排队的消息（按会话子队列 FIFO；发送调用留在页面组件，见文件头职责边界） */
+  queue: QueuedMessage[];
+  /** 排队消息（opts.front = 插到同会话子队首，供「打断并优先发送」用） */
+  enqueueMessage: (raw: string, text: string, skill: string | null, opts?: { front?: boolean }) => void;
+  removeQueued: (id: string) => void;
   setProjectPath: (v: string) => void;
   /** 切换放权模式（同步到后端 + localStorage 持久化） */
   setAutoApprove: (v: boolean) => void;
@@ -532,6 +553,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   setInput: (v) => set({ input: v }),
+  queue: [],
+  enqueueMessage: (raw, text, skill, opts) =>
+    set((s) => {
+      const item: QueuedMessage = {
+        id: newSessionId(),
+        raw,
+        text,
+        skill,
+        sessionId: s.sessionId,
+      };
+      if (opts?.front) {
+        // 插到同会话子队首（其他会话的排队不动，互不阻塞）
+        const at = s.queue.findIndex((q) => q.sessionId === item.sessionId);
+        const queue = [...s.queue];
+        if (at >= 0) queue.splice(at, 0, item);
+        else queue.unshift(item);
+        return { queue };
+      }
+      return { queue: [...s.queue, item] };
+    }),
+  removeQueued: (id) => set((s) => ({ queue: s.queue.filter((q) => q.id !== id) })),
   setMaxTurns: (v) => {
     const n = Number.isFinite(v) && v >= 1 ? Math.floor(v) : 50;
     set({ maxTurns: n });
@@ -691,6 +733,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           parked: omitKey(s.parked, id),
           openTabs,
           activeTabId: s.activeTabId === id ? openTabs[openTabs.length - 1] ?? null : s.activeTabId,
+          // 已删除会话的排队消息一并丢弃，否则永远等不到续发
+          queue: s.queue.filter((q) => q.sessionId !== id),
         };
       });
       await get().refreshSessions();
@@ -823,6 +867,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           parked: omitKey(s.parked, id),
           openTabs: [],
           activeTabId: null,
+          queue: s.queue.filter((q) => q.sessionId !== id),
         }));
         return true;
       }
@@ -830,7 +875,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const neighbor = st.openTabs[idx + 1] ?? st.openTabs[idx - 1];
       const swap = swapToSession({ ...st, entries: [], isDraft: true, running: false, settling: false }, neighbor);
       if (swap) {
-        set((s) => ({ ...swap, parked: omitKey(s.parked, id) }));
+        set((s) => ({ ...swap, parked: omitKey(s.parked, id), queue: s.queue.filter((q) => q.sessionId !== id) }));
       } else {
         // 邻居无法解析（防御）：回退到无 tab 的隐式草稿
         const nid = newSessionId();
@@ -858,6 +903,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         parked: omitKey(s.parked, id),
         openTabs,
         activeTabId: s.activeTabId === id ? openTabs[openTabs.length - 1] ?? null : s.activeTabId,
+        queue: s.queue.filter((q) => q.sessionId !== id),
       };
     });
     if (p) {

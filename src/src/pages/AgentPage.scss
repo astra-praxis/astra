@@ -1173,6 +1173,64 @@ body .content:has(.agent-root) {
     }
   }
 
+  // 排队消息（Zed 式队列）：Run 进行中发送的消息先入列，回答结束后自动续发
+  &__queue {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  &__queue-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px 5px 10px;
+    background: var(--bg-body);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+  }
+
+  &__queue-badge {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--brand-100);
+    color: var(--brand-600);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  &__queue-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__queue-remove {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+
+    &:hover {
+      background: var(--danger-50, rgba(220, 38, 38, 0.1));
+      color: var(--danger-500, #dc2626);
+    }
+  }
+
   // 底栏（Zed thread_view 式）：左右两组，justify-between 撑开
   &__bar {
     display: flex;

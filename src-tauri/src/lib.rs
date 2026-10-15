@@ -1565,6 +1565,7 @@ pub fn run() {
             extensions::extensions_set_enabled,
             extensions::extensions_remove,
             extensions::extensions_update,
+            agent::agent_unload_all_sessions,
             agent::extensions_runtime_status,
             // Dev Mode
             dev_mode::scan_dev_dirs,

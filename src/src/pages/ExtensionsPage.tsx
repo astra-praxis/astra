@@ -2,8 +2,9 @@
  * 扩展管理页：查看 / 启停 / 编辑 / 删除已配置的 MCP Server 与 ACP Agent
  *
  * 配置本体在 astra.toml（[mcp.servers.*] / [acp.agents.*]），
- * 本页是它的可视化管理面；修改默认对新会话生效，
- * 老会话可通过运行状态区的「重载扩展」按钮卸载内存后重建（历史保留）。
+ * 本页是它的可视化管理面。开关 / 编辑 / 删除成功后会自动卸载所有空闲
+ * 会话的内存 Thread（agent_unload_all_sessions），变更在下次对话时生效；
+ * 运行状态区另有「重载扩展」按钮可对单个会话立即重载（历史保留）。
  */
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -17,6 +18,7 @@ import {
   FileWarning,
   ToggleLeft,
   RotateCw,
+  CheckCircle2,
 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import './ExtensionsPage.scss';
@@ -116,6 +118,7 @@ export default function ExtensionsPage() {
   const [runtime, setRuntime] = useState<SessionRuntimeStatus[] | null>(null);
   const [reloadingId, setReloadingId] = useState<string | null>(null);
   const [reloadedId, setReloadedId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refreshRuntime = useCallback(async () => {
     try {
@@ -126,6 +129,29 @@ export default function ExtensionsPage() {
       setRuntime(null);
     }
   }, []);
+
+  // 开关/编辑/删除后自动让变更生效：卸载所有空闲会话的内存 Thread，
+  // 下次对话按新配置重新装配。运行中的会话整体拿不到锁 → 提示稍后生效。
+  const applyToSessions = useCallback(async () => {
+    try {
+      const r = await invoke<{ unloaded: number; skipped: string[] }>(
+        'agent_unload_all_sessions',
+      );
+      if (r.skipped.length > 0) {
+        setNotice(
+          `${r.skipped.length} 个会话未能立即重载（未落盘或被占用），其下次对话时生效`,
+        );
+      } else {
+        setNotice(
+          r.unloaded > 0 ? `已应用：${r.unloaded} 个会话将在下次对话时使用新配置` : null,
+        );
+      }
+    } catch {
+      // Agent 正在运行：拿不到 threads 锁，改为提示
+      setNotice('当前有会话正在运行，变更将在其下次对话时自动生效');
+    }
+    void refreshRuntime();
+  }, [refreshRuntime]);
 
   const refresh = useCallback(async () => {
     try {
@@ -174,6 +200,7 @@ export default function ExtensionsPage() {
     try {
       await invoke('extensions_set_enabled', { kind, id, enabled });
       await refresh();
+      await applyToSessions();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -189,6 +216,7 @@ export default function ExtensionsPage() {
       await invoke('extensions_remove', { kind: deleting.kind, id: deleting.id });
       setDeleting(null);
       await refresh();
+      await applyToSessions();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -219,6 +247,7 @@ export default function ExtensionsPage() {
       });
       setEdit(null);
       await refresh();
+      await applyToSessions();
     } catch (e) {
       setError(String(e));
       // 保存失败时保留弹窗内容让用户改
@@ -396,6 +425,15 @@ export default function ExtensionsPage() {
         <div className="error-banner">
           <FileWarning size={16} />
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="info-banner">
+          <CheckCircle2 size={16} />
+          {notice}
+          <button className="info-banner-close" onClick={() => setNotice(null)}>
+            ×
+          </button>
         </div>
       )}
       {list?.parseError && (

@@ -893,6 +893,38 @@ pub async fn agent_reset_session(
     threads.unload(&session_id, &state.persistence_errors)
 }
 
+/// 扩展开关变更后批量卸载内存 Thread：所有空闲会话在下次对话时按新配置
+/// 重新装配 MCP/ACP。正在运行的会话持有 threads 锁 → 整体失败，由前端
+/// 提示「将在下次对话时生效」；带未落盘错误的会话跳过（unload 返回 Err），
+/// 不影响其余会话。
+#[derive(serde::Serialize)]
+pub struct UnloadAllReport {
+    pub unloaded: usize,
+    pub skipped: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn agent_unload_all_sessions(
+    state: State<'_, AgentState>,
+) -> Result<UnloadAllReport, String> {
+    let mut threads = state.threads.try_lock().map_err(|_| {
+        "Agent is running or draining; the change applies when that conversation continues"
+            .to_string()
+    })?;
+    let ids: Vec<String> = threads.threads.keys().cloned().collect();
+    let mut report = UnloadAllReport {
+        unloaded: 0,
+        skipped: Vec::new(),
+    };
+    for id in ids {
+        match threads.unload(&id, &state.persistence_errors) {
+            Ok(()) => report.unloaded += 1,
+            Err(e) => report.skipped.push(format!("{id}: {e}")),
+        }
+    }
+    Ok(report)
+}
+
 // ===== 预览：从后台任务日志发现本地服务地址并打开预览窗口 =====
 
 /// 可预览任务信息（前端展示用）

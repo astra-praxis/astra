@@ -29,7 +29,7 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use tokio::sync::watch;
 
-// ===== provider 配置（复用星野应用的 providers.json，不打印密钥） =====
+// ===== provider 配置（复用 astra 应用的 providers.json，不打印密钥） =====
 
 #[derive(Debug, Deserialize)]
 struct ProviderInfo {
@@ -312,7 +312,7 @@ fn build_agent(
     let mut builder = model
         .into_agent_builder()
         .preamble(
-            "你是星野项目的文件助手，运行在用户的本地项目目录中。\
+            "你是 astra 项目的文件助手，运行在用户的本地项目目录中。\
              使用提供的工具完成用户任务，回答使用中文。\
              写文件前必须调用 write_file 工具（用户会被征求批准），不要把文件内容只在回复里展示。",
         )

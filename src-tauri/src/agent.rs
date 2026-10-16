@@ -1716,6 +1716,7 @@ mod tests {
             project_root: Some(root.clone()),
             bridge: Arc::new(AllowBridge),
             cancelled: tokio_util::sync::CancellationToken::new(),
+            deadline: None,
         };
 
         // 1. shell_background 启动短命令

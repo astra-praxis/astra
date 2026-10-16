@@ -250,6 +250,7 @@ name = "astra-mcp"
 version = "1.0.0-rc.1"
 dependencies = [
  "astra-error",
+ "astra-process",
  "astra-task",
  "astra-tools",
  "async-trait",
@@ -288,6 +289,15 @@ dependencies = [
  "glob",
  "serde",
  "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "astra-process"
+version = "1.0.0-rc.1"
+dependencies = [
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 
@@ -340,6 +350,7 @@ dependencies = [
  "astra-generation",
  "astra-model",
  "astra-permission",
+ "astra-process",
  "astra-skill",
  "astra-task",
  "async-trait",
@@ -364,6 +375,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "astra-core",
  "astra-error",
+ "astra-process",
  "async-trait",
  "tokio",
  "tracing",

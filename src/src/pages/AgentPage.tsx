@@ -27,7 +27,6 @@ import {
   FolderOpen,
   HelpCircle,
   History,
-  ImagePlus,
   Loader2,
   MonitorUp,
   PanelLeftClose,
@@ -44,8 +43,6 @@ import {
 } from 'lucide-react';
 import OrbArt from '@/components/illustrations/OrbArt';
 
-/** 单条消息最多附带图片数（与后端 build_user_content / core MAX_IMAGES_PER_REQUEST 一致） */
-const MAX_ATTACHED_IMAGES = 4;
 import { useChatToolbarStore } from '@/stores/chatToolbar';
 import {
   useAgentStore,
@@ -573,59 +570,11 @@ export default function AgentPage() {
   // 占用后端单活动 Run 准入的会话（可能是别的 tab 的会话在跑）：多 tab 发送互斥
   const busySessionId = useAgentStore((s) => runningSessionId(s));
 
-  // ===== 多模态 M1：用户附带图片（归一化后随消息发送；预览用 data URL） =====
-  const [attachments, setAttachments] = useState<(UserImage & { name?: string })[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const canSend =
     !running &&
     (busySessionId === null || busySessionId === sessionId) &&
-    (input.trim().length > 0 || attachments.length > 0) &&
+    input.trim().length > 0 &&
     (sourceType === 'model' ? !!selectedModelPort : !!selectedProviderId && !!modelName);
-
-  /** 去除第 i 张附图 */
-  const removeAttachment = useCallback((i: number) => {
-    setAttachments((prev) => prev.filter((_, idx) => idx !== i));
-  }, []);
-  /** 读文件为 base64（data URL 前缀去掉） */
-  const readFileBase64 = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-      reader.onerror = () => reject(reader.error ?? new Error('读取失败'));
-      reader.readAsDataURL(file);
-    });
-  /** 选图后逐张归一化（Rust 侧解码/缩放/重编码 PNG），失败明确提示不静默丢图 */
-  const handleAttachFiles = useCallback(
-    async (fileList: FileList | null) => {
-      if (!fileList || fileList.length === 0) return;
-      if (!useAgentStore.getState().imageRecognition) {
-        setError('图片识别未开启：设置 → Agent 设置 → 图片识别，开启后才能附带图片');
-        return;
-      }
-      for (const file of Array.from(fileList)) {
-        let out: UserImage;
-        try {
-          const bytes = await readFileBase64(file);
-          out = await invoke<UserImage>('agent_normalize_image', { bytesBase64: bytes });
-        } catch (e) {
-          setError(`图片「${file.name}」处理失败：${String(e)}`);
-          continue;
-        }
-        let added = false;
-        setAttachments((prev) => {
-          if (prev.length >= MAX_ATTACHED_IMAGES) return prev;
-          added = true;
-          return [...prev, { ...out, name: file.name }];
-        });
-        if (!added) {
-          setError(`单条消息最多附带 ${MAX_ATTACHED_IMAGES} 张图片`);
-          break;
-        }
-      }
-    },
-    [setError],
-  );
 
   // ===== 事件订阅：见 stores/agent.ts 的模块级单例（ensureAgentListeners） =====
 
@@ -692,7 +641,7 @@ export default function AgentPage() {
   /** 实际发送（队列续发与手动发送共用）：onAdmitted 在全部守卫通过、
    *  即将开跑时调用 —— 队列路径借此保证「先准入后出队」，守卫拦截时消息不丢 */
   const doSend = useCallback(
-    async (raw: string, skillName: string | null, text: string, images: UserImage[] = [], onAdmitted?: () => void) => {
+    async (raw: string, skillName: string | null, text: string, onAdmitted?: () => void) => {
       const st = useChatToolbarStore.getState();
       if (st.sourceType === 'model' && !st.selectedModelPort) {
         setError('请先在标题栏选择一个运行中的本地模型');
@@ -720,10 +669,9 @@ export default function AgentPage() {
       if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId || runningSessionId(useAgentStore.getState()) !== null) return;
       outputScroll.resume();
       setInput('');
-      setAttachments([]);
       setError('');
       onAdmitted?.();
-      pushUser(raw, images); // 会话记录保留原始 /技能名 文本与附图，回放时可读
+      pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
       setRunState(true, 'analyzing');
 
       try {
@@ -731,7 +679,7 @@ export default function AgentPage() {
           req: {
             session_id: sessionId,
             user_text: text,
-            images: images.map(({ data, width, height }) => ({ data, width, height })),
+            images: [],
             skill: skillName,
             provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
             model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
@@ -753,41 +701,39 @@ export default function AgentPage() {
         pushTerminal('failed', String(e));
       }
     },
-    [projectPath, selectedProvider, systemPrompt, sessionId, setInput, setAttachments, setError, pushUser, pushTerminal, setRunState, outputScroll],
+    [projectPath, selectedProvider, systemPrompt, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, outputScroll],
   );
 
   const handleSend = useCallback(async () => {
     const raw = input.trim();
-    if ((!raw && attachments.length === 0) || running) return;
-    // 纯图片消息没有技能前缀可解析；有文本时照常走 /技能名 解析
-    const parsed = raw ? parseSendInput(raw) : { text: '', skill: null };
+    if (!raw || running) return;
+    // 有文本时照常走 /技能名 解析
+    const parsed = parseSendInput(raw);
     if (!parsed) return;
-    await doSend(raw, parsed.skill, parsed.text, attachments);
-  }, [input, attachments, running, parseSendInput, doSend]);
+    await doSend(raw, parsed.skill, parsed.text);
+  }, [input, running, parseSendInput, doSend]);
 
   /** Run 进行中把输入排队（回答结束后由队列续发 effect 自动发出） */
   const handleQueueSend = useCallback(() => {
     const raw = input.trim();
-    if (!raw && attachments.length === 0) return;
-    const parsed = raw ? parseSendInput(raw) : { text: '', skill: null };
+    if (!raw) return;
+    const parsed = parseSendInput(raw);
     if (!parsed) return;
-    enqueueMessage(raw, parsed.text, parsed.skill, undefined, attachments);
+    enqueueMessage(raw, parsed.text, parsed.skill);
     setInput('');
-    setAttachments([]);
-  }, [input, attachments, parseSendInput, enqueueMessage, setInput]);
+  }, [input, parseSendInput, enqueueMessage, setInput]);
 
   /** 打断并优先发送：当前 Run 取消 + 本条插到会话队首，settle 后立即续发。
    *  别的会话占用后端时不能打断（cancel 是全局单活动 Run），退化为普通排队 */
   const handleInterruptSend = useCallback(async () => {
     const raw = input.trim();
-    if (!raw && attachments.length === 0) return;
-    const parsed = raw ? parseSendInput(raw) : { text: '', skill: null };
+    if (!raw) return;
+    const parsed = parseSendInput(raw);
     if (!parsed) return;
     const st = useAgentStore.getState();
     const interruptible = st.running && !st.settling && (busySessionId === null || busySessionId === sessionId);
-    enqueueMessage(raw, parsed.text, parsed.skill, { front: interruptible }, attachments);
+    enqueueMessage(raw, parsed.text, parsed.skill, { front: interruptible });
     setInput('');
-    setAttachments([]);
     if (interruptible) {
       try {
         await invoke('agent_cancel');
@@ -795,15 +741,13 @@ export default function AgentPage() {
         setError(`停止失败：${String(error)}`);
       }
     }
-  }, [input, attachments, parseSendInput, enqueueMessage, setInput, setError, busySessionId, sessionId]);
+  }, [input, parseSendInput, enqueueMessage, setInput, setError, busySessionId, sessionId]);
 
   /** 编辑排队消息（Zed move_queued_message_to_main_editor 语义）：
    *  从队列移除，原文回填主输入框并聚焦到末尾，改完再自行发送 */
   const editQueued = useCallback((q: QueuedMessage) => {
     removeQueued(q.id);
     setInput(q.raw);
-    // 附图一并回填输入框（改名信息不保留，文件名仅用于预览提示）
-    setAttachments(q.images ? q.images.map((img) => ({ ...img })) : []);
     requestAnimationFrame(() => {
       composerRef.current?.focusEnd();
     });
@@ -817,16 +761,16 @@ export default function AgentPage() {
     const interruptible = st.running && !st.settling && (busySessionId === null || busySessionId === q.sessionId);
     removeQueued(q.id);
     if (interruptible) {
-      enqueueMessage(q.raw, q.text, q.skill, { front: true }, q.images);
+      enqueueMessage(q.raw, q.text, q.skill, { front: true });
       try {
         await invoke('agent_cancel');
       } catch (error) {
         setError(`停止失败：${String(error)}`);
       }
     } else if (!st.running && !st.settling && !st.sessionBusy) {
-      void doSend(q.raw, q.skill, q.text, q.images);
+      void doSend(q.raw, q.skill, q.text);
     } else {
-      enqueueMessage(q.raw, q.text, q.skill, { front: true }, q.images);
+      enqueueMessage(q.raw, q.text, q.skill, { front: true });
     }
   }, [busySessionId, removeQueued, enqueueMessage, doSend, setError]);
 
@@ -846,7 +790,7 @@ export default function AgentPage() {
       if (st.running || st.settling || st.sessionBusy || runningSessionId(st) !== null) return;
       if (st.queue.find((q) => q.id === head.id) == null) return; // 排队期间被删除
       st.removeQueued(head.id);
-      void doSendRef.current(head.raw, head.skill, head.text, head.images);
+      void doSendRef.current(head.raw, head.skill, head.text);
     }, 120);
     return () => clearTimeout(timer);
   }, [running, settling, busySessionId, queue, sessionId, lastFailed]);
@@ -1244,7 +1188,7 @@ export default function AgentPage() {
                   {queuedHere.map((q, i) => (
                     <div key={q.id} className="agent-dock__queue-item" role="listitem">
                       <span className="agent-dock__queue-badge">{i === 0 ? '下一条' : `#${i + 1}`}</span>
-                      <span className="agent-dock__queue-text" title={q.raw}>{q.text || q.raw || (q.images?.length ? `[图片 ×${q.images.length}]` : '')}</span>
+                      <span className="agent-dock__queue-text" title={q.raw}>{q.text || q.raw}</span>
                       <div className="agent-dock__queue-actions">
                         <button
                           type="button"
@@ -1279,25 +1223,6 @@ export default function AgentPage() {
                           立即发送
                         </button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {/* 附图预览条（多模态 M1）：归一化后的规范 PNG，可单独移除 */}
-              {attachments.length > 0 && (
-                <div className="agent-dock__attach" role="list" aria-label="附带图片">
-                  {attachments.map((a, i) => (
-                    <div key={`${i}-${a.width}x${a.height}`} className="agent-dock__attach-item" role="listitem">
-                      <img src={userImageUrl(a)} alt={a.name ?? `附图 ${i + 1}`} title={a.name ?? `附图 ${i + 1}`} />
-                      <button
-                        type="button"
-                        className="agent-dock__attach-remove"
-                        onClick={() => removeAttachment(i)}
-                        aria-label={`移除附图 ${i + 1}`}
-                        title="移除"
-                      >
-                        <X size={11} strokeWidth={2.4} />
-                      </button>
                     </div>
                   ))}
                 </div>
@@ -1363,32 +1288,7 @@ export default function AgentPage() {
                       <AtSign size={15} strokeWidth={1.8} />
                     </button>
                   )}
-                  {/* 附图（多模态 M1）：需图片识别开启；运行中不可附加 */}
-                  <button
-                    type="button"
-                    className={`agent-dock__iconbtn${attachments.length > 0 ? ' is-active' : ''}`}
-                    disabled={running}
-                    onClick={() => fileInputRef.current?.click()}
-                    title={
-                      imageRecognition
-                        ? `附带图片（最多 ${MAX_ATTACHED_IMAGES} 张）`
-                        : '附带图片需先开启图片识别（设置 → Agent 设置）'
-                    }
-                    aria-label="附带图片"
-                  >
-                    <ImagePlus size={15} strokeWidth={1.8} />
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    multiple
-                    hidden
-                    onChange={(e) => {
-                      void handleAttachFiles(e.target.files);
-                      e.target.value = ''; // 允许重复选择同一文件
-                    }}
-                  />
+                  {/* 图片理解：模型经 read_file 直接读项目内图片（需图片识别开启，视觉模型） */}
                   <ThinkingButton
                     enabled={thinkingEnabled}
                     effort={thinkingEffort}

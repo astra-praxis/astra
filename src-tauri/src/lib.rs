@@ -12,6 +12,7 @@ mod embedding;
 mod extensions;
 mod indexer;
 mod market;
+mod prompts;
 mod providers;
 mod session_store;
 mod user_skills;

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use astra_memory::decision::DecisionModel;
+use astra_memory::embed::{BgeEmbedder, Embedder};
 use astra_memory::judge_onnx::{OnnxJudge, OnnxJudgeConfig};
 use astra_memory::model::SubjectRef;
 use astra_memory::protocol::{ForgetRequest, RecallHit, RecallQuery, RememberRequest};
@@ -30,6 +31,8 @@ const DEFAULT_SEARCH_LIMIT: usize = 50;
 /// bundle resources 里模型目录 / onnxruntime dylib 的固定落点
 /// （与 tauri.conf.json 的 resources 映射一致）。
 const MODEL_RESOURCE_DIR: &str = "memory-model";
+/// embedding 模型（bge-small-zh-v1.5 int8）在 bundle resources 里的落点。
+const EMBED_RESOURCE_DIR: &str = "embed-model";
 
 /// Judge 部署物路径（bundle resources 或环境变量覆盖）。
 ///
@@ -40,6 +43,8 @@ const MODEL_RESOURCE_DIR: &str = "memory-model";
 pub struct MemoryModelPaths {
     pub model_dir: Option<PathBuf>,
     pub ort_dylib: Option<PathBuf>,
+    /// embedding 模型目录（recall 语义通道）；缺失只降级为词法 recall。
+    pub embed_dir: Option<PathBuf>,
 }
 
 impl MemoryModelPaths {
@@ -61,9 +66,17 @@ impl MemoryModelPaths {
                         .find(|p| p.is_file())
                 })
             });
+        let embed_dir = std::env::var_os("ASTRA_MEMORY_EMBED_DIR")
+            .map(PathBuf::from)
+            .or_else(|| {
+                resource_dir
+                    .map(|r| r.join(EMBED_RESOURCE_DIR))
+                    .filter(|p| p.is_dir())
+            });
         Self {
             model_dir,
             ort_dylib,
+            embed_dir,
         }
     }
 }
@@ -101,7 +114,14 @@ impl MemoryHost {
         let judge_model = judge.as_ref().map(|j| j.model_file().to_owned());
         let model: Option<Arc<dyn DecisionModel>> =
             judge.map(|j| Arc::new(j) as Arc<dyn DecisionModel>);
-        let engine = Arc::new(MemoryEngine::new(Arc::new(store), model));
+        let embedder = load_embedder(models);
+        let engine = match embedder {
+            Some(e) => Arc::new(
+                MemoryEngine::new(Arc::new(store), model)
+                    .with_embedder(Arc::new(e) as Arc<dyn Embedder>),
+            ),
+            None => Arc::new(MemoryEngine::new(Arc::new(store), model)),
+        };
         let provider = Arc::new(AstraMemoryProvider::new(Arc::clone(&engine)));
         Ok(Self {
             engine,
@@ -123,6 +143,45 @@ impl MemoryHost {
 
     pub fn db_path(&self) -> &Path {
         &self.db_path
+    }
+}
+
+/// 加载 embedding 模型（recall 语义通道，bge-small-zh-v1.5 int8）。
+/// ORT_DYLIB_PATH 由 load_judge 设置；judge 缺席时这里兜底设置 ——
+/// 两个模型共用同一个 dylib。任何失败都返回 None 降级词法 recall，
+/// 不影响存储与显式通道（D21）。
+fn load_embedder(models: &MemoryModelPaths) -> Option<BgeEmbedder> {
+    let (Some(embed_dir), Some(dylib)) = (&models.embed_dir, &models.ort_dylib) else {
+        eprintln!(
+            "[memory] embedder disabled (lexical-only recall): embed_dir={:?} dylib={:?}",
+            models.embed_dir, models.ort_dylib
+        );
+        return None;
+    };
+    if std::env::var_os("ORT_DYLIB_PATH").is_none() {
+        std::env::set_var("ORT_DYLIB_PATH", dylib);
+    }
+    // 同 load_judge：ort dylib 加载失败是 panic，必须在启动帧截住。
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        BgeEmbedder::load(embed_dir, 2)
+    })) {
+        Ok(Ok(e)) => {
+            eprintln!("[memory] embedder loaded: {}", embed_dir.display());
+            Some(e)
+        }
+        Ok(Err(error)) => {
+            eprintln!("[memory] embedder load failed, lexical-only recall: {error}");
+            None
+        }
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("ort dylib load panic");
+            eprintln!("[memory] embedder load panicked, lexical-only recall: {msg}");
+            None
+        }
     }
 }
 

@@ -41,6 +41,9 @@ uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
+# 让 agent-core / provider 链路的 tracing 日志在真实 app 里可见
+# （recall 失败此前只有哑的 warn）。ASTRA_LOG 覆盖，默认 info。
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # 用户图片归一化（agent_images.rs）：与 astra-tools 同版本同特性集
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 

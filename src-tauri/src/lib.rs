@@ -1377,6 +1377,16 @@ async fn clean_node_modules(paths: Vec<String>) -> Result<CleanResult, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Logging: surface tracing output (agent-core recall failures/skips were
+    // invisible before). ASTRA_LOG overrides; default info level.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .try_init();
+
     tauri::Builder::default()
         .manage(Mutex::new(Vec::<RunningServer>::new()))
         .manage(chat::ChatStopFlag(std::sync::atomic::AtomicBool::new(

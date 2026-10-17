@@ -12,6 +12,7 @@ mod embedding;
 mod extensions;
 mod indexer;
 mod market;
+mod memory;
 mod prompts;
 mod providers;
 mod session_store;
@@ -1412,6 +1413,29 @@ pub fn run() {
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+            // 记忆宿主初始化（astra-memory）：加密 SQLite + 主密钥文件。
+            // 失败降级为 memory-off：agent 照常运行（无 recall 注入），
+            // memory_* 命令报「memory is unavailable」。judge 部署物缺失
+            // 只降级 v1（bundle resources 见 tauri.conf.json）。
+            let memory_resources = app.path().resource_dir().ok();
+            match app.path().app_data_dir() {
+                Ok(dir) => {
+                    let models =
+                        crate::memory::MemoryModelPaths::resolve(memory_resources.as_deref());
+                    match crate::memory::MemoryHost::init(&dir, &models) {
+                        Ok(host) => {
+                            let _ = app.state::<agent::AgentState>().memory.set(host);
+                        }
+                        Err(error) => {
+                            eprintln!("[memory] init failed, memory disabled: {error}");
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
+                }
+            }
+
             let show_item = MenuItem::with_id(app, "show", "显示窗口", true, Some("Alt+Space"))?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, Some("CmdOrCtrl+Q"))?;
@@ -1538,6 +1562,11 @@ pub fn run() {
             agent::agent_checkpoint_restore,
             // Agent Artifacts（ARTIFACT_SPEC：产物元数据登记）
             agent::agent_artifact_list,
+            // Memory（astra-memory 集成：recall 注入 + 显式管理）
+            memory::memory_status,
+            memory::memory_search,
+            memory::memory_remember,
+            memory::memory_forget,
             // Agent Sessions
             agent_sessions::list_agent_sessions,
             agent_sessions::save_agent_session,

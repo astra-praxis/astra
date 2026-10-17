@@ -261,6 +261,9 @@ pub struct AgentState {
     /// 一次性注册进 tasks；provider 按配置懒构建/懒切换（agent_start_run
     /// 每次 sync，新会话生效），disabled 时工具不注册、不阻塞会话。
     pub(crate) generation: crate::agent_generation::GenerationStack,
+    /// 记忆宿主（astra-memory 集成）：setup 阶段初始化（需要 app_data_dir），
+    /// 失败降级为 memory-off（agent 照常运行，无 recall 注入）。
+    pub(crate) memory: Arc<std::sync::OnceLock<crate::memory::MemoryHost>>,
 }
 
 /// 一次会话装配产生的扩展 manager 句柄（Arc 保活）。
@@ -302,6 +305,7 @@ impl Default for AgentState {
             ),
             mcp_tasks,
             generation,
+            memory: Arc::new(std::sync::OnceLock::new()),
         }
     }
 }
@@ -892,6 +896,12 @@ pub async fn agent_start_run(
                 .or(Some(DEFAULT_AUTO_COMPACT_TOKENS))
                 .filter(|&t| t > 0);
             config.policy = policy;
+            // 记忆集成：注入 MemoryProvider，每个 Run 由 agent-core 自动
+            // recall 最新用户输入进 system prompt（REMEMBERED CONTEXT）。
+            // memory-off（init 失败）时保持 None，prompt 逐字节不变。
+            if let Some(memory) = state.memory.get() {
+                config.memory = Some(memory.provider());
+            }
             // Artifact records share the threads sqlite file; a failure to
             // open it keeps artifacts event-only (same degradation as before
             // this wiring) instead of blocking the run.
@@ -992,10 +1002,34 @@ pub async fn agent_start_run(
     let active = Arc::clone(&state.active);
     let errors = Arc::clone(&state.persistence_errors);
     let settled_session = session_id.clone();
+    // 记忆 Formation（宿主能力，不暴露给 agent 模型）：Run 结束后把用户输入
+    // 喂进 observe 管线。v2 全量 formation：普通消息由进程内 OnnxJudge
+    // 决策（数十毫秒级）；judge 未加载时降级 v1（仅显式口令，observer
+    // 预筛几微秒级丢弃）。异步 spawn，不阻塞 Run 结束路径。
+    let observe_engine = state.memory.get().map(|m| m.engine().clone());
+    let observe_text = user_text.clone();
     tokio::spawn(async move {
         while let Some(env) = rx.recv().await {
             log_event(&forward_app, &env);
             let _ = forward_app.emit("agent-event", &env);
+        }
+        if let Some(engine) = observe_engine {
+            let text = observe_text.trim();
+            if !text.is_empty() {
+                if let Err(error) = engine
+                    .observe(
+                        text,
+                        &astra_memory::model::SubjectRef::user(),
+                        crate::memory::now_secs(),
+                    )
+                    .await
+                {
+                    eprintln!(
+                        "[memory] observe failed (session {}): {error}",
+                        settled_session
+                    );
+                }
+            }
         }
         let persistence_error = errors
             .lock()

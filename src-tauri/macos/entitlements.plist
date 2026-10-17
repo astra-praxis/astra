@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- onnxruntime dylib (pip wheel, linker-signed ad-hoc) is loaded at
+	     runtime via ORT_DYLIB_PATH from bundle Resources. Library validation
+	     (implied by the hardened-runtime flag the tauri bundler sets) rejects
+	     ad-hoc dylibs: "mapping process and mapped file have different Team
+	     IDs". No team ID exists to match, so LV must be disabled for local
+	     / ad-hoc distribution. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

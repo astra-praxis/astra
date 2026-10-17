@@ -28,8 +28,18 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../../astra-memory/checkpoints/astra-memory-v3/": "memory-model/",
+      "resources/onnxruntime/": "onnxruntime/"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      }
+    },
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "macos/entitlements.plist"
     },
     "icon": [
       "icons/32x32.png",

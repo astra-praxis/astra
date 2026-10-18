@@ -115,13 +115,14 @@ impl MemoryHost {
         let model: Option<Arc<dyn DecisionModel>> =
             judge.map(|j| Arc::new(j) as Arc<dyn DecisionModel>);
         let embedder = load_embedder(models);
-        let engine = match embedder {
-            Some(e) => Arc::new(
-                MemoryEngine::new(Arc::new(store), model)
-                    .with_embedder(Arc::new(e) as Arc<dyn Embedder>),
-            ),
-            None => Arc::new(MemoryEngine::new(Arc::new(store), model)),
-        };
+        let mut engine = MemoryEngine::new(Arc::new(store), model);
+        if let Some(e) = embedder {
+            engine = engine.with_embedder(Arc::new(e) as Arc<dyn Embedder>);
+        }
+        if let Some(p) = load_proposer() {
+            engine = engine.with_proposer(p);
+        }
+        let engine = Arc::new(engine);
         let provider = Arc::new(AstraMemoryProvider::new(Arc::clone(&engine)));
         Ok(Self {
             engine,
@@ -183,6 +184,27 @@ fn load_embedder(models: &MemoryModelPaths) -> Option<BgeEmbedder> {
             None
         }
     }
+}
+
+/// LLM Cognitive Proposer（docs/11 §3，Cognitive Layer v1）：可选 ——
+/// env `ASTRA_MEMORY_PROPOSER_URL`（OpenAI 兼容 base url）+ 可选
+/// `ASTRA_MEMORY_PROPOSER_MODEL` / `ASTRA_MEMORY_PROPOSER_KEY`。env 缺失
+/// 时返回 None，行为与纯确定性管线完全一致；只在 pipeline 未落盘的
+/// Observed/Discarded 事件上被 best-effort 调用（见 engine）。
+fn load_proposer() -> Option<Arc<dyn astra_memory::proposer::CognitiveProposer>> {
+    let base_url = std::env::var("ASTRA_MEMORY_PROPOSER_URL").ok()?;
+    let model =
+        std::env::var("ASTRA_MEMORY_PROPOSER_MODEL").unwrap_or_else(|_| "default".to_string());
+    let key = std::env::var("ASTRA_MEMORY_PROPOSER_KEY").ok();
+    eprintln!(
+        "[memory] llm proposer enabled: url={} model={}",
+        base_url, model
+    );
+    Some(Arc::new(astra_memory::proposer::OpenAiCompatProposer::new(
+        &base_url,
+        &model,
+        key.as_deref(),
+    )))
 }
 
 /// 加载进程内 OnnxJudge：先设 ORT_DYLIB_PATH（ort load-dynamic 在首次

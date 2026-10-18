@@ -19,7 +19,6 @@ use astra_memory::engine::MemoryEngine;
 use astra_memory::judge_onnx::{OnnxJudge, OnnxJudgeConfig};
 use astra_memory::model::SubjectRef;
 use astra_memory::protocol::RecallQuery;
-use astra_memory::store::MemoryStore;
 use astra_memory::store_sqlite::SqliteStore;
 use astra_memory_provider::AstraMemoryProvider;
 
@@ -39,6 +38,20 @@ const SEEDS: &[(&str, &str)] = &[
     ("记住我用 vim 键位，不要给我 emacs 建议", "显式·偏好"),
     ("这个项目必须支持内网离线运行", "隐式·项目约束"),
     ("我女朋友叫小雨，她生日在三月", "隐式·关系"),
+    // ---- Cognitive Layer v1 seeds: second project + attribution + reversal
+    (
+        "我在做一个叫 campus-ai 的校园 AI 入口平台",
+        "隐式·项目·campus-ai",
+    ),
+    (
+        "campus-ai 用 Rust Gateway 做安全决策引擎",
+        "隐式·项目上下文·campus-ai",
+    ),
+    ("astra 用 rmcp 实现 MCP client", "隐式·项目上下文·astra"),
+    (
+        "campus-ai 不用 Rust Gateway 了，安全决策引擎改成 rmcp",
+        "矛盾更新·campus-ai",
+    ),
     ("帮我打开 README", "瞬态·应被 observer 丢弃"),
     ("把光标移到行尾", "瞬态·应被 observer 丢弃"),
 ];
@@ -81,6 +94,42 @@ fn load_judge() -> Option<OnnxJudge> {
     }
 }
 
+/// Deterministic stand-in for the LLM cognitive proposer: maps message
+/// substrings the judge missed to the proposals a real model would emit.
+/// Evidence/entity grounding is still done by the engine (Rust), so the
+/// wiring under test is the production one.
+struct TableProposer;
+
+#[async_trait::async_trait]
+impl astra_memory::proposer::CognitiveProposer for TableProposer {
+    async fn propose(
+        &self,
+        input: &astra_memory::proposer::ProposerInput,
+    ) -> astra_memory::Result<Vec<astra_memory::consolidation::ClaimProposal>> {
+        use astra_memory::consolidation::{ClaimProposal, ProposalOperation};
+        let c = &input.event.content;
+        let op = if c.contains("astra 用 rmcp") {
+            Some(ProposalOperation::CreateClaim {
+                subject_entity: "project:astra".into(),
+                predicate: "uses".into(),
+                object: "astra 用 rmcp 实现 MCP client".into(),
+            })
+        } else {
+            None
+        };
+        Ok(op
+            .map(|operation| {
+                ClaimProposal::new(
+                    "prp_table".into(),
+                    operation,
+                    "scripted proposer (judge blind spot)",
+                )
+            })
+            .into_iter()
+            .collect())
+    }
+}
+
 fn load_embedder() -> Option<BgeEmbedder> {
     let model_dir = std::env::var("BGE_MODEL_DIR").ok()?;
     if std::env::var_os("ORT_DYLIB_PATH").is_none() {
@@ -113,10 +162,19 @@ async fn batch_conversation_eval() {
 
     let model: Option<Arc<dyn DecisionModel>> =
         judge.map(|j| Arc::new(j) as Arc<dyn DecisionModel>);
-    let engine = match embedder {
-        Some(e) => MemoryEngine::new(Arc::new(store), model)
-            .with_embedder(Arc::new(e) as Arc<dyn Embedder>),
-        None => MemoryEngine::new(Arc::new(store), model),
+    let engine = {
+        let e = match embedder {
+            Some(e) => MemoryEngine::new(Arc::new(store), model)
+                .with_embedder(Arc::new(e) as Arc<dyn Embedder>),
+            None => MemoryEngine::new(Arc::new(store), model),
+        };
+        // Scripted proposer standing in for the LLM channel (docs/11 §3):
+        // the real host builds OpenAiCompatProposer from env. The judge
+        // discard on "astra 用 rmcp 实现 MCP client" (Observed) is exactly
+        // the rule/judge blind spot the proposer supplements — this table
+        // simulates what a real model would propose for it, and exercises
+        // the engine→grounding→apply wiring end to end.
+        Arc::new(e.with_proposer(Arc::new(TableProposer)))
     };
 
     // ===== Phase A: formation =====
@@ -283,11 +341,13 @@ async fn batch_conversation_eval() {
     // cognitive channel (project-state lines) ahead of the atom channel,
     // deduped — exactly what AstraMemoryProvider::search returns.
     eprintln!("=== Phase E: provider.search (REMEMBERED CONTEXT rendering) ===");
-    let provider = AstraMemoryProvider::new(Arc::new(engine));
+    let provider = AstraMemoryProvider::new(Arc::clone(&engine));
     for probe in [
         "astra 项目现在怎么打包？",
+        "astra 的 MCP client 用什么实现？",
         "界面配色用哪种比较合适？",
         "下个月有什么计划？",
+        "campus-ai 的安全决策引擎现在用什么？",
     ] {
         let entries = provider.search(probe, None, 5).await.unwrap();
         eprintln!("  Q: {probe}");
@@ -300,4 +360,85 @@ async fn batch_conversation_eval() {
     }
 
     assert!(positives > 0 && negatives > 0, "eval data must be labeled");
+
+    // ===== Phase F: cognitive layer (multi-subject bridge, docs/11 §5) =====
+    eprintln!("=== Phase F: cognitive layer checks ===");
+    use astra_memory::consolidation::pred;
+    use astra_memory::model::{ClaimStatus, EntityKind};
+    let store = engine.store();
+    let user = store
+        .find_entity("user")
+        .await
+        .unwrap()
+        .expect("user entity bridged");
+    for name in ["astra", "campus-ai"] {
+        let e = store
+            .find_entity(name)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("{name} project entity should exist"));
+        assert_eq!(e.kind, EntityKind::Project);
+    }
+    let astra = store.find_entity("astra").await.unwrap().unwrap();
+    let campus = store.find_entity("campus-ai").await.unwrap().unwrap();
+    let astra_claims = store
+        .claims_about(&astra.id, Some(ClaimStatus::Active))
+        .await
+        .unwrap();
+    let campus_claims = store
+        .claims_about(&campus.id, Some(ClaimStatus::Active))
+        .await
+        .unwrap();
+    for (name, claims) in [("astra", &astra_claims), ("campus-ai", &campus_claims)] {
+        eprintln!("  [{name}] {} active claims:", claims.len());
+        for c in claims {
+            eprintln!(
+                "    {} {} (conf {:.2})",
+                c.predicate, c.object, c.confidence
+            );
+        }
+    }
+    // Cross-project isolation: each project's cognition only speaks about
+    // itself (跨项目不串 — the “打包 Windows” class of failures).
+    assert!(
+        !astra_claims.iter().any(|c| c.object.contains("campus-ai")),
+        "astra cognition contaminated with campus-ai"
+    );
+    assert!(
+        !campus_claims.iter().any(|c| c.object.contains("astra")),
+        "campus-ai cognition contaminated with astra"
+    );
+    // Attribution: technology decisions sit on the RIGHT project.
+    assert!(
+        astra_claims
+            .iter()
+            .any(|c| c.predicate == pred::USES && c.object.contains("rmcp")),
+        "astra should hold the rmcp uses claim"
+    );
+    // Reversal sync: campus-ai's single-valued uses claim must supersede
+    // Rust Gateway with rmcp (claim-level Replaced, history kept).
+    let campus_uses: Vec<_> = campus_claims
+        .iter()
+        .filter(|c| c.predicate == pred::USES)
+        .collect();
+    assert_eq!(
+        campus_uses.len(),
+        1,
+        "single-valued uses claim must supersede, got {campus_uses:?}"
+    );
+    assert!(
+        campus_uses[0].object.contains("rmcp"),
+        "reversal did not sync the campus-ai uses claim: {}",
+        campus_uses[0].object
+    );
+    // user ---> project edges exist for both projects.
+    let edges = store.claim_relations_for(&user.id).await.unwrap();
+    eprintln!("  user edges: {}", edges.len());
+    for e in &edges {
+        eprintln!("    {:?} -> {}", e.relation, e.to_entity);
+    }
+    assert!(edges
+        .iter()
+        .any(|e| e.to_entity == astra.id || e.to_entity == campus.id));
+    eprintln!("=== Phase F: all cognitive-layer assertions passed ===");
 }

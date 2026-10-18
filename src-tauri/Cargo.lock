@@ -285,6 +285,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "ort",
+ "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "serde_json",

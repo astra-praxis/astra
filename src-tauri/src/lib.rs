@@ -12,6 +12,7 @@ mod embedding;
 mod extensions;
 mod indexer;
 mod market;
+mod mcp_config_tool;
 mod memory;
 mod prompts;
 mod providers;

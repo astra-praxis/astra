@@ -436,8 +436,12 @@ fn build_registry(
     )>,
 ) -> ToolRegistry {
     // 网络工具 + ask_user 不依赖项目根，纯聊天也可用；任务查询工具同全局
-    let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search_endpoint)
-        .register(agent_core::AskUserTool::new(question_bridge));
+    let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search)
+        .register(agent_core::AskUserTool::new(question_bridge))
+        // MCP 配置自助管理：用户在对话里说「装个 xx MCP」时，agent 用它写
+        // ~/.astra/config.toml（工具集合建会话时冻结，写入后新会话生效）
+        .register(crate::mcp_config_tool::McpConfigRead)
+        .register(crate::mcp_config_tool::McpConfigWrite);
     let reg = agent_core::task_tools::register(reg, tasks.clone());
     // 多模态 M5：enabled 且配置完整时注册 generate_image（付费生成，
     // MULTIMODAL_SPEC §10）；disabled / 缺配置时不注册、不报错。
@@ -859,6 +863,10 @@ pub async fn agent_start_run(
             policy.allowed_readonly.push("extract_document".into());
             policy.allowed_readonly.push("ask_user".into());
             policy.allowed_readonly.push("search_web".into());
+            // MCP 配置自助管理：读无副作用 Allow；写入配置 Confirm（自动全放行
+            // 时随 auto_all 放行，装扩展是用户主动要求的行为）
+            policy.allowed_readonly.push("mcp_config_read".into());
+            policy.confirm_tools.push("mcp_config_write".into());
             policy.confirm_tools.push("edit_file".into());
             policy.confirm_tools.push("copy_path".into());
             policy.confirm_tools.push("move_path".into());

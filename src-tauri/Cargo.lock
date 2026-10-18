@@ -291,6 +291,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokenizers",
+ "tracing",
 ]
 
 [[package]]
@@ -302,6 +303,7 @@ dependencies = [
  "astra-memory",
  "async-trait",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]

@@ -123,7 +123,11 @@ struct AppSettings {
     models: Vec<ModelConfig>,
     #[serde(default)]
     favorite_dev_mode: Option<DevModeFavorite>,
-    /// Agent search_web 的 SearXNG 实例地址（可选；不设置用 DuckDuckGo 抓取）
+    /// Agent search_web 的搜索引擎（bing | duckduckgo | searxng；默认 bing）
+    #[serde(default)]
+    search_engine: Option<String>,
+    /// SearXNG 实例地址（search_engine = searxng 时使用；仅配置了它而未选
+    /// 引擎的旧设置仍走 SearXNG）
     #[serde(default)]
     search_endpoint: Option<String>,
 }
@@ -140,6 +144,7 @@ impl Default for AppSettings {
             scan_depth: 3,
             models: Vec::new(),
             favorite_dev_mode: None,
+            search_engine: None,
             search_endpoint: None,
         }
     }

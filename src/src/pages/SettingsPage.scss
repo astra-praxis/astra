@@ -236,6 +236,11 @@
   &--wide {
     width: 240px;
   }
+
+  // 搜索引擎下拉：选项文案比默认输入宽
+  &--select {
+    width: 170px;
+  }
 }
 
 // 图片生成配置（generate_image）：多行字段 + 保存按钮

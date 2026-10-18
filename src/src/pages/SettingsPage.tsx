@@ -29,6 +29,7 @@ interface AppSettings {
   workspaces: WorkspaceConfig[];
   active_workspace: string | null;
   scan_depth: number;
+  search_engine?: string | null;
   search_endpoint?: string | null;
 }
 
@@ -75,7 +76,8 @@ export default function SettingsPage() {
   // 图片识别：read_file 图片上传所选模型的显式授权（仅新会话生效）
   const imageRecognition = useAgentStore((s) => s.imageRecognition);
   const setImageRecognition = useAgentStore((s) => s.setImageRecognition);
-  // Agent search_web 的 SearXNG 实例地址（可选；空 = 用 DuckDuckGo）
+  // Agent search_web 的搜索引擎（bing 默认 / duckduckgo / searxng）与 SearXNG 实例地址
+  const [searchEngine, setSearchEngine] = useState('bing');
   const [searchEndpoint, setSearchEndpoint] = useState('');
   // 图片生成（generate_image 工具）：OpenAI Images 兼容网关配置
   //（保存后新会话生效；api_key 仅存本机 generation.json）
@@ -104,6 +106,10 @@ export default function SettingsPage() {
         setWorkspaces(settings.workspaces);
         setActiveWorkspace(settings.active_workspace);
         setScanDepth(settings.scan_depth || 3);
+        // 旧设置只配了 search_endpoint 而未选引擎 → 实际走 SearXNG，如实回显
+        setSearchEngine(
+          settings.search_engine ?? (settings.search_endpoint ? 'searxng' : 'bing')
+        );
         setSearchEndpoint(settings.search_endpoint ?? '');
         setGenConfig((prev) => ({ ...prev, ...gen }));
 
@@ -165,6 +171,7 @@ export default function SettingsPage() {
           workspaces,
           active_workspace: activeWorkspace,
           scan_depth: scanDepth,
+          search_engine: searchEngine,
           search_endpoint: searchEndpoint.trim() || null,
         },
       });
@@ -524,19 +531,39 @@ export default function SettingsPage() {
         </div>
         <div className="agent-perm-row">
           <div className="agent-perm-text">
-            <span className="agent-perm-title">搜索服务地址（可选）</span>
+            <span className="agent-perm-title">搜索引擎</span>
             <span className="agent-perm-desc">
-              Agent 的 search_web 工具默认用 DuckDuckGo（部分网络不可达）。填写一个 SearXNG 实例地址（如 https://searx.example.org）可切换到该实例，保存后新会话生效。
+              Agent 的 search_web 工具使用的搜索后端，默认 Bing（一般可直连）。
+              DuckDuckGo 部分网络不可达；SearXNG 需自建或指定实例地址（需开启 format=json）。保存后新会话生效。
             </span>
           </div>
-          <input
-            type="text"
-            value={searchEndpoint}
-            placeholder="https://searx.example.org"
-            className="agent-perm-input agent-perm-input--wide"
-            onChange={(e) => setSearchEndpoint(e.target.value)}
-          />
+          <select
+            value={searchEngine}
+            className="agent-perm-input agent-perm-input--select"
+            onChange={(e) => setSearchEngine(e.target.value)}
+          >
+            <option value="bing">Bing（默认）</option>
+            <option value="duckduckgo">DuckDuckGo</option>
+            <option value="searxng">SearXNG（自建实例）</option>
+          </select>
         </div>
+        {searchEngine === 'searxng' && (
+          <div className="agent-perm-row">
+            <div className="agent-perm-text">
+              <span className="agent-perm-title">SearXNG 实例地址</span>
+              <span className="agent-perm-desc">
+                SearXNG 实例的基地址（如 https://searx.example.org），实例需允许 JSON 输出。
+              </span>
+            </div>
+            <input
+              type="text"
+              value={searchEndpoint}
+              placeholder="https://searx.example.org"
+              className="agent-perm-input agent-perm-input--wide"
+              onChange={(e) => setSearchEndpoint(e.target.value)}
+            />
+          </div>
+        )}
         <div className="agent-perm-row">
           <div className="agent-perm-text">
             <span className="agent-perm-title">图片生成（generate_image）</span>

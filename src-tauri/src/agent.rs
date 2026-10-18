@@ -356,16 +356,21 @@ impl QuestionHub {
 /// UserQuestionBridge 宿主实现：发 agent-question 事件给前端，
 /// oneshot 等待 agent_question_answer 回传。发送端被清理（取消/重置）
 /// 时返回 Err，问题作废，工具把错误回传模型。
-/// 从应用设置读取 search_web 的 SearXNG 实例地址（未配置 → None，用 DDG）。
-/// 地址会 trim 并去掉末尾的 /，再拼 /search?q=&format=json。
-fn settings_search_endpoint(app: &AppHandle) -> Option<String> {
-    let path = crate::get_settings_path(app).ok()?;
-    let content = std::fs::read_to_string(path).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
-    v.get("search_endpoint")
-        .and_then(|s| s.as_str())
-        .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
+/// 从应用设置读取 search_web 的搜索配置：`search_engine` 选后端（bing |
+/// duckduckgo | searxng，未设置时默认 bing；仅配置了 search_endpoint 的旧
+/// 设置保持 SearXNG 语义，由 agent-core 的 SearchEngine::resolve 统一裁定）。
+fn settings_search(app: &AppHandle) -> agent_core::net_tools::SearchEngine {
+    let read = |key: &str| -> Option<String> {
+        let path = crate::get_settings_path(app).ok()?;
+        let content = std::fs::read_to_string(path).ok()?;
+        let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+        v.get(key)
+            .and_then(|s| s.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let endpoint = read("search_endpoint").map(|s| s.trim_end_matches('/').to_string());
+    agent_core::net_tools::SearchEngine::resolve(read("search_engine").as_deref(), endpoint)
 }
 
 struct QuestionBridge {
@@ -422,7 +427,7 @@ fn build_registry(
     project_root: Option<&PathBuf>,
     skills_dir: Option<&Path>,
     question_bridge: Arc<dyn agent_core::UserQuestionBridge>,
-    search_endpoint: Option<String>,
+    search: agent_core::net_tools::SearchEngine,
     processes: Arc<agent_core::shell_background::ProcessManager>,
     tasks: Arc<agent_core::TaskManager>,
     generation: Option<(
@@ -931,7 +936,7 @@ pub async fn agent_start_run(
                 project_root.as_ref(),
                 skills_dir.as_deref(),
                 question_bridge,
-                settings_search_endpoint(&app),
+                settings_search(&app),
                 Arc::clone(&state.processes),
                 Arc::clone(&state.tasks),
                 generation,
@@ -1666,7 +1671,7 @@ mod tests {
                 None,
                 None,
                 Arc::new(NoQuestions2),
-                None,
+                agent_core::net_tools::SearchEngine::default(),
                 Arc::new(agent_core::shell_background::ProcessManager::new()),
                 Arc::new(agent_core::TaskManager::new(8, None)),
                 generation,
@@ -1731,7 +1736,7 @@ mod tests {
             Some(&root),
             None,
             Arc::new(NoQuestions) as Arc<dyn agent_core::UserQuestionBridge>,
-            None,
+            agent_core::net_tools::SearchEngine::default(),
             Arc::clone(&state.processes),
             Arc::clone(&state.tasks),
             None,

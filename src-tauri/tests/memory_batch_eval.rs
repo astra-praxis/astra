@@ -12,14 +12,16 @@
 
 use std::sync::Arc;
 
+use agent_core::memory::MemoryProvider;
 use astra_memory::decision::DecisionModel;
 use astra_memory::embed::{BgeEmbedder, Embedder};
 use astra_memory::engine::MemoryEngine;
 use astra_memory::judge_onnx::{OnnxJudge, OnnxJudgeConfig};
-use astra_memory::model::{MemoryKind, SubjectRef};
+use astra_memory::model::SubjectRef;
 use astra_memory::protocol::RecallQuery;
 use astra_memory::store::MemoryStore;
 use astra_memory::store_sqlite::SqliteStore;
+use astra_memory_provider::AstraMemoryProvider;
 
 const NOW: u64 = 1_800_000_000;
 
@@ -275,6 +277,27 @@ async fn batch_conversation_eval() {
     eprintln!(
         "  → old preference retired: {outdated_gone}, updated content recalled: {updated_present}"
     );
+
+    // ===== Phase E: agent-visible context (provider fusion, docs/11 §6) =====
+    // What the host actually injects as REMEMBERED CONTEXT lines: the
+    // cognitive channel (project-state lines) ahead of the atom channel,
+    // deduped — exactly what AstraMemoryProvider::search returns.
+    eprintln!("=== Phase E: provider.search (REMEMBERED CONTEXT rendering) ===");
+    let provider = AstraMemoryProvider::new(Arc::new(engine));
+    for probe in [
+        "astra 项目现在怎么打包？",
+        "界面配色用哪种比较合适？",
+        "下个月有什么计划？",
+    ] {
+        let entries = provider.search(probe, None, 5).await.unwrap();
+        eprintln!("  Q: {probe}");
+        if entries.is_empty() {
+            eprintln!("       (no memory injected)");
+        }
+        for e in &entries {
+            eprintln!("       - {}", e.content);
+        }
+    }
 
     assert!(positives > 0 && negatives > 0, "eval data must be labeled");
 }

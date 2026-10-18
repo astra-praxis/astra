@@ -344,7 +344,7 @@ async fn project_image_read_reaches_model_and_sqlite_without_event_payloads() {
 }
 
 #[tokio::test]
-async fn image_consent_is_bound_before_cache_and_survives_restart() {
+async fn image_config_is_recorded_not_enforced_and_survives_restart() {
     let database = Database::new();
     let mut host = AgentThreads::default();
     host.open(&database.0, errors()).await.unwrap();
@@ -355,73 +355,79 @@ async fn image_consent_is_bound_before_cache_and_survives_restart() {
         .await
         .unwrap();
     drain(&host.threads["images"]).await;
-    for (enabled, endpoint, model) in [
-        (false, "https://gateway/v1", "vision"),
-        (true, "https://other/v1", "vision"),
-        (true, "https://gateway/v1", "other"),
-    ] {
-        assert!(host
-            .bind_image_config("images", enabled, endpoint, model)
-            .await
-            .is_err());
-    }
+    // 会话与模型不绑定：开关与目的地任意变化都允许，换目的地时报告变化。
+    assert!(!host
+        .bind_image_config("images", false, "https://gateway/v1", "vision")
+        .await
+        .unwrap());
+    assert!(host
+        .bind_image_config("images", true, "https://other/v1", "vision")
+        .await
+        .unwrap());
+    assert!(host
+        .bind_image_config("images", true, "https://gateway/v1", "other")
+        .await
+        .unwrap());
     drop(host);
     let mut host = AgentThreads::default();
     host.open(&database.0, errors()).await.unwrap();
-    host.bind_image_config("images", true, "https://gateway/v1", "vision")
+    // 记录持久化：重启后同配置不再报告目的地变化。
+    assert!(!host
+        .bind_image_config("images", true, "https://gateway/v1", "other")
         .await
-        .unwrap();
-    assert!(host
-        .bind_image_config("images", false, "https://gateway/v1", "vision")
+        .unwrap());
+    // 新会话首 runs 不报告变化；legacy 会话（无记录）中途开启图片识别也允许。
+    assert!(!host
+        .bind_image_config("new", false, "https://gateway/v1", "vision")
         .await
-        .is_err());
-    host.bind_image_config("new", false, "https://gateway/v1", "vision")
-        .await
-        .unwrap();
+        .unwrap());
     load(&mut host, "legacy", Arc::new(Backend::default()))
         .await
         .unwrap();
-    assert!(host
+    assert!(!host
         .bind_image_config("legacy", true, "https://gateway/v1", "vision")
         .await
-        .is_err());
-    host.bind_image_config("legacy", false, "https://gateway/v1", "vision")
+        .unwrap());
+    assert!(host
+        .bind_image_config("legacy", true, "https://gateway/v1", "m2")
         .await
-        .unwrap();
+        .unwrap());
 }
 
 #[tokio::test]
-async fn text_session_allows_model_switch_but_images_stay_bound() {
+async fn session_allows_model_and_image_switch_freely() {
     let database = Database::new();
     let mut host = AgentThreads::default();
     host.open(&database.0, errors()).await.unwrap();
-    // 纯文本会话：模型来源可自由切换，切换时报告目的地变化（调用方重建 Thread）。
+    // 首次运行：无已记录目的地，不报告变化。
     assert!(!host
         .bind_image_config("text", false, "https://gateway/v1", "m1")
         .await
         .unwrap());
+    // 换模型：允许并报告目的地变化（调用方重建 Thread）。
     assert!(host
         .bind_image_config("text", false, "https://gateway/v1", "m2")
         .await
         .unwrap());
+    // 同配置重复运行：不报告变化。
     assert!(!host
         .bind_image_config("text", false, "https://gateway/v1", "m2")
         .await
         .unwrap());
-    // 用已记录目的地中途开启图片识别：consent 由用户显式开关给出。
+    // 中途开启图片识别（同目的地）：允许，不报告变化。
     assert!(!host
         .bind_image_config("text", true, "https://gateway/v1", "m2")
         .await
         .unwrap());
-    // 开启后目的地冻结：关闭或换模型都必须新建会话。
-    assert!(host
+    // 开启后仍可自由关闭或换模型。
+    assert!(!host
         .bind_image_config("text", false, "https://gateway/v1", "m2")
         .await
-        .is_err());
+        .unwrap());
     assert!(host
         .bind_image_config("text", true, "https://gateway/v1", "m3")
         .await
-        .is_err());
+        .unwrap());
 }
 
 #[tokio::test]

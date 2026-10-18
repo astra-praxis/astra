@@ -11,9 +11,7 @@
 
 `AgentStartReq.image_recognition` defaults to false. Only explicit true selects `ImageEncoding::UserImageUrl`; otherwise the backend uses `Disabled`.
 
-The host persists `host_image_config` (enabled, endpoint, resolved model; no API key) in the SQLite thread metadata under the existing lifecycle lock, **before** cached-thread reuse. A mismatch rejects the request before model invocation. This also prevents an image-enabled cached thread from silently using a different destination than the selected model. Model/endpoint changes likewise require a new conversation. Reverting to the bound configuration allows continuation.
-
-Changing the checkbox only changes the preference for new conversations, not existing consent. The toolbar labels it “新会话设置”, not the current thread's effective state. Existing sessions keep their binding across unload/restart. Legacy sessions without metadata are treated as image-disabled and cannot be upgraded in place. Disabling the preference is not a history scrub: start a new disabled conversation to stop using images. Existing enabled conversations cannot continue with the disabled setting.
+The host persists `host_image_config` (enabled, endpoint, resolved model; no API key) in the SQLite thread metadata under the existing lifecycle lock, **before** cached-thread reuse. The record is informational only: sessions are not bound to a model. A destination (endpoint+model) change reports `dest_changed` so the caller unloads the cached thread and rebuilds it with the new backend; history is preserved in SQLite. Enabling or disabling image recognition never rejects a request — the checkbox simply takes effect on the next rebuilt thread (destination change) or new conversation.
 
 ## Privacy and limits
 
@@ -26,6 +24,6 @@ Changing the checkbox only changes the preference for new conversations, not exi
 
 ## Verification
 
-Host tests cover default-off deserialization/backend capability, cached-session mismatch, destination mismatch, legacy behavior, restart persistence, actual `read_file` image delivery to a mock vision backend, metadata-only events, and restoring image context after deleting the source. They do not certify live cloud gateway compatibility.
+Host tests cover default-off deserialization/backend capability, free model/image switching with destination-change reporting, restart persistence, actual `read_file` image delivery to a mock vision backend, metadata-only events, and restoring image context after deleting the source. They do not certify live cloud gateway compatibility.
 
 Frontend tests cover preference persistence and image metadata rendering alongside the existing test suite. Run from `web`: `pnpm typecheck`, `pnpm build`, and all `src/**/*.test.mjs` files with Node's test runner. Run from `src-tauri`: `cargo check --locked` and `cargo test --locked --lib`.

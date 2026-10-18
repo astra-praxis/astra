@@ -36,7 +36,6 @@ import {
   RotateCcw,
   Copy,
   Sparkles,
-  Square,
   Trash,
   Wrench,
   X,
@@ -81,30 +80,6 @@ const STATUS_LABEL: Record<string, string> = {
   compacting: '压缩上下文',
   persisting: '保存上下文',
 };
-
-// 「分析中」阶段往往持续很久，固定一个文案很呆 —— 轮换一组短语（对齐 Claude Code 风格）
-const ANALYZING_QUIPS = [
-  '思考中…',
-  '分析上下文…',
-  '组织思路…',
-  '翻阅资料…',
-  '构思回复…',
-  '整理要点…',
-  '斟酌措辞…',
-  '检查细节…',
-];
-
-/** 运行期间每隔几秒换一个短语；active 变化时从头开始 */
-function useRunningQuip(active: boolean): string {
-  const [idx, setIdx] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    setIdx(0);
-    const timer = setInterval(() => setIdx((i) => i + 1), 3200);
-    return () => clearInterval(timer);
-  }, [active]);
-  return ANALYZING_QUIPS[idx % ANALYZING_QUIPS.length];
-}
 
 // 权限确认卡文案按工具区分（未收录的工具用兜底文案）
 const PERM_ACTION_LABEL: Record<string, string> = {
@@ -586,6 +561,35 @@ export default function AgentPage() {
     () => entries.map((e, i) => (e.kind === 'user' ? i : -1)).filter((i) => i >= 0),
     [entries],
   );
+
+  /**
+   * 每条助手消息对应的「本轮完整回复」：一个 Run 里助手输出会被工具调用/思考块
+   * 切成多段 assistant 条目，复制时按 Run（相邻两条用户消息之间）聚合所有段。
+   * 仅多段时写入 map；单段直接用 entry.text 即可。
+   */
+  const fullRunTexts = useMemo(() => {
+    const map = new Map<number, string>();
+    let runStart = 0;
+    const flush = (end: number) => {
+      const texts: string[] = [];
+      for (let i = runStart; i < end; i++) {
+        const e = entries[i];
+        if (e.kind === 'assistant' && e.text.trim()) texts.push(e.text);
+      }
+      if (texts.length > 1) {
+        const joined = texts.join('\n\n');
+        for (let i = runStart; i < end; i++) {
+          if (entries[i].kind === 'assistant') map.set(i, joined);
+        }
+      }
+      runStart = end + 1;
+    };
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].kind === 'user') flush(i);
+    }
+    flush(entries.length);
+    return map;
+  }, [entries]);
   const [activeDot, setActiveDot] = useState(-1);
 
   /** 滚动时计算当前视口顶部所在的用户提问序号（未过任何提问时为 -1） */
@@ -1140,6 +1144,7 @@ export default function AgentPage() {
                 key={i}
                 entry={e}
                 index={i}
+                fullText={fullRunTexts.get(i)}
                 onDecide={handleDecide}
                 onAnswer={handleAnswer}
                 skills={skills}
@@ -1147,7 +1152,7 @@ export default function AgentPage() {
               />
             ))}
 
-            {running && <StatusLine status={status} settling={settling} onStop={handleStop} />}
+            {running && <StatusLine status={status} />}
           </div>
 
           </div>
@@ -1455,22 +1460,15 @@ function AssistantCopyFooter({ text }: { text: string }) {
 }
 
 /**
- * 运行中状态条：
- * - 分析中/未知状态 → 轮换短语（否则一个“分析中”挂几十秒太呆）
- * - 其它状态（执行工具/等待确认/压缩上下文…）信息量高，固定显示
- * - 文案切换时淡入，避免硬蹦
+ * 运行中状态指示：三点脉冲 loading（状态文案与停止操作已按需求移除；
+ * 悬停 title 保留当前状态，取消走输入框右侧的停止按钮）
  */
-function StatusLine({ status, settling, onStop }: { status: string | null; settling: boolean; onStop: () => Promise<void> | void }) {
-  const quipActive = !status || status === 'analyzing';
-  const quip = useRunningQuip(quipActive);
-  const label = quipActive ? quip : (STATUS_LABEL[status] ?? '运行中');
+function StatusLine({ status }: { status: string | null }) {
   return (
-    <div className="agent-statusline">
-      <Loader2 size={13} strokeWidth={2} className="agent-statusline__spin" />
-      <span key={label} className="agent-statusline__label">{label}</span>
-      <button type="button" disabled={settling} onClick={() => void onStop()}>
-        停止
-      </button>
+    <div className="agent-statusline" title={(status && STATUS_LABEL[status]) || '运行中'}>
+      <span className="agent-statusline__dot" />
+      <span className="agent-statusline__dot" />
+      <span className="agent-statusline__dot" />
     </div>
   );
 }
@@ -1478,6 +1476,7 @@ function StatusLine({ status, settling, onStop }: { status: string | null; settl
 const EntryView = memo(function EntryView({
   entry,
   index,
+  fullText,
   onDecide,
   onAnswer,
   skills,
@@ -1486,6 +1485,8 @@ const EntryView = memo(function EntryView({
   entry: Entry;
   /** 条目在会话流中的序号：写入 data-idx，供右侧圆点导轨快速定位 */
   index: number;
+  /** 本轮 Run 聚合后的完整回复（多段 assistant 时存在）；复制用 */
+  fullText?: string;
   onDecide: (callId: string, allow: boolean) => Promise<void>;
   onAnswer: (questionId: string, answer: string | null) => void;
   skills: UserSkillLite[];
@@ -1542,7 +1543,7 @@ const EntryView = memo(function EntryView({
               <div className="aentry__md">
                 <MarkdownMessage content={entry.text} streaming={entry.streaming} />
               </div>
-              {!entry.streaming && <AssistantCopyFooter text={entry.text} />}
+              {!entry.streaming && <AssistantCopyFooter text={fullText ?? entry.text} />}
             </>
           ) : (
             <div className="aentry__typing">
@@ -1607,11 +1608,6 @@ const EntryView = memo(function EntryView({
                   请在模型列表选择兼容模型，或改用标准 API 端点后新建会话。
                 </div>
               )}
-            </>
-          )}
-          {entry.outcome === 'cancelled' && (
-            <>
-              <Square size={11} strokeWidth={2} /> 已取消
             </>
           )}
         </div>

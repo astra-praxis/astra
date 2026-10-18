@@ -107,7 +107,7 @@ export type Entry =
       /** 用户取消/拒绝回答 */
       declined?: boolean;
     }
-  | { kind: 'terminal'; outcome: 'completed' | 'failed' | 'cancelled'; text?: string };
+  | { kind: 'terminal'; outcome: 'completed' | 'failed'; text?: string };
 
 /** 用户附带图片（规范 PNG 的 base64 与尺寸，与后端 AgentImageInput / NormalizedImage 对齐） */
 export interface UserImage {
@@ -409,7 +409,8 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
       if (env.type === 'run_failed') {
         return [...closed, { kind: 'terminal', outcome: 'failed', text: env.error }];
       }
-      return [...closed, { kind: 'terminal', outcome: 'cancelled' }];
+      // run_cancelled：不追加“已取消”终态条目，直接收尾（用户主动停止无需提示）
+      return closed;
     }
     case 'compaction_completed':
       return [...prev, { kind: 'notice', text: '上下文已压缩' }];
@@ -489,7 +490,7 @@ interface AgentState extends RunWindow {
   pushUser: (text: string, images?: UserImage[]) => void;
   /** checkpoint 恢复后用后端回传的历史重建条目（仅当会话一致且无运行中任务） */
   restoreEntries: (sessionId: string, entries: Entry[]) => void;
-  pushTerminal: (outcome: 'completed' | 'failed' | 'cancelled', text?: string) => void;
+  pushTerminal: (outcome: 'completed' | 'failed', text?: string) => void;
   /** 收到 ask_user 提问事件（追加问题卡条目） */
   pushQuestion: (q: AgentQuestionPayload) => void;
   /** 回答问题卡：answer 为 null 表示取消（本地立即置态，后端 oneshot 解析） */

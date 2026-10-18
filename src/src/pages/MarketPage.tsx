@@ -1,256 +1,296 @@
 /**
- * 扩展市场共享页面组件（MCP / Skill 两种形态）
- * 搜索内置目录 → 卡片展示（推荐置顶）→ 一键安装
+ * 扩展/技能共享页面组件
+ * - MCP：展示已安装（config.toml 已配置）的 MCP / ACP 扩展，
+ *   支持启停 / 删除 / 运行状态标记；新扩展不在页面安装，
+ *   由用户在 Agent 对话中让 AI 下载并写好配置
+ * - Skill：展示本地技能库已安装的技能；新技能同样回 Agent 对话安装
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { Search, Download, Check, Star, RefreshCw, X, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import {
+  RefreshCw,
+  X,
+  MessageSquarePlus,
+  FileWarning,
+  CheckCircle2,
+  Trash2,
+} from 'lucide-react';
+import Modal from '@/components/ui/Modal';
 import './MarketPage.scss';
 
-interface McpMarketEntry {
+interface McpExtensionInfo {
   id: string;
-  kind: 'mcp' | 'acp';
-  name: string;
-  description: string;
-  tags: string[];
-  official: boolean;
-  recommended: boolean;
-  recommendReason: string;
+  enabled: boolean;
+  transport: string;
   command: string;
   args: string[];
-  requires: string[];
-  npmPackage: string | null;
-  suggestedAllow: string[];
-  requiresEnv: string[];
+  env: string[];
+  required: boolean;
+  allow: string[];
+  deny: string[];
+  callTimeoutSecs: number;
 }
 
-interface SkillMarketEntry {
+interface AcpExtensionInfo {
   id: string;
+  enabled: boolean;
+  command: string;
+  args: string[];
+  env: string[];
+  required: boolean;
+  permission: string;
+  sessionPolicy: string;
+}
+
+interface ExtensionsList {
+  mcp: McpExtensionInfo[];
+  acp: AcpExtensionInfo[];
+  configPath: string;
+  parseError: string | null;
+}
+
+interface UserSkillMeta {
   name: string;
+  displayName: string;
   description: string;
-  installs: number;
-  source: string;
-  skillId: string;
-  pageUrl: string;
-  official: boolean;
-  recommended: boolean;
-  recommendReason: string;
-  installed: boolean;
+  path: string;
+  fileCount: number;
+  /** 目录内存在 SKILL.md（/调用 与 read_skill 都依赖它） */
+  available: boolean;
 }
 
 interface MarketStatus {
-  configuredIds: string[];
   nodeAvailable: boolean;
-  gitAvailable: boolean;
 }
 
-interface InstallResult {
-  ok: boolean;
-  message: string;
+type Kind = 'mcp' | 'acp';
+type DeleteKind = Kind | 'skill';
+
+interface DeleteTarget {
+  kind: DeleteKind;
+  id: string;
 }
 
-type InstallState = 'idle' | 'installing' | 'installed' | 'error';
-type MarketFilter = 'all' | 'installed' | 'uninstalled';
-
-function formatInstalls(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)} 万`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
+interface McpRuntimeStatus {
+  id: string;
+  status: 'stopped' | 'starting' | 'ready' | 'failed';
+  toolCount: number;
+  error: string | null;
+  attempts: number;
 }
 
-const RECO_BANNERS = {
-  mcp: [
-    { scene: '浏览器自动化 / 网页抓取', pick: 'Playwright' },
-    { scene: '测试 Agent 链路', pick: 'Everything' },
-    { scene: '把外部编码 Agent 当工具调用', pick: 'Claude Code (ACP)' },
-  ],
-  skill: [
-    { scene: '文档交付（Word 报告/标书）', pick: 'docx' },
-    { scene: '前端 / UI 任务', pick: 'frontend-design' },
-    { scene: '幻灯片制作', pick: 'pptx' },
-  ],
-} as const;
+interface AcpRuntimeStatus {
+  id: string;
+  status: 'stopped' | 'starting' | 'ready' | 'failed';
+  error: string | null;
+  attempts: number;
+}
+
+interface SessionRuntimeStatus {
+  sessionId: string;
+  mcp: McpRuntimeStatus[];
+  acp: AcpRuntimeStatus[];
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  ready: '运行中',
+  starting: '加载中',
+  failed: '加载失败',
+  stopped: '未加载',
+};
+
+function statusLabel(s: string): string {
+  return STATUS_LABEL[s] ?? s;
+}
+
+function kindLabel(kind: DeleteKind): string {
+  if (kind === 'mcp') return 'MCP 扩展';
+  if (kind === 'acp') return 'ACP Agent';
+  return '技能';
+}
+
+// 会话间聚合：同一扩展在多个会话里状态可能不同，取"最好"的状态展示
+// （任一会话 ready 即视为可用；全部 failed 才报失败并带出错误信息）
+const STATUS_RANK: Record<string, number> = {
+  stopped: 0,
+  starting: 1,
+  failed: 2,
+  ready: 3,
+};
 
 export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
-  const [query, setQuery] = useState('');
-  const [mcpEntries, setMcpEntries] = useState<McpMarketEntry[]>([]);
-  const [skillEntries, setSkillEntries] = useState<SkillMarketEntry[]>([]);
+  const navigate = useNavigate();
   const [status, setStatus] = useState<MarketStatus | null>(null);
+  // MCP：已安装（config.toml 已配置）扩展列表
+  const [installed, setInstalled] = useState<ExtensionsList | null>(null);
+  // Skill：本地技能库已安装技能
+  const [skills, setSkills] = useState<UserSkillMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [installStates, setInstallStates] = useState<Record<string, InstallState>>({});
-  const [installMessages, setInstallMessages] = useState<Record<string, string>>({});
-  // skills.sh 远程条目描述懒加载缓存
-  const [descMap, setDescMap] = useState<Record<string, string>>({});
-  // 市场过滤：全部 / 已安装（MCP=已配置）/ 未安装
-  const [mcpFilter, setMcpFilter] = useState<MarketFilter>('all');
-  const [skillFilter, setSkillFilter] = useState<MarketFilter>('all');
-  const isMcpKind = kind === 'mcp';
-  const filter = isMcpKind ? mcpFilter : skillFilter;
-  const setFilter = isMcpKind ? setMcpFilter : setSkillFilter;
-  // 在线搜索进行中（搜索反馈）
-  const [searching, setSearching] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
+  // 活跃会话中扩展的真实加载状态（5s 轮询）
+  const [runtime, setRuntime] = useState<SessionRuntimeStatus[] | null>(null);
+  // 开关/删除后"变更已应用 / 稍后生效"的提示
+  const [notice, setNotice] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       if (kind === 'mcp') {
-        const [entries, st] = await Promise.all([
-          invoke<McpMarketEntry[]>('market_mcp_search', { query: '' }),
+        const [list, st] = await Promise.all([
+          invoke<ExtensionsList>('extensions_list'),
           invoke<MarketStatus>('market_status'),
         ]);
-        setMcpEntries(entries);
+        setInstalled(list);
         setStatus(st);
       } else {
-        const [entries, st] = await Promise.all([
-          invoke<SkillMarketEntry[]>('market_skill_search', { query: '' }),
-          invoke<MarketStatus>('market_status'),
-        ]);
-        setSkillEntries(entries);
-        setStatus(st);
+        setSkills(await invoke<UserSkillMeta[]>('list_user_skills'));
       }
     } catch (e) {
-      setError(`加载市场目录失败: ${e}`);
+      setError(`加载失败: ${e}`);
     } finally {
       setLoading(false);
     }
-  }
+  }, [kind]);
+
+  const refreshRuntime = useCallback(async () => {
+    try {
+      setRuntime(await invoke<SessionRuntimeStatus[]>('extensions_runtime_status'));
+    } catch {
+      // 状态查询失败不阻塞配置展示（旧版本后端可能没有该命令）
+      setRuntime(null);
+    }
+  }, []);
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (kind === 'mcp') {
+      void refreshRuntime();
+      // 会话扩展在新建会话时变化：低频轮询，切回来时也能看到最新状态
+      const timer = setInterval(() => void refreshRuntime(), 5000);
+      return () => clearInterval(timer);
+    }
+  }, [refresh, refreshRuntime, kind]);
 
-  // 搜索（MCP：空查询→精选目录，非空→Smithery 在线生态；Skill 同理 skills.sh）
-  const searched = useMemo(() => {
-    return async () => {
-      try {
-        setSearching(true);
-        if (kind === 'mcp') {
-          if (query.trim() === '') {
-            setMcpEntries(
-              await invoke<McpMarketEntry[]>('market_mcp_search', { query: '' })
-            );
-          } else {
-            setMcpEntries(
-              await invoke<McpMarketEntry[]>('market_mcp_remote_search', { query })
-            );
-          }
-        } else {
-          setSkillEntries(
-            await invoke<SkillMarketEntry[]>('market_skill_search', { query })
-          );
-        }
-      } catch (e) {
-        setError(`搜索失败: ${e}`);
-      } finally {
-        setSearching(false);
-      }
-    };
-  }, [kind, query]);
-
-  useEffect(() => {
-    const t = setTimeout(() => void searched(), 200);
-    return () => clearTimeout(t);
-  }, [searched]);
-
-  // 远程条目描述懒加载：批量拉 SKILL.md frontmatter（失败静默，不占卡片）
-  useEffect(() => {
-    if (kind !== 'skill') return;
-    const missing = skillEntries.filter((e) => !e.description && !descMap[e.id]);
-    if (missing.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      const results = await Promise.allSettled(
-        missing.map((e) => invoke<string>('market_skill_detail', { id: e.id }))
+  // 开关/删除后自动让变更生效：卸载所有空闲会话的内存 Thread，
+  // 下次对话按新配置重新装配。运行中的会话拿不到锁 → 提示稍后生效。
+  const applyToSessions = useCallback(async () => {
+    try {
+      const r = await invoke<{ unloaded: number; skipped: string[] }>(
+        'agent_unload_all_sessions',
       );
-      if (cancelled) return;
-      setDescMap((prev) => {
-        const next = { ...prev };
-        missing.forEach((e, i) => {
-          const r = results[i];
-          if (r.status === 'fulfilled' && r.value) next[e.id] = r.value;
-        });
-        return next;
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [skillEntries, kind, descMap]);
+      if (r.skipped.length > 0) {
+        setNotice(
+          `${r.skipped.length} 个会话未能立即重载（未落盘或被占用），其下次对话时生效`,
+        );
+      } else {
+        setNotice(
+          r.unloaded > 0 ? `已应用：${r.unloaded} 个会话将在下次对话时使用新配置` : null,
+        );
+      }
+    } catch {
+      // Agent 正在运行：拿不到 threads 锁，改为提示
+      setNotice('当前有会话正在运行，变更将在其下次对话时自动生效');
+    }
+    void refreshRuntime();
+  }, [refreshRuntime]);
 
-  async function doInstallMcp(entry: McpMarketEntry) {
-    setInstallStates((p) => ({ ...p, [entry.id]: 'installing' }));
-    setInstallMessages((p) => ({ ...p, [entry.id]: '' }));
+  async function toggleEnabled(t: Kind, id: string, enabled: boolean) {
+    const key = `${t}/${id}`;
+    setBusyId(key);
     try {
-      const r = await invoke<InstallResult>('market_mcp_install', { id: entry.id });
-      setInstallStates((p) => ({ ...p, [entry.id]: r.ok ? 'installed' : 'error' }));
-      setInstallMessages((p) => ({ ...p, [entry.id]: r.message }));
-      if (r.ok) setStatus(await invoke<MarketStatus>('market_status'));
+      await invoke('extensions_set_enabled', { kind: t, id, enabled });
+      await refresh();
+      await applyToSessions();
     } catch (e) {
-      setInstallStates((p) => ({ ...p, [entry.id]: 'error' }));
-      setInstallMessages((p) => ({ ...p, [entry.id]: String(e) }));
+      setError(String(e));
+    } finally {
+      setBusyId(null);
     }
   }
 
-  async function doInstallSkill(entry: SkillMarketEntry) {
-    setInstallStates((p) => ({ ...p, [entry.id]: 'installing' }));
-    setInstallMessages((p) => ({ ...p, [entry.id]: '' }));
+  async function doRemove() {
+    if (!deleting) return;
+    const key = `${deleting.kind}/${deleting.id}`;
+    setBusyId(key);
     try {
-      const r = await invoke<InstallResult>('market_skill_install', { id: entry.id });
-      setInstallStates((p) => ({ ...p, [entry.id]: r.ok ? 'installed' : 'error' }));
-      setInstallMessages((p) => ({ ...p, [entry.id]: r.message }));
-      if (r.ok) {
-        // 重新搜索以刷新 installed 标记
-        try {
-          setSkillEntries(
-            await invoke<SkillMarketEntry[]>('market_skill_search', { query })
-          );
-        } catch {
-          /* 刷新失败不影响安装结果展示 */
+      if (deleting.kind === 'skill') {
+        await invoke('delete_user_skill', { name: deleting.id });
+      } else {
+        await invoke('extensions_remove', { kind: deleting.kind, id: deleting.id });
+      }
+      setDeleting(null);
+      await refresh();
+      if (deleting.kind !== 'skill') await applyToSessions();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // 按扩展聚合运行状态：key = "mcp/<id>" | "acp/<id>"
+  const runtimeMap = useMemo(() => {
+    const map = new Map<string, { status: string; toolCount: number; error: string | null }>();
+    for (const session of runtime ?? []) {
+      for (const m of session.mcp) {
+        const key = `mcp/${m.id}`;
+        const prev = map.get(key);
+        if (!prev || STATUS_RANK[m.status] > STATUS_RANK[prev.status]) {
+          map.set(key, { status: m.status, toolCount: m.toolCount, error: m.error });
         }
       }
-    } catch (e) {
-      setInstallStates((p) => ({ ...p, [entry.id]: 'error' }));
-      setInstallMessages((p) => ({ ...p, [entry.id]: String(e) }));
+      for (const a of session.acp) {
+        const key = `acp/${a.id}`;
+        const prev = map.get(key);
+        if (!prev || STATUS_RANK[a.status] > STATUS_RANK[prev.status]) {
+          map.set(key, { status: a.status, toolCount: 0, error: a.error });
+        }
+      }
     }
+    return map;
+  }, [runtime]);
+
+  const installedMcpList = installed?.mcp ?? [];
+  const installedAcpList = installed?.acp ?? [];
+  const installedTotal = installedMcpList.length + installedAcpList.length;
+
+  // 跳到 Agent 对话安装新扩展：导航
+  function goAgentInstall() {
+    navigate('/agent');
   }
 
-  const configuredSet = new Set(status?.configuredIds ?? []);
-  const banners = RECO_BANNERS[kind];
-  const isMcp = kind === 'mcp';
-
-  // 过滤：已安装 = MCP 已配置 / Skill 已安装（含本次会话刚装完）
-  const mcpInstalled = (e: McpMarketEntry) =>
-    configuredSet.has(e.id) || installStates[e.id] === 'installed';
-  const skillInstalled = (e: SkillMarketEntry) =>
-    e.installed || installStates[e.id] === 'installed';
-  const mcpInstalledCount = mcpEntries.filter(mcpInstalled).length;
-  const skillInstalledCount = skillEntries.filter(skillInstalled).length;
-  const filteredMcpEntries =
-    mcpFilter === 'installed'
-      ? mcpEntries.filter(mcpInstalled)
-      : mcpFilter === 'uninstalled'
-        ? mcpEntries.filter((e) => !mcpInstalled(e))
-        : mcpEntries;
-  const filteredSkillEntries =
-    skillFilter === 'installed'
-      ? skillEntries.filter(skillInstalled)
-      : skillFilter === 'uninstalled'
-        ? skillEntries.filter((e) => !skillInstalled(e))
-        : skillEntries;
+  // 卡片上的运行状态徽标：配置里「启用」≠ 实际加载成功，这里反映真实状态
+  function renderStatus(t: Kind, id: string) {
+    const entry = runtimeMap.get(`${t}/${id}`);
+    if (!entry) return null;
+    return (
+      <div className="card-status">
+        <span className={`status-badge ${entry.status}`}>
+          {statusLabel(entry.status)}
+          {entry.toolCount > 0 && ` · ${entry.toolCount} 个工具`}
+        </span>
+        {entry.status === 'failed' && entry.error && (
+          <span className="status-error" title={entry.error}>
+            {entry.error}
+          </span>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={`market-page market-${kind}`}>
       <div className="page-header">
         <div className="header-left">
-          <h1>{isMcp ? 'MCP 扩展市场' : 'Skill 技能市场'}</h1>
+          <h1>{kind === 'mcp' ? 'MCP 扩展' : 'Skill 技能'}</h1>
           <p className="subtitle">
-            {isMcp
-              ? '搜索并一键安装 MCP / ACP 扩展，安装后写入配置，新会话生效'
-              : '从 Anthropic Skills 仓库安装技能到本地技能库，安装后通过 /技能名 调用'}
+            {kind === 'mcp'
+              ? '已安装的 MCP / ACP 扩展；安装新扩展请到 Agent 对话中让 AI 下载并配置'
+              : '已安装到本地技能库的技能，在 Agent 对话中用 /技能名 调用；安装新技能回 Agent 对话让 AI 下载'}
           </p>
         </div>
         <button className="btn-refresh" onClick={() => void refresh()} disabled={loading}>
@@ -261,88 +301,31 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
 
       {error && (
         <div className="error-banner">
-          <span>⚠️</span>
+          <FileWarning size={15} />
           <span>{error}</span>
           <button className="error-dismiss" onClick={() => setError('')}>
             <X size={14} />
           </button>
         </div>
       )}
+      {notice && (
+        <div className="info-banner">
+          <CheckCircle2 size={15} />
+          <span>{notice}</span>
+          <button className="error-dismiss" onClick={() => setNotice(null)}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
-      {/* 推荐横幅 */}
-      <div className="reco-banner">
-        <span className="reco-title">
-          <Star size={14} strokeWidth={2.2} />
-          怎么选
-        </span>
-        {banners.map((b) => (
-          <span key={b.pick} className="reco-item">
-            {b.scene} → <strong>{b.pick}</strong>
-          </span>
-        ))}
-      </div>
-
-      {/* 依赖状态 */}
-      <div className="dep-status">
-        {isMcp && (
+      {/* 依赖状态（仅 MCP 页） */}
+      {kind === 'mcp' && (
+        <div className="dep-status">
           <span className={status?.nodeAvailable ? 'dep-ok' : 'dep-missing'}>
             {status?.nodeAvailable ? '✓ Node.js 可用' : '✗ 未检测到 Node.js（MCP/ACP 运行必需）'}
           </span>
-        )}
-        {!isMcp && (
-          <span className={status?.gitAvailable ? 'dep-ok' : 'dep-missing'}>
-            {status?.gitAvailable ? '✓ git 可用' : '✗ 未检测到 git（技能安装必需）'}
-          </span>
-        )}
-      </div>
-
-      {/* 搜索框 */}
-      <div className="market-search">
-        <Search size={16} strokeWidth={2.2} />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={
-            isMcp
-              ? '搜索 Smithery 生态，如 github memory fetch'
-              : '搜索 skills.sh 生态，如 commit react 文档'
-          }
-        />
-        {searching && <div className="searching-hint">搜索中…</div>}
-      </div>
-
-      {/* 过滤行：全部 / 已安装 / 未安装 + 结果计数（两页通用） */}
-      <div className="filter-row">
-        <div className="filter-tabs">
-          <button
-            className={filter === 'all' ? 'active' : ''}
-            onClick={() => setFilter('all')}
-          >
-            全部 {(isMcp ? mcpEntries.length : skillEntries.length) > 0 &&
-              `(${isMcp ? mcpEntries.length : skillEntries.length})`}
-          </button>
-          <button
-            className={filter === 'installed' ? 'active' : ''}
-            onClick={() => setFilter('installed')}
-          >
-            {isMcp ? '已配置' : '已安装'}
-            {(isMcp ? mcpInstalledCount : skillInstalledCount) > 0 &&
-              `(${isMcp ? mcpInstalledCount : skillInstalledCount})`}
-          </button>
-          <button
-            className={filter === 'uninstalled' ? 'active' : ''}
-            onClick={() => setFilter('uninstalled')}
-          >
-            {isMcp ? '未配置' : '未安装'}
-          </button>
         </div>
-        {query.trim() !== '' && (
-          <span className="result-count">
-            共 {(isMcp ? filteredMcpEntries.length : filteredSkillEntries.length)} 个结果 ·{' '}
-            {isMcp ? 'Smithery' : 'skills.sh'}
-          </span>
-        )}
-      </div>
+      )}
 
       {loading ? (
         <div className="loading">
@@ -351,186 +334,258 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
         </div>
       ) : (
         <div className="market-grid">
-          {isMcp &&
-            filteredMcpEntries.map((e) => {
-              const configured = configuredSet.has(e.id);
-              const st = installStates[e.id] ?? 'idle';
-              return (
-                <div key={e.id} className={`market-card${e.recommended ? ' recommended' : ''}`}>
-                  <div className="card-head">
-                    <h3 className="card-name">{e.name}</h3>
-                    {e.recommended && <span className="badge-reco">推荐</span>}
-                    {e.official && <span className="badge-official">官方</span>}
-                    <span className={`badge-kind kind-${e.kind}`}>{e.kind.toUpperCase()}</span>
-                  </div>
-                  <p className="card-desc">{e.description}</p>
-                  <div className="card-tags">
-                    {e.tags.map((t) => (
-                      <span key={t} className="tag">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                  {e.recommended && (
-                    <div className="reco-reason" title={e.recommendReason}>
-                      💡 {e.recommendReason}
-                    </div>
-                  )}
-                  <div className="card-meta">
-                    <code className="cmd" title={`${e.command} ${e.args.join(' ')}`}>
-                      {e.command} {e.args.join(' ')}
-                    </code>
-                  </div>
-                  {e.requiresEnv.length > 0 && (
-                    <div className="env-hint">
-                      需要预先导出环境变量: <code>{e.requiresEnv.join(', ')}</code>
-                    </div>
-                  )}
-                  {e.requires.length > 0 && (
-                    <div className="env-hint">运行依赖: {e.requires.join(' / ')}</div>
-                  )}
-                  {configured ? (
-                    <div className="install-done">✓ 已配置</div>
-                  ) : (
-                    <button
-                      className={`btn-install${st === 'error' ? ' has-error' : ''}`}
-                      disabled={st === 'installing'}
-                      onClick={() => void doInstallMcp(e)}
-                    >
-                      {st === 'installing' ? (
-                        <>
-                          <div className="spinner-small" />
-                          安装中...
-                        </>
-                      ) : st === 'installed' ? (
-                        <>
-                          <Check size={14} strokeWidth={2.5} />
-                          已安装
-                        </>
-                      ) : (
-                        <>
-                          <Download size={14} strokeWidth={2.5} />
-                          安装
-                        </>
-                      )}
-                    </button>
-                  )}
-                  {installMessages[e.id] && st !== 'installing' && (
-                    <div className={`install-msg${st === 'error' ? ' is-error' : ''}`}>
-                      {installMessages[e.id]}
-                    </div>
-                  )}
+          {kind === 'mcp' ? (
+            <>
+              {/* 安装引导：新扩展回 Agent 对话安装 */}
+              <div className="mcp-guide">
+                <div className="mcp-guide-text">
+                  <span className="mcp-guide-title">
+                    <MessageSquarePlus size={15} strokeWidth={2.2} />
+                    想安装新扩展？
+                  </span>
+                  <span className="mcp-guide-desc">
+                    回到 Agent 对话直接说，例如：「帮我安装 Playwright 浏览器 MCP」，AI 会下载依赖并写好
+                    ~/.astra/config.toml 配置，保存后新建会话生效。
+                  </span>
                 </div>
-              );
-            })}
+                <button className="btn-install" onClick={goAgentInstall}>
+                  <MessageSquarePlus size={14} strokeWidth={2.5} />
+                  去 Agent 对话安装
+                </button>
+              </div>
 
-          {!isMcp &&
-            filteredSkillEntries.map((e) => {
-              const st = installStates[e.id] ?? 'idle';
-              const desc = e.description || descMap[e.id] || '';
-              const installed = e.installed || st === 'installed';
-              return (
-                <div key={e.id} className={`market-card${e.recommended ? ' recommended' : ''}`}>
-                  <div className="card-head">
-                    <h3 className="card-name">/{e.name}</h3>
-                    {e.recommended && <span className="badge-reco">推荐</span>}
-                    {e.official && <span className="badge-official">官方</span>}
-                  </div>
-                  <p className={`card-desc${desc ? '' : ' is-loading'}`}>
-                    {desc || '描述加载中…'}
-                  </p>
-                  <div className="card-tags">
-                    <span className="tag" title={`安装量 ${e.installs}`}>
-                      ⬇ {formatInstalls(e.installs)}
-                    </span>
-                    <span className="tag">{e.source}</span>
-                  </div>
-                  {e.recommended && (
-                    <div className="reco-reason" title={e.recommendReason}>
-                      💡 {e.recommendReason}
-                    </div>
-                  )}
-                  <div className="card-meta">
-                    <code className="cmd" title={`安装后用 /${e.skillId} 调用`}>
-                      /{e.skillId}
-                    </code>
-                  </div>
-                  <div className="card-footer">
-                    {installed ? (
-                      <div className="install-done">✓ 已安装</div>
-                    ) : (
+              {/* 配置解析失败（坏配置也要露出，不能静默空白） */}
+              {installed?.parseError && (
+                <div className="error-banner">
+                  <FileWarning size={15} />
+                  <span>配置解析失败：{installed.parseError}</span>
+                </div>
+              )}
+
+              {installedMcpList.map((e) => {
+                const busy = busyId === `mcp/${e.id}`;
+                return (
+                  <div
+                    key={`mcp:${e.id}`}
+                    className={`market-card${e.enabled ? '' : ' is-disabled'}`}
+                  >
+                    <div className="card-head">
+                      <h3 className="card-name">{e.id}</h3>
+                      <span className="badge-kind kind-mcp">MCP</span>
+                      {e.required && <span className="badge-kind kind-required">必需</span>}
+                      <span className="spacer" />
                       <button
-                        className={`btn-install${st === 'error' ? ' has-error' : ''}`}
-                        disabled={st === 'installing'}
-                        onClick={() => void doInstallSkill(e)}
+                        className="icon-btn danger"
+                        title="删除"
+                        disabled={busy}
+                        onClick={() => setDeleting({ kind: 'mcp', id: e.id })}
                       >
-                        {st === 'installing' ? (
-                          <>
-                            <div className="spinner-small" />
-                            安装中...
-                          </>
-                        ) : (
-                          <>
-                            <Download size={14} strokeWidth={2.5} />
-                            安装
-                          </>
-                        )}
+                        <Trash2 size={14} />
                       </button>
-                    )}
-                    <button
-                      className="btn-page"
-                      onClick={() => void openUrl(e.pageUrl)}
-                      title="在 skills.sh 查看详情"
-                    >
-                      <ExternalLink size={13} strokeWidth={2} />
-                      详情页
-                    </button>
-                  </div>
-                  {installMessages[e.id] && st !== 'installing' && (
-                    <div className={`install-msg${st === 'error' ? ' is-error' : ''}`}>
-                      {installMessages[e.id]}
+                      <label className="switch" title={e.enabled ? '停用' : '启用'}>
+                        <input
+                          type="checkbox"
+                          checked={e.enabled}
+                          disabled={busy}
+                          onChange={(ev) => void toggleEnabled('mcp', e.id, ev.target.checked)}
+                        />
+                        <span className="slider" />
+                      </label>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    <div className="card-meta">
+                      <code className="cmd" title={`${e.command} ${e.args.join(' ')}`}>
+                        {e.command} {e.args.join(' ')}
+                      </code>
+                    </div>
+                    {e.env.length > 0 && (
+                      <div className="env-hint">
+                        需要环境变量: <code>{e.env.join(', ')}</code>
+                      </div>
+                    )}
+                    {e.allow.length > 0 && (
+                      <div className="env-hint" title={e.allow.join(', ')}>
+                        已放行 {e.allow.length} 个工具
+                      </div>
+                    )}
+                    {renderStatus('mcp', e.id)}
+                    <div className="install-done">✓ 已配置（新会话生效）</div>
+                  </div>
+                );
+              })}
 
-          {!isMcp && filteredSkillEntries.length === 0 && (
-            <div className="empty-state">
-              <span className="empty-icon">🔍</span>
-              <h3>
-                {skillFilter === 'installed' && query.trim() === ''
-                  ? '还没有已安装的技能'
-                  : skillFilter === 'installed'
-                    ? '搜索结果中没有已安装的技能'
-                    : '没有匹配的技能'}
-              </h3>
-              <p>
-                {skillFilter === 'installed' && query.trim() === ''
-                  ? '在「全部」里挑一个安装，装完用 /技能名 调用'
-                  : '换个关键词试试'}
-              </p>
-            </div>
-          )}
-          {isMcp && filteredMcpEntries.length === 0 && (
-            <div className="empty-state">
-              <span className="empty-icon">🔍</span>
-              <h3>
-                {mcpFilter === 'installed' && query.trim() === ''
-                  ? '还没有已配置的扩展'
-                  : mcpFilter === 'installed'
-                    ? '搜索结果中没有已配置的扩展'
-                    : '没有匹配的扩展'}
-              </h3>
-              <p>
-                {mcpFilter === 'installed' && query.trim() === ''
-                  ? '在「全部」里挑一个安装，装完新会话生效'
-                  : '换个关键词试试，在线搜索走 Smithery 生态'}
-              </p>
-            </div>
+              {installedAcpList.map((e) => {
+                const busy = busyId === `acp/${e.id}`;
+                return (
+                  <div
+                    key={`acp:${e.id}`}
+                    className={`market-card${e.enabled ? '' : ' is-disabled'}`}
+                  >
+                    <div className="card-head">
+                      <h3 className="card-name">{e.id}</h3>
+                      <span className="badge-kind kind-acp">ACP</span>
+                      {e.required && <span className="badge-kind kind-required">必需</span>}
+                      <span className="spacer" />
+                      <button
+                        className="icon-btn danger"
+                        title="删除"
+                        disabled={busy}
+                        onClick={() => setDeleting({ kind: 'acp', id: e.id })}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <label className="switch" title={e.enabled ? '停用' : '启用'}>
+                        <input
+                          type="checkbox"
+                          checked={e.enabled}
+                          disabled={busy}
+                          onChange={(ev) => void toggleEnabled('acp', e.id, ev.target.checked)}
+                        />
+                        <span className="slider" />
+                      </label>
+                    </div>
+                    <div className="card-meta">
+                      <code className="cmd" title={`${e.command} ${e.args.join(' ')}`}>
+                        {e.command} {e.args.join(' ')}
+                      </code>
+                    </div>
+                    <div className="env-hint">
+                      权限模式: {e.permission} · 会话策略: {e.sessionPolicy}
+                    </div>
+                    {renderStatus('acp', e.id)}
+                    <div className="install-done">✓ 已配置（新会话生效）</div>
+                  </div>
+                );
+              })}
+
+              {installedTotal === 0 && !installed?.parseError && (
+                <div className="empty-state">
+                  <span className="empty-icon">🧩</span>
+                  <h3>还没有已安装的扩展</h3>
+                  <p>
+                    回到 Agent 对话说「帮我安装 xxx MCP」，
+                    AI 会下载依赖并写好 ~/.astra/config.toml 配置，装完这里就能看到。
+                  </p>
+                  <button className="btn-install" onClick={goAgentInstall}>
+                    <MessageSquarePlus size={14} strokeWidth={2.5} />
+                    去 Agent 对话安装
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* 安装引导：新技能回 Agent 对话安装 */}
+              <div className="mcp-guide">
+                <div className="mcp-guide-text">
+                  <span className="mcp-guide-title">
+                    <MessageSquarePlus size={15} strokeWidth={2.2} />
+                    想安装新技能？
+                  </span>
+                  <span className="mcp-guide-desc">
+                    回到 Agent 对话直接说，例如：「帮我安装 docx 技能」，AI 会从 GitHub /
+                    skills.sh 下载并装进 ~/.config/astra/skills，装完用 /技能名 调用。
+                  </span>
+                </div>
+                <button className="btn-install" onClick={goAgentInstall}>
+                  <MessageSquarePlus size={14} strokeWidth={2.5} />
+                  去 Agent 对话安装
+                </button>
+              </div>
+
+              {skills.map((s) => {
+                const busy = busyId === `skill/${s.name}`;
+                return (
+                  <div key={s.name} className="market-card">
+                    <div className="card-head">
+                      <h3 className="card-name" title={s.name}>
+                        /{s.name}
+                      </h3>
+                      {s.available ? (
+                        <span className="badge-kind kind-on">可用</span>
+                      ) : (
+                        <span className="badge-kind kind-off">不可用</span>
+                      )}
+                      {s.displayName !== s.name && (
+                        <span className="badge-kind kind-off" title={s.displayName}>
+                          {s.displayName}
+                        </span>
+                      )}
+                      <span className="spacer" />
+                      <button
+                        className="icon-btn danger"
+                        title="删除"
+                        disabled={busy}
+                        onClick={() => setDeleting({ kind: 'skill', id: s.name })}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    {s.description && <p className="card-desc">{s.description}</p>}
+                    <div className="card-meta">
+                      <code className="cmd" title={s.path}>
+                        {s.path}
+                      </code>
+                    </div>
+                    <div className="card-tags">
+                      <span className="tag">{s.fileCount} 个文件</span>
+                      {!s.available && (
+                        <span className="tag tag-warn">缺少 SKILL.md，/调用不可用</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {skills.length === 0 && (
+                <div className="empty-state">
+                  <span className="empty-icon">🎓</span>
+                  <h3>还没有已安装的技能</h3>
+                  <p>
+                    回到 Agent 对话说「帮我安装 xxx 技能」，
+                    AI 会下载并装进 ~/.config/astra/skills，装完这里就能看到。
+                  </p>
+                  <button className="btn-install" onClick={goAgentInstall}>
+                    <MessageSquarePlus size={14} strokeWidth={2.5} />
+                    去 Agent 对话安装
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
+
+      {/* 删除确认弹窗（Modal 走 Portal 渲染在 body 下，确认样式须全局类） */}
+      <Modal
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title="确认删除"
+        variant="confirm"
+        footer={
+          <button
+            className="market-btn-danger"
+            disabled={busyId !== null}
+            onClick={() => void doRemove()}
+          >
+            <Trash2 size={15} strokeWidth={2.5} />
+            确认删除
+          </button>
+        }
+      >
+        {deleting && (
+          <>
+            <p className="market-confirm-text">
+              确定要删除 {kindLabel(deleting.kind)} <strong>{deleting.id}</strong>{' '}
+              {deleting.kind === 'skill' ? '及其全部文件吗？' : '的配置吗？'}
+            </p>
+            <p className="market-confirm-hint">
+              {deleting.kind === 'skill'
+                ? '将删除技能库目录 ~/.config/astra/skills 下的整个技能目录，不可恢复。'
+                : '仅删除 ~/.astra/config.toml 中的配置段，不会卸载外部程序本身。'}
+            </p>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -1605,13 +1605,7 @@ pub fn run() {
             user_skills::write_user_skill_file,
             user_skills::delete_user_skill_file,
             user_skills::delete_user_skill,
-            // Extensions Market（MCP / Skill 市场搜索与一键安装）
-            market::market_mcp_search,
-            market::market_mcp_remote_search,
-            market::market_mcp_install,
-            market::market_skill_search,
-            market::market_skill_detail,
-            market::market_skill_install,
+            // Extensions 市场（状态展示；安装走 Agent 对话）
             market::market_status,
             // Extensions 管理（MCP / ACP 启停、编辑、删除）
             extensions::extensions_list,

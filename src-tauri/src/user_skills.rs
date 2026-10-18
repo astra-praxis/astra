@@ -29,6 +29,8 @@ pub struct UserSkillMeta {
     pub description: String,
     pub path: String,
     pub file_count: usize,
+    /// 技能是否可用：目录内存在 SKILL.md（read_skill / /调用 都依赖它）
+    pub available: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,6 +187,7 @@ pub fn list_in(dir: &Path) -> Vec<UserSkillMeta> {
                 description: skill_description(&path),
                 path: path.to_string_lossy().to_string(),
                 file_count: count_files(&path, &mut budget),
+                available: path.join("SKILL.md").is_file(),
                 name,
             })
         })
@@ -385,6 +388,7 @@ pub fn create_user_skill(
         description: description.trim().to_string(),
         path: path.to_string_lossy().to_string(),
         file_count: count_files(&path, &mut budget),
+        available: path.join("SKILL.md").is_file(),
         name: name.trim().to_string(),
     })
 }
@@ -400,6 +404,7 @@ pub fn import_user_skill(app: AppHandle, source: String) -> Result<UserSkillMeta
         description: skill_description(&path),
         path: path.to_string_lossy().to_string(),
         file_count: count_files(&path, &mut budget),
+        available: path.join("SKILL.md").is_file(),
         name,
     })
 }

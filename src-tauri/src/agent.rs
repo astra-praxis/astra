@@ -33,6 +33,148 @@ use crate::providers;
 
 // ===== 事件日志（JSONL，一行一个 Envelope，供排查对话问题） =====
 
+/// 截断记忆采集用的长文本（按字符，不劈开 UTF-8 序列），附带长度标记。
+fn truncate_for_memory(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_owned();
+    }
+    let head: String = s.chars().take(max_chars).collect();
+    format!("{head}…[truncated]")
+}
+
+/// 记忆采集器：从 Run 事件流中提取值得进入记忆管线的内容，纯逻辑、
+/// 无 AppHandle 依赖——宿主 observe spawn 与集成测试共用同一段代码。
+///
+/// 采集边界：助手最终回答（unverified，只进摘要不成记忆）、已验证成功的
+/// 工具结果、工具失败原因（进摘要，解决方案需验证后才进记忆）。内容截断，
+/// 记忆模块不需要完整工具输出。MessageDelta / Started / Permission 等忽略。
+struct MemoryRunCollector {
+    collected: Vec<(astra_memory::cme::compactor::MessageRole, String, String)>,
+}
+
+impl MemoryRunCollector {
+    fn new() -> Self {
+        Self {
+            collected: Vec::new(),
+        }
+    }
+
+    fn observe(&mut self, env: &Envelope) {
+        match &env.event {
+            agent_core::RunEvent::RunCompleted { final_text } => {
+                let text = final_text.trim();
+                if text.chars().count() >= 6 {
+                    self.collected.push((
+                        astra_memory::cme::compactor::MessageRole::Assistant,
+                        truncate_for_memory(text, 2000),
+                        env.event_id.clone(),
+                    ));
+                }
+            }
+            agent_core::RunEvent::ToolCallCompleted {
+                tool_name,
+                result_summary,
+                raw_output,
+                ..
+            } => {
+                let body = match raw_output {
+                    Some(raw) if !raw.trim().is_empty() => truncate_for_memory(raw.trim(), 2000),
+                    _ => truncate_for_memory(result_summary.trim(), 2000),
+                };
+                if !body.is_empty() {
+                    self.collected.push((
+                        astra_memory::cme::compactor::MessageRole::Tool,
+                        format!("{tool_name}: {body}"),
+                        env.event_id.clone(),
+                    ));
+                }
+            }
+            agent_core::RunEvent::ToolCallFailed {
+                tool_name, error, ..
+            } => {
+                let body = error.trim();
+                if !body.is_empty() {
+                    self.collected.push((
+                        astra_memory::cme::compactor::MessageRole::Tool,
+                        format!(
+                            "[tool failed] {tool_name}: {}",
+                            truncate_for_memory(body, 2000)
+                        ),
+                        env.event_id.clone(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 组装 ingest 消息：用户输入在前，采集到的运行事件随后。id 用事件
+    /// event_id（重放稳定）；空则回退到时间序合成 id。
+    fn into_messages(
+        self,
+        user_text: &str,
+        now_ms: u64,
+    ) -> Vec<astra_memory::cme::compactor::ConversationMessage> {
+        let mut messages: Vec<astra_memory::cme::compactor::ConversationMessage> = Vec::new();
+        let text = user_text.trim();
+        if !text.is_empty() {
+            messages.push(astra_memory::cme::compactor::ConversationMessage {
+                id: format!("u_{now_ms}"),
+                thread_id: String::new(), // ingest 按 session 盖章
+                role: astra_memory::cme::compactor::MessageRole::User,
+                content: text.to_owned(),
+                created_at: now_ms as i64,
+            });
+        }
+        for (role, content, event_id) in self.collected {
+            let id = if event_id.is_empty() {
+                format!("{now_ms}_{}", messages.len())
+            } else {
+                event_id
+            };
+            messages.push(astra_memory::cme::compactor::ConversationMessage {
+                id,
+                thread_id: String::new(),
+                role,
+                content,
+                created_at: now_ms as i64,
+            });
+        }
+        messages
+    }
+}
+
+/// Run 结束后的记忆提交（observe spawn 与真实 Run 测试共用）：登记采集
+/// 消息进 CME 待处理队列，含优先级线索时立即压缩提炼。任何失败只记
+/// 日志：记忆故障永不阻断 agent（D21）。返回是否走了立即处理路径
+/// （priority gate 触发），测试用于断言。
+async fn commit_collected_memory(
+    engine: &std::sync::Arc<
+        astra_memory::cme::engine::MemoryEngine<astra_memory::cme::store_sqlite::CmeSqliteStore>,
+    >,
+    collector: MemoryRunCollector,
+    session_id: &str,
+    project: Option<&str>,
+    user_text: &str,
+    now_ms: u64,
+) -> bool {
+    if let Err(error) = engine.set_thread_scope(session_id, project).await {
+        eprintln!("[memory] cme set_thread_scope failed (session {session_id}): {error}");
+    }
+    let messages = collector.into_messages(user_text, now_ms);
+    if messages.is_empty() {
+        return false;
+    }
+    engine.ingest(session_id, messages);
+    // 含重要线索（决策/纠正/偏好/已验证工具结果）立即处理，不让关键信息
+    // 滞留在待处理队列；普通对话走阈值批处理。
+    let force = engine.has_priority_pending();
+    if let Err(error) = engine.process_pending(force).await {
+        eprintln!("[memory] cme process_pending failed (session {session_id}): {error}");
+    }
+    force
+}
+
 /// 把事件追加写入 app_data_dir/agent_events.log（JSONL）。
 /// 失败只忽略——日志不能影响对话本身。
 fn log_event(app: &AppHandle, env: &Envelope) {
@@ -824,6 +966,15 @@ pub async fn agent_start_run(
     let session_id = req.session_id;
     let user_text = req.user_text;
 
+    // 记忆作用域键：取项目根目录名（稳定、跨机器可复现）。ingest 侧
+    // set_thread_scope 与 recall 侧 ProjectBoundProvider 必须用同一个键，
+    // 项目记忆才能对上。
+    let bound_project = project_root.as_ref().map(|p| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.to_string_lossy().into_owned())
+    });
+
     // 2.5 技能库：注册发现/读取工具 + system prompt 注入摘要（跨会话复用，建 Thread 时生效）
     let skills_dir = crate::user_skills::app_skills_dir(&app).ok();
     let skills_summary = skills_dir
@@ -912,8 +1063,14 @@ pub async fn agent_start_run(
             // 记忆集成：注入 MemoryProvider，每个 Run 由 agent-core 自动
             // recall 最新用户输入进 system prompt（REMEMBERED CONTEXT）。
             // memory-off（init 失败）时保持 None，prompt 逐字节不变。
+            // 项目绑定：core 的 recall 恒传 scope=None（冻结接口），这里用
+            // ProjectBoundProvider 把本次 Run 的项目绑定进搜索范围
+            // （全局偏好 + 本项目记忆），项目私有记忆不会跨项目串线。
             if let Some(memory) = state.memory.get() {
-                config.memory = Some(memory.provider());
+                config.memory = Some(Arc::new(astra_memory_provider::ProjectBoundProvider::new(
+                    memory.provider(),
+                    bound_project.clone(),
+                )));
             }
             // Artifact records share the threads sqlite file; a failure to
             // open it keeps artifacts event-only (same degradation as before
@@ -995,6 +1152,35 @@ pub async fn agent_start_run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&session_id);
+    // 3.5 无感快照（隐形保险层）：每个发送前自动锚定 BeforeTurn checkpoint
+    // （对话游标 + git 工作区快照），供「回到出错前 / 编辑重发」回退使用。
+    // 用户不感知、无常驻 UI；捕获失败按 CHECKPOINT spec §5.3 降级为仅锚点，
+    // 打点本身失败只记日志，绝不阻断 Run。
+    if project_root.is_some() {
+        match threads.checkpoints() {
+            Ok(checkpoints) => {
+                let provider = agent_core::astra_workspace::GitWorkspaceCheckpointProvider::new();
+                if let Err(error) = thread
+                    .create_checkpoint(
+                        checkpoints,
+                        Some(Arc::new(provider)),
+                        agent_core::CheckpointKind::BeforeTurn,
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    eprintln!(
+                        "[checkpoint] auto before_turn failed (session {session_id}): {error}"
+                    );
+                }
+            }
+            // 快照存储不可用只损失回退能力，不阻断发送
+            Err(error) => {
+                eprintln!("[checkpoint] store unavailable (session {session_id}): {error}")
+            }
+        }
+    }
     let handle = match thread.try_send_content(content, tx) {
         Ok(handle) => handle,
         Err(error) => {
@@ -1015,34 +1201,40 @@ pub async fn agent_start_run(
     let active = Arc::clone(&state.active);
     let errors = Arc::clone(&state.persistence_errors);
     let settled_session = session_id.clone();
-    // 记忆 Formation（宿主能力，不暴露给 agent 模型）：Run 结束后把用户输入
-    // 喂进 observe 管线。v2 全量 formation：普通消息由进程内 OnnxJudge
-    // 决策（数十毫秒级）；judge 未加载时降级 v1（仅显式口令，observer
-    // 预筛几微秒级丢弃）。异步 spawn，不阻塞 Run 结束路径。
+    // 记忆采集（宿主能力，不暴露给 agent 模型）：Run 结束后把用户输入、
+    // 助手最终回答和已完成的工具结果 ingest 进 CME 待处理队列，达到阈值时
+    // 压缩会话并提炼长期记忆。提炼是确定性规则，无模型调用；异步 spawn，
+    // 不阻塞 Run 结束路径。任何失败只记日志：记忆故障永不阻断 agent（D21）。
     let observe_engine = state.memory.get().map(|m| m.engine().clone());
     let observe_text = user_text.clone();
+    let observe_project = bound_project.clone();
     tokio::spawn(async move {
+        // 边转发边采集（采集边界见 MemoryRunCollector 文档）：提炼是确定性
+        // 规则，无模型调用；异步 spawn，不阻塞 Run 结束路径。任何失败只记
+        // 日志：记忆故障永不阻断 agent（D21）。
+        let mut collector = MemoryRunCollector::new();
         while let Some(env) = rx.recv().await {
+            collector.observe(&env);
             log_event(&forward_app, &env);
             let _ = forward_app.emit("agent-event", &env);
         }
         if let Some(engine) = observe_engine {
-            let text = observe_text.trim();
-            if !text.is_empty() {
-                if let Err(error) = engine
-                    .observe(
-                        text,
-                        &astra_memory::model::SubjectRef::user(),
-                        crate::memory::now_secs(),
-                    )
-                    .await
-                {
-                    eprintln!(
-                        "[memory] observe failed (session {}): {error}",
-                        settled_session
-                    );
-                }
-            }
+            // 项目绑定：本 Run 提炼的记忆落到对应项目作用域，避免跨项目串线。
+            // best-effort：失败只记日志。键与 recall 侧 ProjectBoundProvider
+            // 同源（bound_project），否则项目记忆对不上。
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            commit_collected_memory(
+                &engine,
+                collector,
+                &settled_session,
+                observe_project.as_deref(),
+                &observe_text,
+                now_ms,
+            )
+            .await;
         }
         let persistence_error = errors
             .lock()
@@ -1483,6 +1675,99 @@ pub async fn agent_checkpoint_restore(
 #[allow(dead_code)]
 fn _assert_types(_: ChatMessage, _: Role) {}
 
+/// 回退结果：回退后的锚点游标、是否还原了工作区、回退后的完整消息序列
+/// （前端用它重建会话视图，同 agent_checkpoint_restore.messages）。
+#[derive(Debug, Serialize)]
+pub struct AgentRewindResult {
+    pub thread_seq: u64,
+    pub workspace_restored: bool,
+    pub messages: Vec<ChatMessage>,
+}
+
+/// 回退到倒数第 N 条用户消息之前（1 = 最后一条）。
+///
+/// 无感快照层的恢复原语，服务两个入口：
+/// - 失败卡片「重试 / 编辑后重发」：`restore_workspace = true`，回退对话并
+///   尝试把项目文件还原到该轮发送前的快照（找不到快照时降级为仅回退对话）；
+/// - 历史消息「编辑重发」：`restore_workspace = false`，只回退对话（成功轮次
+///   的文件产物属于用户工作，不能随对话回退被静默覆盖）。
+///
+/// 工作区还原走最近一次自动锚定的 BeforeTurn checkpoint（agent_start_run
+/// 每次发送前创建）；同一锚点的快照记录可能因早先的回退被清理，此时降级。
+#[tauri::command]
+pub async fn agent_rewind_to_user_message(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    turns_back: u32,
+    restore_workspace: bool,
+) -> Result<AgentRewindResult, String> {
+    // 进行中的 Run 会持有 threads 生命周期锁；先给出明确提示而不是静默排队。
+    {
+        let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
+        if active.is_some() {
+            return Err("Agent 正在运行，请先取消当前任务再回退".into());
+        }
+    }
+    let mut threads = state.threads.lock().await;
+    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    threads
+        .open(&directory, Arc::clone(&state.persistence_errors))
+        .await?;
+    let thread = threads
+        .threads
+        .get(&session_id)
+        .ok_or_else(|| "会话未加载，无法回退".to_string())?;
+
+    // 定位目标用户消息前的锚点（候选消息不足时明确报错）。
+    let anchor = thread
+        .anchor_before_user_turn(turns_back)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 工作区还原：找锚点上的快照记录走完整 restore（对话回退 + 文件还原）。
+    let mut workspace_restored = false;
+    if restore_workspace {
+        let checkpoints = threads.checkpoints()?;
+        let records = checkpoints
+            .list(&session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let record = records.iter().find(|r| r.thread_seq == anchor);
+        if let Some(record) = record {
+            let provider = agent_core::astra_workspace::GitWorkspaceCheckpointProvider::new();
+            match thread
+                .restore_checkpoint(checkpoints, &record.id, Some(Arc::new(provider)), None)
+                .await
+            {
+                Ok(report) => workspace_restored = report.workspace_restored,
+                Err(error) => {
+                    // 快照还原失败不阻断回退：对话本身必须能回去。
+                    eprintln!(
+                        "[checkpoint] workspace restore failed (session {session_id}): {error}"
+                    );
+                    thread.rewind_to(anchor).await.map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    // 仅对话回退（或快照缺失 / 还原失败后的降级路径）。
+    if !workspace_restored {
+        thread.rewind_to(anchor).await.map_err(|e| e.to_string())?;
+    }
+
+    let _ = app.emit(
+        "agent-checkpoint-restored",
+        json!({ "session_id": session_id, "checkpoint_id": null }),
+    );
+    Ok(AgentRewindResult {
+        thread_seq: anchor,
+        workspace_restored,
+        messages: thread.messages(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1818,5 +2103,645 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ===== 记忆采集端到端：宿主采集路径 + memory_search / 数据库两面 =====
+
+    use agent_core::memory::MemoryProvider as _;
+    use astra_memory::cme::engine::{MemoryEngine, RememberRequest};
+    use astra_memory::cme::model::MemoryKind;
+    use astra_memory::cme::store::MemoryStore as _;
+    use astra_memory::cme::store_sqlite::CmeSqliteStore;
+    use astra_memory_provider::{CmeMemoryProvider, ProjectBoundProvider};
+
+    fn envelope(event_id: &str, seq: u64, event: agent_core::RunEvent) -> Envelope {
+        Envelope {
+            schema_version: agent_core::events::EVENT_SCHEMA_VERSION,
+            event_id: event_id.into(),
+            timestamp: 1_700_000_000_000,
+            session_id: "sess-mem-e2e".into(),
+            run_id: "run-mem-e2e".into(),
+            sequence: seq,
+            event,
+        }
+    }
+
+    /// 宿主采集路径端到端：模拟一次真实 Run 的完整事件流（用户提问 →
+    /// 工具失败 → 工具成功 → 助手总结），用与 observe spawn 相同的
+    /// MemoryRunCollector + 引擎调用写入真实加密 SQLite，然后验证两面：
+    /// memory_search 面（ProjectBoundProvider，即 core 实际调用路径）和
+    /// 数据库面（reopen + 摘要/游标 + 静态加密）。
+    #[tokio::test]
+    async fn memory_collection_end_to_end_both_surfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("memory-cme.sqlite");
+        let key = [7u8; 32];
+        let engine =
+            std::sync::Arc::new(MemoryEngine::new(CmeSqliteStore::open(&db, &key).unwrap()));
+        let provider = CmeMemoryProvider::new(std::sync::Arc::clone(&engine));
+
+        // ---- 1. 真实 Run 事件流（顺序与真实发射顺序一致）----
+        let events = vec![
+            envelope(
+                "evt_run_1",
+                1,
+                agent_core::RunEvent::StatusChanged {
+                    status: agent_core::RunStatus::ExecutingTool,
+                },
+            ),
+            envelope(
+                "evt_run_2",
+                2,
+                agent_core::RunEvent::MessageDelta {
+                    text: "让我先查一下".into(),
+                },
+            ),
+            envelope(
+                "evt_run_3",
+                3,
+                agent_core::RunEvent::ToolCallStarted {
+                    tool_call_id: "tc1".into(),
+                    tool_name: "shell_execute".into(),
+                    args_summary: "which pandoc".into(),
+                    args: None,
+                },
+            ),
+            // 失败：原因进摘要，永不直接成记忆
+            envelope(
+                "evt_run_4",
+                4,
+                agent_core::RunEvent::ToolCallFailed {
+                    tool_call_id: "tc1".into(),
+                    tool_name: "shell_execute".into(),
+                    error: "command not found: pandoc".into(),
+                },
+            ),
+            // 成功：已验证路径，应提炼为长期记忆（experience）
+            envelope(
+                "evt_run_5",
+                5,
+                agent_core::RunEvent::ToolCallCompleted {
+                    tool_call_id: "tc2".into(),
+                    tool_name: "shell_execute".into(),
+                    result_summary: "转换完成".into(),
+                    raw_output: Some("成功，已验证实际路径 /opt/homebrew/bin/pandoc 可用".into()),
+                    artifacts: vec![],
+                },
+            ),
+            // 助手总结：含未验证猜测，只进摘要永不成记忆
+            envelope(
+                "evt_run_6",
+                6,
+                agent_core::RunEvent::RunCompleted {
+                    final_text: "我觉得 pandoc 应该在 /usr/bin/pandoc，大概就是这个位置啦。".into(),
+                },
+            ),
+        ];
+
+        // ---- 2. 与 observe spawn 逐字相同的采集 + 提交路径 ----
+        let mut collector = MemoryRunCollector::new();
+        for env in &events {
+            collector.observe(env);
+        }
+        let session = "sess-mem-e2e";
+        let bound_project: Option<String> = Some("astra".into());
+        engine
+            .set_thread_scope(session, bound_project.as_deref())
+            .await
+            .unwrap();
+        let now_ms = 1_700_000_100_000u64;
+        let messages = collector.into_messages("帮我确认系统里 pandoc 的实际路径", now_ms);
+        assert_eq!(messages.len(), 4); // user + failed + completed + assistant
+        engine.ingest(session, messages);
+        let force = engine.has_priority_pending();
+        assert!(force, "verified tool result must trip the priority gate");
+        engine.process_pending(force).await.unwrap();
+
+        // ---- 3. memory_search 面：ProjectBoundProvider（core 实际调用形状）----
+        let bound = ProjectBoundProvider::new(std::sync::Arc::new(provider), bound_project.clone());
+
+        // 已验证工具路径可召回，kind = experience，内容含实际路径。
+        let hits = bound
+            .search("/opt/homebrew/bin/pandoc", None, 10)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1, "verified tool path should be recallable");
+        assert!(hits[0].content.contains("/opt/homebrew/bin/pandoc"));
+        assert_eq!(hits[0].metadata["kind"], serde_json::json!("experience"));
+        assert_eq!(hits[0].scope, agent_core::memory::MemoryScope::Project);
+
+        // 助手猜测与失败原因不成为记忆（错误注入检查）。
+        assert!(
+            bound
+                .search("/usr/bin/pandoc", None, 10)
+                .await
+                .unwrap()
+                .is_empty(),
+            "assistant guess must never become a memory"
+        );
+        assert!(
+            bound
+                .search("command not found", None, 10)
+                .await
+                .unwrap()
+                .is_empty(),
+            "raw failure must never become a memory"
+        );
+
+        // ---- 4. 数据库面：reopen + 摘要/游标持久化 + 静态加密 ----
+        drop(bound);
+        drop(engine);
+        let reopened = CmeSqliteStore::open(&db, &key).unwrap();
+
+        // 摘要保留完整会话流（含失败原因与助手文本），游标推进到最后一条
+        // 采集事件（evt_run_6），下轮增量压缩从这里继续。
+        let summary = reopened.load_summary(session).await.unwrap().unwrap();
+        assert_eq!(summary.project_id.as_deref(), Some("astra"));
+        assert!(
+            summary.summary.contains("not found"),
+            "failure goes to summary"
+        );
+        assert!(
+            summary.summary.contains("/usr/bin/pandoc"),
+            "assistant text goes to summary"
+        );
+        assert!(summary.summary.contains("/opt/homebrew/bin/pandoc"));
+        assert_eq!(summary.covered_until.as_deref(), Some("evt_run_6"));
+
+        // reopen 后记忆仍在（重启持久化）。
+        let hits = reopened
+            .search_text("/opt/homebrew/bin/pandoc", Some("astra"), 10)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+
+        // 静态加密：落盘字节不含任何明文正文。
+        drop(reopened);
+        let raw = std::fs::read(&db).unwrap();
+        let raw_str = String::from_utf8_lossy(&raw);
+        assert!(!raw_str.contains("pandoc"), "plaintext leaked at rest");
+        assert!(!raw_str.contains("帮我确认"), "plaintext leaked at rest");
+    }
+
+    /// 真实 Run 回放：从宿主 `agent_events.log` 提取的一次完整真实 Run
+    /// （641 个事件：9 次工具成功、1 次失败、8 次权限、用户取消收尾）。
+    /// 事件 JSON 原样反序列化成 Envelope，走与 observe spawn 相同的
+    /// MemoryRunCollector → engine 路径，验证真实世界数据形态下的
+    /// memory_search / 数据库两面。fixture：tests/fixtures/cme_replay_run.jsonl。
+    #[tokio::test]
+    async fn memory_collection_replays_real_run_event_stream() {
+        const REAL_RUN: &str = include_str!("../tests/fixtures/cme_replay_run.jsonl");
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("memory-cme.sqlite");
+        let key = [9u8; 32];
+        let engine =
+            std::sync::Arc::new(MemoryEngine::new(CmeSqliteStore::open(&db, &key).unwrap()));
+        let provider = CmeMemoryProvider::new(std::sync::Arc::clone(&engine));
+
+        // ---- 1. 真实事件流 → Envelope → 采集器（与 spawn 逐字相同）----
+        let mut collector = MemoryRunCollector::new();
+        let mut event_count = 0usize;
+        for line in REAL_RUN.lines().filter(|l| !l.trim().is_empty()) {
+            let env: Envelope = serde_json::from_str(line).expect("real event must deserialize");
+            collector.observe(&env);
+            event_count += 1;
+        }
+        assert_eq!(event_count, 641, "fixture must replay the full real run");
+
+        // ---- 2. Run 收尾路径（与 spawn 相同；该 Run 被用户取消，无 RunCompleted）----
+        let session = "agent-mvf245e8-ab5odl"; // 真实 session id
+        let bound_project: Option<String> = Some("astra".into());
+        engine
+            .set_thread_scope(session, bound_project.as_deref())
+            .await
+            .unwrap();
+        // 真实用户提问（来自 agent_threads.sqlite3 同一 session）。
+        let user_text = "Claude Code 是一款存在于终端中的代理编码工具 开源了?";
+        let messages = collector.into_messages(user_text, 1_799_240_400_000);
+        // user + 9 completed + 1 failed = 11（真实 Run 无 RunCompleted）
+        assert_eq!(messages.len(), 11);
+        engine.ingest(session, messages);
+        let force = engine.has_priority_pending();
+        assert!(force, "9 verified tool results must trip the priority gate");
+        engine.process_pending(force).await.unwrap();
+
+        // ---- 3. memory_search 面：真实工具结果可召回 ----
+        let bound = ProjectBoundProvider::new(std::sync::Arc::new(provider), bound_project.clone());
+
+        // 真实 fetch 结果（GitHub API JSON）被采集并提炼；搜索真实出现过的
+        // 工具名应命中（experience，来自工具成功 cue）。
+        let hits = bound.search("fetch", None, 10).await.unwrap();
+        assert!(
+            !hits.is_empty(),
+            "verified fetch results should be recallable"
+        );
+        assert!(hits
+            .iter()
+            .all(|h| h.metadata["kind"] == serde_json::json!("experience")));
+        assert!(hits
+            .iter()
+            .all(|h| h.scope == agent_core::memory::MemoryScope::Project));
+
+        // 真实失败（HTTP 403）不成为记忆，但进摘要。token-overlap 检索是
+        // 模糊匹配，这里直接断言不变量：没有任何已存记忆的正文携带失败
+        // 前缀或失败原因。
+        assert!(
+            !bound
+                .search("HTTP 403", None, 10)
+                .await
+                .unwrap()
+                .iter()
+                .any(|h| h.content.contains("[tool failed]") || h.content.contains("HTTP 403"),),
+            "real tool failure must never become a memory"
+        );
+
+        // ---- 4. 数据库面：reopen + 摘要/游标 + 静态加密 ----
+        drop(bound);
+        drop(engine);
+        let reopened = CmeSqliteStore::open(&db, &key).unwrap();
+
+        let summary = reopened.load_summary(session).await.unwrap().unwrap();
+        assert_eq!(summary.project_id.as_deref(), Some("astra"));
+        // 摘要覆盖真实会话内容：用户提问 + 工具结果 + 失败原因。
+        assert!(
+            summary.summary.contains("Claude Code"),
+            "user text in summary"
+        );
+        assert!(
+            summary.summary.contains("HTTP 403"),
+            "failure reason in summary"
+        );
+        // 游标推进到最后一条被采集的事件（工具完成 seq 628），而非流的最后
+        // 一条（run_cancelled 不被采集）。
+        assert_eq!(
+            summary.covered_until.as_deref(),
+            Some("evt_run_fe7f6199-047e-4907-b321-2d216d300fb0_628")
+        );
+
+        // reopen 后记忆仍在。
+        let hits = reopened
+            .search_text("fetch", Some("astra"), 10)
+            .await
+            .unwrap();
+        assert!(!hits.is_empty());
+
+        // 静态加密：真实正文（GitHub JSON / 用户提问）不以明文落盘。
+        drop(reopened);
+        let raw = std::fs::read(&db).unwrap();
+        let raw_str = String::from_utf8_lossy(&raw);
+        assert!(!raw_str.contains("Claude Code"), "plaintext leaked at rest");
+        assert!(!raw_str.contains("node_id"), "plaintext leaked at rest");
+    }
+
+    // ===== 真实模型 Run：端到端验证宿主采集与跨会话召回注入 =====
+
+    struct NoQuestions;
+    #[async_trait::async_trait]
+    impl agent_core::UserQuestionBridge for NoQuestions {
+        async fn ask(
+            &self,
+            _question: String,
+            _options: Vec<String>,
+            _allow_free_text: bool,
+        ) -> std::result::Result<String, String> {
+            Err("no questions in test".into())
+        }
+    }
+
+    /// 从 providers.json 取一个可用的真实 provider（api_key + active_model）。
+    /// 路径可用 ASTRA_REAL_RUN_PROVIDERS 覆盖，默认读本机应用数据目录。
+    fn load_real_provider() -> (String, String, String) {
+        let path = std::env::var_os("ASTRA_REAL_RUN_PROVIDERS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let home = std::env::var("HOME").expect("HOME not set");
+                std::path::PathBuf::from(home)
+                    .join("Library/Application Support/com.astra.app/providers.json")
+            });
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("real-run test needs providers config: {path:?}: {e}"));
+        let providers: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        for p in providers.as_array().expect("providers must be an array") {
+            let base_url = p["base_url"].as_str().unwrap_or("").trim().to_string();
+            let api_key = p["api_key"].as_str().unwrap_or("").trim().to_string();
+            let model = p["active_model"].as_str().unwrap_or("").trim().to_string();
+            if !base_url.is_empty() && !api_key.is_empty() && !model.is_empty() {
+                return (base_url, api_key, model);
+            }
+        }
+        panic!("no provider with base_url + api_key + active_model in {path:?}");
+    }
+
+    /// 一次真实 Run：与 observe spawn 同形状组装 Thread（真实 backend /
+    /// registry / policy / ProjectBoundProvider 记忆），跑一轮并采集事件。
+    /// 返回（助手最终回答，采集器）。权限桥全放行（等价 auto_all）。
+    #[allow(clippy::too_many_arguments)]
+    async fn real_turn(
+        threads: &mut crate::agent_threads::AgentThreads,
+        session: &str,
+        project_root: &Path,
+        memory: Arc<dyn agent_core::memory::MemoryProvider>,
+        base_url: &str,
+        api_key: &str,
+        model_name: &str,
+        user_text: &str,
+    ) -> (String, MemoryRunCollector) {
+        // 与 agent_start_run 相同的策略形状：本测试只需 read_file（默认
+        // Allow）+ shell_execute（Confirm，经 AutoBridge 全放行）。
+        let mut policy = ToolPolicy::default();
+        policy.allowed_readonly.push("find_path".into());
+        policy.confirm_tools.push("shell_execute".into());
+
+        let mut config =
+            ThreadConfig::new(session.to_string(), crate::prompts::agent_system_prompt());
+        config.project_root = Some(project_root.to_path_buf());
+        config.max_turns = 6;
+        config.auto_compact_tokens = Some(DEFAULT_AUTO_COMPACT_TOKENS).filter(|&t| t > 0);
+        config.policy = policy;
+        config.memory = Some(memory);
+        config.texts = Arc::new(agent_core::TextPack::zh());
+
+        let backend: Arc<dyn ModelBackend> = Arc::new(RigBackend::new(
+            base_url.to_string(),
+            api_key.to_string(),
+            model_name.to_string(),
+        ));
+        let root = project_root.to_path_buf();
+        let registry = build_registry(
+            session,
+            Some(&root),
+            None,
+            Arc::new(NoQuestions),
+            agent_core::net_tools::SearchEngine::default(),
+            Arc::new(agent_core::shell_background::ProcessManager::new()),
+            Arc::new(agent_core::TaskManager::new(8, None)),
+            None,
+        );
+        threads
+            .load_or_create(
+                config,
+                backend,
+                registry,
+                Arc::new(agent_core::AutoBridge(Decision::Allow)),
+            )
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Envelope>(1024);
+        let content = vec![MessageContent::text(user_text)];
+        let handle = threads.threads[session]
+            .try_send_content(content, tx)
+            .unwrap();
+        let mut collector = MemoryRunCollector::new();
+        let mut final_text = String::new();
+        let wait = async {
+            while let Some(env) = rx.recv().await {
+                if let agent_core::RunEvent::RunCompleted { final_text: text } = &env.event {
+                    final_text = text.clone();
+                }
+                collector.observe(&env);
+            }
+        };
+        if tokio::time::timeout(std::time::Duration::from_secs(300), wait)
+            .await
+            .is_err()
+        {
+            handle.cancel();
+            panic!("real run timed out after 300s");
+        }
+        (final_text, collector)
+    }
+
+    /// 真实模型 Run 验证宿主采集路径（唯一依赖外部模型 API 的测试，默认
+    /// 忽略）：`cargo test --lib memory_collection_real_model_run -- --ignored --nocapture`
+    ///
+    /// 链路：真实模型 + 真实工具执行（read_file + shell_execute）→
+    /// 与 observe spawn 逐字相同的 MemoryRunCollector + commit_collected_memory
+    /// → 真实 CME 加密库。验证两面 + 跨会话召回注入：
+    /// 1) memory_search 面：已验证 shell 输出成为可召回记忆（experience / Project）；
+    /// 2) 数据库面：摘要含工具输出、游标推进、静态加密；
+    /// 3) 注入面：全新会话（无对话历史）问探针输出，只有记忆召回注入
+    ///    一条路能提供 token —— 模型答对即证明工具经验真实进入上下文。
+    #[tokio::test]
+    #[ignore = "real model API + network; run with --ignored --nocapture"]
+    async fn memory_collection_real_model_run() {
+        let (base_url, api_key, model_name) = load_real_provider();
+        eprintln!("[real-run] model: {model_name}");
+
+        // 临时项目：README 供 read_file；探针 token 不可推算，只能来自
+        // 工具结果 → 记忆 → 跨会话召回注入。
+        const PROBE: &str = "ASTRA_MEMORY_PROBE_X7K9";
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(
+            project.path().join("README.md"),
+            "# memory probe\n\nThis project uses pnpm as its package manager.\n",
+        )
+        .unwrap();
+
+        let mem_dir = tempfile::tempdir().unwrap();
+        let db = mem_dir.path().join("memory-cme.sqlite");
+        let key = [11u8; 32];
+        let engine = Arc::new(MemoryEngine::new(CmeSqliteStore::open(&db, &key).unwrap()));
+        let bound_project: Option<String> = Some("astra-real-run-probe".into());
+
+        let mut threads = crate::agent_threads::AgentThreads::default();
+        let threads_dir = tempfile::tempdir().unwrap();
+        threads
+            .open(threads_dir.path(), Arc::new(Mutex::new(HashMap::new())))
+            .await
+            .unwrap();
+
+        // ---- Run 1：真实模型 + 真实工具，采集 → 提炼 ----
+        let prompt1 = "请先读取项目根目录的 README.md，告诉我这个项目用的包管理器；然后执行 shell 命令 `echo ASTRA_MEMORY_PROBE_X7K9`，把命令的完整原始输出告诉我。";
+        let memory1 = Arc::new(ProjectBoundProvider::new(
+            Arc::new(CmeMemoryProvider::new(Arc::clone(&engine))),
+            bound_project.clone(),
+        ));
+        let (final1, collector1) = real_turn(
+            &mut threads,
+            "sess-real-run-1",
+            project.path(),
+            memory1,
+            &base_url,
+            &api_key,
+            &model_name,
+            prompt1,
+        )
+        .await;
+        eprintln!("[real-run] run1 final: {final1}");
+        assert!(
+            !final1.trim().is_empty(),
+            "run 1 must complete with a final answer"
+        );
+
+        // Run 收尾（与 observe spawn 相同的共用提交路径）。
+        let force = commit_collected_memory(
+            &engine,
+            collector1,
+            "sess-real-run-1",
+            bound_project.as_deref(),
+            prompt1,
+            1_800_000_000_000,
+        )
+        .await;
+        assert!(force, "verified shell result must trip the priority gate");
+
+        // ---- 1. memory_search 面：已验证 shell 输出成为可召回记忆 ----
+        let bound = ProjectBoundProvider::new(
+            Arc::new(CmeMemoryProvider::new(Arc::clone(&engine))),
+            bound_project.clone(),
+        );
+        let hits = bound.search(PROBE, None, 10).await.unwrap();
+        assert!(
+            hits.iter().any(|h| h.content.contains(PROBE)),
+            "verified shell output must become a recallable memory; got: {:?}",
+            hits.iter().map(|h| h.content.clone()).collect::<Vec<_>>()
+        );
+        assert!(hits
+            .iter()
+            .filter(|h| h.content.contains(PROBE))
+            .all(|h| h.metadata["kind"] == serde_json::json!("experience")));
+        assert!(hits
+            .iter()
+            .filter(|h| h.content.contains(PROBE))
+            .all(|h| h.scope == agent_core::memory::MemoryScope::Project));
+
+        // ---- 1b. 作用域隔离与显式记住（确定性断言，无需额外模型调用）----
+        // 显式记住（host memory_remember 同路径）：立即持久化可召回，
+        // 不经过 process_pending 阈值；project_id=None = 全局（User 级）。
+        let preference = "用户偏好：回答保持简洁";
+        engine
+            .remember(RememberRequest {
+                content: preference.into(),
+                kind: MemoryKind::Preference,
+                project_id: None,
+                thread_id: None,
+            })
+            .await
+            .unwrap();
+        let hits = bound.search("保持简洁", None, 10).await.unwrap();
+        assert!(
+            hits.iter().any(|h| h.content.contains("保持简洁")),
+            "explicit remember must be immediately recallable without threshold"
+        );
+        assert!(hits
+            .iter()
+            .any(|h| h.scope == agent_core::memory::MemoryScope::User));
+
+        // 反向隔离：项目 B 绑定召回不到项目 A 的探针记忆，但全局偏好
+        // （User 级）跨项目共享。
+        let bound_b = ProjectBoundProvider::new(
+            Arc::new(CmeMemoryProvider::new(Arc::clone(&engine))),
+            Some("astra-other-project".into()),
+        );
+        let hits_b = bound_b.search(PROBE, None, 10).await.unwrap();
+        assert!(
+            hits_b.iter().all(|h| !h.content.contains(PROBE)),
+            "project A probe must never leak into project B recall"
+        );
+        let hits_b = bound_b.search("保持简洁", None, 10).await.unwrap();
+        assert!(
+            hits_b.iter().any(|h| h.content.contains("保持简洁")),
+            "user-level memory must be shared across projects"
+        );
+
+        // 对称隔离：写入项目 B 的记忆对项目 A 不可见。
+        const BUN: &str = "BUN_PROBE_Y4M8";
+        engine
+            .remember(RememberRequest {
+                content: format!("astra-other-project 的构建工具是 {BUN}"),
+                kind: MemoryKind::Fact,
+                project_id: Some("astra-other-project".into()),
+                thread_id: None,
+            })
+            .await
+            .unwrap();
+        let hits_b = bound_b.search(BUN, None, 10).await.unwrap();
+        assert!(hits_b.iter().any(|h| h.content.contains(BUN)));
+        let hits_a = bound.search(BUN, None, 10).await.unwrap();
+        assert!(
+            hits_a.iter().all(|h| !h.content.contains(BUN)),
+            "project B memory must never leak into project A recall"
+        );
+
+        // ---- 2. 数据库面：摘要含工具输出、游标推进、静态加密 ----
+        let reopened = CmeSqliteStore::open(&db, &key).unwrap();
+        let summary = reopened
+            .load_summary("sess-real-run-1")
+            .await
+            .unwrap()
+            .expect("run 1 summary must exist");
+        assert_eq!(summary.project_id.as_deref(), Some("astra-real-run-probe"));
+        assert!(
+            summary.summary.contains(PROBE),
+            "tool output must reach the session summary"
+        );
+        assert!(
+            summary.covered_until.is_some(),
+            "cursor must advance past collected events"
+        );
+        // SQL 级作用域过滤证明：隔离不是元数据标记，而是 store 的 WHERE
+        // 子句（Some(p) → 全局+p；None → 仅全局）。
+        let hits = reopened
+            .search_text(PROBE, Some("astra-real-run-probe"), 10)
+            .await
+            .unwrap();
+        assert!(hits.iter().any(|h| h.content.contains(PROBE)));
+        let hits = reopened
+            .search_text(PROBE, Some("astra-other-project"), 10)
+            .await
+            .unwrap();
+        assert!(
+            hits.is_empty(),
+            "wrong-project SQL filter must exclude the probe memory"
+        );
+        let hits = reopened.search_text(PROBE, None, 10).await.unwrap();
+        assert!(
+            hits.is_empty(),
+            "project memory must never be visible as global"
+        );
+        drop(reopened);
+        let raw = std::fs::read(&db).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&raw).contains(PROBE),
+            "plaintext leaked at rest"
+        );
+
+        // ---- 3. 注入面：全新会话（无对话历史），只有记忆召回注入一条路
+        // 能提供探针 token —— 模型答对即证明工具经验真实进入上下文。 ----
+        // 注意问题措辞：必须含检索命中词（shell_execute，与记忆正文
+        // 「shell_execute: …」重叠）但绝不能含 token 本身。
+        let prompt2 = "不要执行任何命令，不要读任何文件。我们之前用 shell_execute 执行过一个 echo 探针命令，请根据你记忆中的信息回答：它输出的完整 token 是什么？只回答 token 本身。";
+        let memory2 = Arc::new(ProjectBoundProvider::new(
+            Arc::new(CmeMemoryProvider::new(Arc::clone(&engine))),
+            bound_project.clone(),
+        ));
+        let (final2, collector2) = real_turn(
+            &mut threads,
+            "sess-real-run-2",
+            project.path(),
+            memory2,
+            &base_url,
+            &api_key,
+            &model_name,
+            prompt2,
+        )
+        .await;
+        eprintln!("[real-run] run2 final: {final2}");
+        assert!(
+            final2.contains("X7K9"),
+            "cross-session recall must inject the verified tool memory into a fresh session; final: {final2}"
+        );
+        // Run 2 的采集提交也走一遍共用路径（不应 panic / 破坏状态）。
+        commit_collected_memory(
+            &engine,
+            collector2,
+            "sess-real-run-2",
+            bound_project.as_deref(),
+            prompt2,
+            1_800_000_100_000,
+        )
+        .await;
     }
 }

@@ -1429,24 +1429,18 @@ pub fn run() {
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-            // 记忆宿主初始化（astra-memory）：加密 SQLite + 主密钥文件。
+            // 记忆宿主初始化（astra-memory CME）：加密 SQLite + 主密钥文件。
             // 失败降级为 memory-off：agent 照常运行（无 recall 注入），
-            // memory_* 命令报「memory is unavailable」。judge 部署物缺失
-            // 只降级 v1（bundle resources 见 tauri.conf.json）。
-            let memory_resources = app.path().resource_dir().ok();
+            // memory_* 命令报「memory is unavailable」。
             match app.path().app_data_dir() {
-                Ok(dir) => {
-                    let models =
-                        crate::memory::MemoryModelPaths::resolve(memory_resources.as_deref());
-                    match crate::memory::MemoryHost::init(&dir, &models) {
-                        Ok(host) => {
-                            let _ = app.state::<agent::AgentState>().memory.set(host);
-                        }
-                        Err(error) => {
-                            eprintln!("[memory] init failed, memory disabled: {error}");
-                        }
+                Ok(dir) => match crate::memory::MemoryHost::init(&dir) {
+                    Ok(host) => {
+                        let _ = app.state::<agent::AgentState>().memory.set(host);
                     }
-                }
+                    Err(error) => {
+                        eprintln!("[memory] init failed, memory disabled: {error}");
+                    }
+                },
                 Err(error) => {
                     eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
                 }
@@ -1576,6 +1570,7 @@ pub fn run() {
             agent::agent_checkpoint_list,
             agent::agent_checkpoint_create,
             agent::agent_checkpoint_restore,
+            agent::agent_rewind_to_user_message,
             // Agent Artifacts（ARTIFACT_SPEC：产物元数据登记）
             agent::agent_artifact_list,
             // Memory（astra-memory 集成：recall 注入 + 显式管理）

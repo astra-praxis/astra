@@ -24,7 +24,8 @@ export default function App() {
     <HashRouter>
       <Routes>
         <Route element={<AppLayout />}>
-          <Route path="/" element={<WorkspacePage />} />
+          <Route path="/" element={<Navigate to="/agent" replace />} />
+          <Route path="/workspace" element={<WorkspacePage />} />
           <Route path="/agent" element={<AgentPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tools/downloader" element={<DownloaderPage />} />
@@ -42,7 +43,7 @@ export default function App() {
           <Route path="/market/skills" element={<MarketSkillPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/dev-mode/:encoded" element={<DevModePage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/agent" replace />} />
         </Route>
       </Routes>
     </HashRouter>

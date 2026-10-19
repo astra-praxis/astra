@@ -26,7 +26,7 @@ import './layout.scss';
 
 const menuItems = [
   { id: 'agent', label: 'Agent', path: '/agent', icon: Bot },
-  { id: 'workspace', label: '工作空间', path: '/', icon: FolderOpen },
+  { id: 'workspace', label: '工作空间', path: '/workspace', icon: FolderOpen },
   { id: 'tools', label: '工具箱', path: '/tools', icon: Wrench },
   { id: 'logs', label: '日志', path: '/logs', icon: ScrollText },
   { id: 'artifacts', label: '产物库', path: '/artifacts', icon: Package },

@@ -521,9 +521,9 @@ export default function DevModePage() {
   function goBack() {
     const from = searchParams.get('from');
     if (from) {
-      navigate(`/?detail=${encodeURIComponent(from)}`);
+      navigate(`/workspace?detail=${encodeURIComponent(from)}`);
     } else {
-      navigate('/');
+      navigate('/workspace');
     }
   }
 

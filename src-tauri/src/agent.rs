@@ -564,6 +564,53 @@ impl agent_core::UserQuestionBridge for QuestionBridge {
 
 // ===== 工具注册（全部实现在 agent-core，本层只做组装） =====
 
+/// 宿主工具权限白名单（严格模型：不在名单内一律 Deny）。每次新增内置
+/// 工具时必须同步这里，否则注册成功但执行被拒（memory 工具踩过一次：
+/// agent 看得到、调不了）。
+fn host_tool_policy() -> ToolPolicy {
+    // 在默认策略上追加 pandoc 工具：转换是只读产物生成（Allow），
+    // 构建 docx 会覆盖/创建交付文件（Confirm）
+    let mut policy = ToolPolicy::default();
+    // fs_tools（Zed 移植）：find_path 只读；edit/copy/move/mkdir 产生变更走 Confirm
+    policy.allowed_readonly.push("find_path".into());
+    // pandoc 转换是只读产物生成（Allow）；ask_user / search_web 无副作用（Allow）
+    policy.allowed_readonly.push("extract_document".into());
+    policy.allowed_readonly.push("ask_user".into());
+    policy.allowed_readonly.push("search_web".into());
+    // MCP 配置自助管理：读无副作用 Allow；写入配置 Confirm（自动全放行
+    // 时随 auto_all 放行，装扩展是用户主动要求的行为）
+    policy.allowed_readonly.push("mcp_config_read".into());
+    policy.confirm_tools.push("mcp_config_write".into());
+    policy.confirm_tools.push("edit_file".into());
+    policy.confirm_tools.push("copy_path".into());
+    policy.confirm_tools.push("move_path".into());
+    policy.confirm_tools.push("create_directory".into());
+    policy.confirm_tools.push("build_docx".into());
+    policy.confirm_tools.push("shell_execute".into());
+    // 后台任务：启动/停止有副作用走 Confirm；shell_status 只读（Allow）
+    policy.confirm_tools.push("shell_background".into());
+    policy.confirm_tools.push("shell_kill".into());
+    policy.allowed_readonly.push("shell_status".into());
+    // 统一任务查询（TASK_SPEC D3）：status/result 只读 Allow，
+    // cancel 有副作用走 Confirm
+    policy.allowed_readonly.push("task_status".into());
+    policy.allowed_readonly.push("task_result".into());
+    policy.confirm_tools.push("task_cancel".into());
+    // 付费生成（MULTIMODAL_SPEC §10）：循环层直接放行，付费确认由
+    // 工具内部 request_permission 完成（批准仅针对固定请求，换参数
+    // 会重新弹窗）——避免循环层 Confirm + 工具内确认双重弹窗。
+    policy.allowed_readonly.push("generate_image".into());
+    // fetch 涉及外部网络访问，走确认弹窗（SSRF 门在工具内部始终生效）
+    policy.confirm_tools.push("fetch".into());
+    // Agent 记忆工具：search 只读 Allow；remember 写的是应用自己的
+    // 记忆库（非文件系统/系统变更，可经 engine.forget 回退），且设计
+    // 要求「显式记住立即生效」——走 Confirm 弹窗会破坏这个语义，
+    // 故 Allow（memory-off 时工具根本不注册，不存在未声明即放行）。
+    policy.allowed_readonly.push("memory_search".into());
+    policy.allowed_readonly.push("memory_remember".into());
+    policy
+}
+
 fn build_registry(
     session_id: &str,
     project_root: Option<&PathBuf>,
@@ -1018,40 +1065,7 @@ pub async fn agent_start_run(
                 .map_err(|e| format!("切换模型来源失败：{e}"))?;
         }
         if !threads.threads.contains_key(&session_id) {
-            // 在默认策略上追加 pandoc 工具：转换是只读产物生成（Allow），
-            // 构建 docx 会覆盖/创建交付文件（Confirm）
-            let mut policy = ToolPolicy::default();
-            // fs_tools（Zed 移植）：find_path 只读；edit/copy/move/mkdir 产生变更走 Confirm
-            policy.allowed_readonly.push("find_path".into());
-            // pandoc 转换是只读产物生成（Allow）；ask_user / search_web 无副作用（Allow）
-            policy.allowed_readonly.push("extract_document".into());
-            policy.allowed_readonly.push("ask_user".into());
-            policy.allowed_readonly.push("search_web".into());
-            // MCP 配置自助管理：读无副作用 Allow；写入配置 Confirm（自动全放行
-            // 时随 auto_all 放行，装扩展是用户主动要求的行为）
-            policy.allowed_readonly.push("mcp_config_read".into());
-            policy.confirm_tools.push("mcp_config_write".into());
-            policy.confirm_tools.push("edit_file".into());
-            policy.confirm_tools.push("copy_path".into());
-            policy.confirm_tools.push("move_path".into());
-            policy.confirm_tools.push("create_directory".into());
-            policy.confirm_tools.push("build_docx".into());
-            policy.confirm_tools.push("shell_execute".into());
-            // 后台任务：启动/停止有副作用走 Confirm；shell_status 只读（Allow）
-            policy.confirm_tools.push("shell_background".into());
-            policy.confirm_tools.push("shell_kill".into());
-            policy.allowed_readonly.push("shell_status".into());
-            // 统一任务查询（TASK_SPEC D3）：status/result 只读 Allow，
-            // cancel 有副作用走 Confirm
-            policy.allowed_readonly.push("task_status".into());
-            policy.allowed_readonly.push("task_result".into());
-            policy.confirm_tools.push("task_cancel".into());
-            // 付费生成（MULTIMODAL_SPEC §10）：循环层直接放行，付费确认由
-            // 工具内部 request_permission 完成（批准仅针对固定请求，换参数
-            // 会重新弹窗）——避免循环层 Confirm + 工具内确认双重弹窗。
-            policy.allowed_readonly.push("generate_image".into());
-            // fetch 涉及外部网络访问，走确认弹窗（SSRF 门在工具内部始终生效）
-            policy.confirm_tools.push("fetch".into());
+            let policy = host_tool_policy();
             let mut system_prompt = req
                 .system_prompt
                 .unwrap_or_else(crate::prompts::agent_system_prompt);
@@ -2002,6 +2016,45 @@ mod tests {
             Arc::new(StubProvider);
         let reg = registry_with(Some((Arc::clone(&backend), provider)));
         assert!(reg.get("generate_image").is_some());
+    }
+
+    /// 白名单完备性：registry 里每个工具（memory-off 形状）都必须在
+    /// host_tool_policy 里点名（Allow/Confirm）。权限是严格模型：漏了
+    /// 白名单 = 注册成功但执行被拒（memory 工具踩过：agent 看得到、调不了）。
+    #[test]
+    fn every_registered_tool_is_listed_in_host_policy() {
+        struct NoQuestions3;
+        #[async_trait::async_trait]
+        impl agent_core::UserQuestionBridge for NoQuestions3 {
+            async fn ask(
+                &self,
+                _question: String,
+                _options: Vec<String>,
+                _allow_free_text: bool,
+            ) -> Result<String, String> {
+                Err("test bridge".into())
+            }
+        }
+        let reg = build_registry(
+            "sess-policy",
+            None,
+            None,
+            Arc::new(NoQuestions3),
+            agent_core::net_tools::SearchEngine::default(),
+            Arc::new(agent_core::shell_background::ProcessManager::new()),
+            Arc::new(agent_core::TaskManager::new(8, None)),
+            None,
+            None,
+        );
+        let policy = host_tool_policy();
+        for name in reg.names() {
+            let listed = policy.allowed_readonly.iter().any(|n| n == &name)
+                || policy.confirm_tools.iter().any(|n| n == &name);
+            assert!(
+                listed,
+                "tool '{name}' 未列入 host_tool_policy，执行会被 Deny"
+            );
+        }
     }
 
     /// 宿主层闭环（TASK_SPEC §六）：AgentState::default 的共享 ProcessManager

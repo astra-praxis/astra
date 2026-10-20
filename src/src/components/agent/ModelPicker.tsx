@@ -7,13 +7,49 @@
  * overrideModelName），与 agent_start_run 的载荷语义对齐。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, ChevronDown, Cpu, Loader2, RefreshCw, Search, X } from 'lucide-react';
+import { Activity, ChevronDown, Cpu, History, Loader2, RefreshCw, Search, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useChatToolbarStore, type ModelInfo } from '@/stores/chatToolbar';
 import './ModelPicker.scss';
 
 /** Provider → 模型列表（弹层打开时逐个懒加载；'loading' 占位） */
 type ProviderModelsState = Record<string, ModelInfo[] | 'loading'>;
+
+/** 最近使用条目（localStorage 持久化，跨会话保留） */
+type RecentEntry =
+  | { t: 'model'; port: number; name: string }
+  | { t: 'provider'; pid: string; mid: string; pname?: string };
+
+const RECENT_KEY = 'astra-agent-mpick-recent';
+const RECENT_MAX = 6;
+/** 大分组默认展开的模型数；超出折叠，可一键展开 */
+const GROUP_PREVIEW = 6;
+
+function loadRecents(): RecentEntry[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const parsed = raw ? (JSON.parse(raw) as RecentEntry[]) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecent(entry: RecentEntry) {
+  const rest = loadRecents().filter((r) => {
+    if (r.t !== entry.t) return true;
+    if (r.t === 'model' && entry.t === 'model') return r.port !== entry.port;
+    if (r.t === 'provider' && entry.t === 'provider') {
+      return !(r.pid === entry.pid && r.mid === entry.mid);
+    }
+    return true;
+  });
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify([entry, ...rest].slice(0, RECENT_MAX)));
+  } catch {
+    /* 忽略持久化失败：最近使用只是加速，不影响选择 */
+  }
+}
 
 export default function ModelPicker() {
   const sourceType = useChatToolbarStore((s) => s.sourceType);
@@ -30,6 +66,13 @@ export default function ModelPicker() {
   const [providerModels, setProviderModels] = useState<ProviderModelsState>({});
   // 弹层内搜索：过滤本地模型与各 Provider 的模型（标题/模型 id，大小写不敏感）
   const [query, setQuery] = useState('');
+  // 最近使用（打开弹层时读取一次；选择后更新）
+  const [recents, setRecents] = useState<RecentEntry[]>([]);
+  // 大分组展开状态（按 provider id）
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // 键盘指向：可见 .mpick__item 序列中的下标（命令式高亮，避免随渲染重建）
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const kbdIdxRef = useRef(-1);
 
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
 
@@ -83,12 +126,14 @@ export default function ModelPicker() {
   useEffect(() => {
     if (!open) return;
     setQuery('');
+    setRecents(loadRecents());
+    setExpanded(new Set());
     // 等弹层渲染完成后聚焦，直接可打字搜索
     requestAnimationFrame(() => searchRef.current?.focus());
     void useChatToolbarStore.getState().refreshRunningModels();
     for (const p of providers) {
       setProviderModels((prev) => ({ ...prev, [p.id]: 'loading' }));
-      invoke<ModelInfo[]>("fetch_provider_models", {
+      invoke<ModelInfo[]>('fetch_provider_models', {
         baseUrl: p.base_url,
         apiKey: p.api_key,
         kind: p.kind,
@@ -98,10 +143,11 @@ export default function ModelPicker() {
     }
   }, [open, providers]);
 
-  function pickLocal(port: number) {
+  function pickLocal(port: number, name?: string) {
     const st = useChatToolbarStore.getState();
     st.setSourceType('model');
     st.setSelectedModelPort(port);
+    pushRecent({ t: 'model', port, name: name ?? `本地模型 :${port}` });
     setOpen(false);
   }
 
@@ -111,7 +157,67 @@ export default function ModelPicker() {
     st.setSourceType('provider');
     st.selectProvider(providerId);
     st.setOverrideModelName(modelId);
+    pushRecent({
+      t: 'provider',
+      pid: providerId,
+      mid: modelId,
+      pname: providers.find((p) => p.id === providerId)?.name,
+    });
     setOpen(false);
+  }
+
+  // ===== 键盘导航：上下在可见项间移动，回车选中，Esc 关闭 =====
+  function visibleItems(): HTMLButtonElement[] {
+    return Array.from(
+      scrollRef.current?.querySelectorAll<HTMLButtonElement>('.mpick__item') ?? [],
+    );
+  }
+
+  function clearPointed() {
+    scrollRef.current
+      ?.querySelectorAll('.mpick__item.is-pointed')
+      .forEach((el) => el.classList.remove('is-pointed'));
+    kbdIdxRef.current = -1;
+  }
+
+  function pointAt(items: HTMLButtonElement[], idx: number) {
+    scrollRef.current
+      ?.querySelectorAll('.mpick__item.is-pointed')
+      .forEach((el) => el.classList.remove('is-pointed'));
+    const el = items[idx];
+    if (el) {
+      el.classList.add('is-pointed');
+      el.scrollIntoView({ block: 'nearest' });
+    }
+    kbdIdxRef.current = idx;
+  }
+
+  function onSearchKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const items = visibleItems();
+      if (items.length === 0) return;
+      const prev = kbdIdxRef.current;
+      const next =
+        e.key === 'ArrowDown'
+          ? prev + 1 >= items.length
+            ? 0
+            : prev + 1
+          : prev - 1 < 0
+            ? items.length - 1
+            : prev - 1;
+      pointAt(items, next);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const items = visibleItems();
+      if (items.length === 0) return;
+      const idx = kbdIdxRef.current >= 0 && kbdIdxRef.current < items.length ? kbdIdxRef.current : 0;
+      items[idx].scrollIntoView({ block: 'nearest' });
+      items[idx].click();
+    } else if (e.key === 'Escape') {
+      if (query) setQuery('');
+      else setOpen(false);
+    }
   }
 
   return (
@@ -139,15 +245,12 @@ export default function ModelPicker() {
             <input
               ref={searchRef}
               value={query}
-              placeholder="搜索模型 / Provider…"
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  if (query) setQuery('');
-                  else setOpen(false);
-                }
+              placeholder="搜索模型 / Provider，↑↓ 选择，回车确认"
+              onChange={(e) => {
+                setQuery(e.target.value);
+                clearPointed();
               }}
+              onKeyDown={onSearchKeyDown}
             />
             {query && (
               <button type="button" className="mpick__search-clear" onClick={() => setQuery('')} aria-label="清空搜索">
@@ -156,7 +259,57 @@ export default function ModelPicker() {
             )}
           </div>
 
-          <div className="mpick__scroll">
+          <div className="mpick__scroll" ref={scrollRef}>
+          {/* 最近使用：置顶直达，仅无搜索词时展示；失效条目（provider 已删 /
+              本地模型已停）自动隐藏 */}
+          {!q && recents.length > 0 && (
+            <div className="mpick__group">
+              <div className="mpick__group-name">最近使用</div>
+              {recents.map((r) => {
+                if (r.t === 'model') {
+                  const stillRunning = runningModels.some((m) => m.port === r.port);
+                  if (!stillRunning) return null;
+                  const active = sourceType === 'model' && selectedModelPort === r.port;
+                  return (
+                    <button
+                      key={`recent-model-${r.port}`}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      className={`mpick__item${active ? ' is-active' : ''}`}
+                      onClick={() => pickLocal(r.port, r.name)}
+                    >
+                      <History size={13} strokeWidth={1.8} />
+                      <span className="mpick__item-label">{r.name}</span>
+                    </button>
+                  );
+                }
+                const p = providers.find((x) => x.id === r.pid);
+                if (!p) return null;
+                const active =
+                  sourceType === 'provider' && selectedProviderId === r.pid
+                    ? (overrideModelName ?? p.active_model) === r.mid
+                    : false;
+                return (
+                  <button
+                    key={`recent-${r.pid}-${r.mid}`}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    className={`mpick__item${active ? ' is-active' : ''}`}
+                    onClick={() => pickProviderModel(r.pid, r.mid)}
+                  >
+                    <History size={13} strokeWidth={1.8} />
+                    <span className="mpick__item-label mono">
+                      {r.pname ? `${r.pname} · ` : ''}
+                      {r.mid}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {hitLocal.length > 0 && (
             <div className="mpick__group">
               <div className="mpick__group-name">
@@ -180,7 +333,7 @@ export default function ModelPicker() {
                     role="option"
                     aria-selected={active}
                     className={`mpick__item${active ? ' is-active' : ''}`}
-                    onClick={() => pickLocal(m.port)}
+                    onClick={() => pickLocal(m.port, `${m.name} :${m.port}`)}
                   >
                     <Cpu size={13} strokeWidth={1.8} />
                     <span className="mpick__item-label">{m.name} :{m.port}</span>
@@ -192,32 +345,56 @@ export default function ModelPicker() {
 
           {hitProviders.map(({ provider: p, models }) => {
             const currentModel = overrideModelName ?? p.active_model;
+            // 大分组折叠：超过 GROUP_PREVIEW 时只展示前 N 个，搜索时全量展示
+            const isExpanded = expanded.has(p.id) || q !== '';
+            const modelList = Array.isArray(models) ? models : [];
+            const visibleModels = isExpanded ? modelList : modelList.slice(0, GROUP_PREVIEW);
+            const hiddenCount = isExpanded ? 0 : modelList.length - GROUP_PREVIEW;
             return (
               <div className="mpick__group" key={p.id}>
-                <div className="mpick__group-name">{p.name}</div>
+                <div className="mpick__group-name">
+                  {p.name}
+                  {modelList.length > 0 && (
+                    <span className="mpick__group-count">{modelList.length}</span>
+                  )}
+                </div>
                 {models === undefined || models === 'loading' ? (
                   <div className="mpick__hint">
                     <Loader2 size={11} strokeWidth={2.2} className="mpick__spin" />
                     加载中…
                   </div>
                 ) : (
-                  models.map((m) => {
-                    const active =
-                      sourceType === 'provider' && selectedProviderId === p.id && currentModel === m.id;
-                    return (
+                  <>
+                    {visibleModels.map((m) => {
+                      const active =
+                        sourceType === 'provider' && selectedProviderId === p.id && currentModel === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          role="option"
+                          aria-selected={active}
+                          className={`mpick__item${active ? ' is-active' : ''}`}
+                          onClick={() => pickProviderModel(p.id, m.id)}
+                        >
+                          <Activity size={13} strokeWidth={1.8} />
+                          <span className="mpick__item-label mono">{m.id}</span>
+                        </button>
+                      );
+                    })}
+                    {hiddenCount > 0 && (
                       <button
-                        key={m.id}
                         type="button"
-                        role="option"
-                        aria-selected={active}
-                        className={`mpick__item${active ? ' is-active' : ''}`}
-                        onClick={() => pickProviderModel(p.id, m.id)}
+                        className="mpick__more"
+                        onClick={() =>
+                          setExpanded((prev) => new Set(prev).add(p.id))
+                        }
                       >
-                        <Activity size={13} strokeWidth={1.8} />
-                        <span className="mpick__item-label mono">{m.id}</span>
+                        显示全部 {modelList.length} 个模型
+                        <ChevronDown size={11} strokeWidth={2.2} />
                       </button>
-                    );
-                  })
+                    )}
+                  </>
                 )}
               </div>
             );

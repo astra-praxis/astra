@@ -114,7 +114,7 @@
 
   // 滚动区：搜索框固定在顶部，分组列表在此滚动
   &__scroll {
-    max-height: 320px;
+    max-height: 380px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -141,6 +141,37 @@
     font-weight: 600;
     color: var(--text-muted);
     letter-spacing: 0.02em;
+  }
+
+  // 组名右侧的模型计数
+  &__group-count {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-weight: 400;
+    color: var(--text-muted);
+    opacity: 0.8;
+  }
+
+  // 大分组折叠时的展开按钮
+  &__more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin: 2px 0 3px;
+    padding: 4px 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+
+    &:hover {
+      color: var(--brand-600);
+      background: var(--brand-50);
+    }
   }
 
   &__refresh {
@@ -203,6 +234,15 @@
         border-bottom: 2px solid var(--brand-600);
         transform: rotate(45deg);
       }
+    }
+
+    // 键盘指向态（与 hover 同级，但不覆盖选中态的字体加粗）
+    &.is-pointed {
+      background: var(--bg-surface-soft, var(--bg-surface));
+    }
+
+    &.is-pointed.is-active {
+      background: var(--brand-100, var(--brand-50));
     }
   }
 

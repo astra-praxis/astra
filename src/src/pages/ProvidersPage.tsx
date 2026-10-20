@@ -195,8 +195,8 @@ export default function ProvidersPage() {
             <ChevronLeft size={14} strokeWidth={2.5} />
             返回设置
           </Link>
-          <h1 className="providers-page__title">API 接口管理</h1>
-          <p className="providers-page__subtitle">配置 OpenAI 兼容的 API 接口</p>
+          <h1 className="providers-page__title">AI 服务商</h1>
+          <p className="providers-page__subtitle">配置 OpenAI 兼容的服务商与 API 密钥</p>
         </div>
         <div className="providers-page__actions">
           <button

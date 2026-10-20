@@ -8,6 +8,7 @@
  * 版本链在前端按 artifact_key 分组（registry 无分页，spec §4）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { invoke } from '@tauri-apps/api/core';
 import {
   ChevronLeft,
@@ -16,7 +17,6 @@ import {
   ExternalLink,
   FileText,
   History,
-  Package,
 } from 'lucide-react';
 import { describeArtifact, type Artifact } from '@/components/agent/artifact';
 import './ArtifactsPage.scss';
@@ -170,13 +170,18 @@ export default function ArtifactsPage() {
   return (
     <div className="artifacts-page">
       <div className="artifacts-header">
-        <h2>
-          <Package size={18} strokeWidth={2.2} />
-          产物库
-        </h2>
-        <p className="artifacts-subtitle">
-          Agent 会话产出的文件登记（路径为写入时刻的记录，不保证文件当前仍在）
-        </p>
+        <div className="artifacts-title-row">
+          <Link to="/settings" className="btn-back" title="返回设置">
+            <ChevronLeft size={14} strokeWidth={2.5} />
+            返回设置
+          </Link>
+          <div className="artifacts-titles">
+            <h1>产物库</h1>
+            <p className="artifacts-subtitle">
+              Agent 会话产出的文件登记（路径为写入时刻的记录，不保证文件当前仍在）
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="artifacts-body">

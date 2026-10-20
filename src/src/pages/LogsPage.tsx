@@ -3,7 +3,7 @@
  * 移植自 src/routes/logs/+page.svelte
  */
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { ChevronLeft, FileText } from 'lucide-react';
 import { useLogsStore, type LogEntry } from '@/stores/logs';
 import { formatClockMs } from '@/lib/format';
@@ -39,7 +39,6 @@ function levelLabel(level: LogEntry['level']): string {
 }
 
 export default function LogsPage() {
-  const navigate = useNavigate();
   const entries = useLogsStore((s) => s.entries);
   const clear = useLogsStore((s) => s.clear);
 
@@ -63,11 +62,14 @@ export default function LogsPage() {
   return (
     <div className="logs-page">
       <div className="logs-header">
-        <button className="back-btn" onClick={() => navigate(-1)}>
-          <ChevronLeft size={18} strokeWidth={2.5} />
-          返回
-        </button>
-        <h2>📋 日志</h2>
+        <Link to="/settings" className="back-btn" title="返回设置">
+          <ChevronLeft size={14} strokeWidth={2.5} />
+          返回设置
+        </Link>
+        <div className="logs-titles">
+          <h1>日志</h1>
+          <p className="logs-subtitle">应用运行日志，用于诊断问题</p>
+        </div>
         <div className="logs-actions">
           <span className="logs-count">{filteredEntries.length} 条记录</span>
           <button

@@ -3,7 +3,7 @@
  * 移植自 src/routes/tools/+page.svelte
  */
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ChevronLeft, Search, X, ChevronRight } from 'lucide-react';
 import './ToolsPage.scss';
 
@@ -69,10 +69,14 @@ export default function ToolsPage() {
       {/* 页头 */}
       <div className="page-header">
         <div className="header-left">
-          <button className="btn-back" onClick={() => navigate('/settings')} title="返回设置">
+          <Link to="/settings" className="btn-back" title="返回设置">
             <ChevronLeft size={14} strokeWidth={2.5} />
-          </button>
-          <h1>工具箱</h1>
+            返回设置
+          </Link>
+          <div className="header-titles">
+            <h1>工具箱</h1>
+            <p className="page-subtitle">下载管理与 node_modules 清理</p>
+          </div>
         </div>
       </div>
 

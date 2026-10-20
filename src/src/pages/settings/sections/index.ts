@@ -79,7 +79,7 @@ export const ALL_SECTIONS: SettingsSectionDef[] = [...PREFERENCE_SECTIONS, ...DE
 /** 管理与资源：独立管理页面的跨页入口，不是设置项 */
 export const RESOURCE_LINKS: { icon: string; label: string; to: string }[] = [
   { icon: '🤖', label: '模型管理', to: '/models' },
-  { icon: '🔌', label: 'API 接口', to: '/providers' },
+  { icon: '🔌', label: 'AI 服务商', to: '/providers' },
   { icon: '🧩', label: 'Skills 管理', to: '/skills' },
   { icon: '⚡', label: '我的 Skills', to: '/my-skills' },
   { icon: '🧰', label: '工具箱', to: '/tools' },

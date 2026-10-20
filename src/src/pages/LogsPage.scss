@@ -18,15 +18,19 @@
 .back-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  gap: 4px;
+  padding: 5px 10px 5px 8px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
   font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  flex-shrink: 0;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
 
   &:hover {
     background: var(--bg-card-hover);
@@ -34,11 +38,21 @@
   }
 }
 
-.logs-header h2 {
-  font-size: 15px;
+.logs-titles {
+  min-width: 0;
+}
+
+.logs-header h1 {
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
+}
+
+.logs-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 0;
 }
 
 .logs-actions {

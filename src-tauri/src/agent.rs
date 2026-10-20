@@ -1511,15 +1511,20 @@ pub async fn agent_start_run(
     Ok(session_id)
 }
 
-/// 取消当前 Run（停止不再启动新工具调用；进行中的模型流被中断）
+/// 取消当前 Run（停止不再启动新工具调用；进行中的模型流被中断）。
+/// 返回是否确实取消了活跃 Run：发送后的启动准备阶段（checkpoint/存储写入）
+/// 尚未登记 active 时取消是空操作，前端据此给出可见反馈而不是静默失败。
 #[tauri::command]
-pub fn agent_cancel(state: State<'_, AgentState>) {
+pub fn agent_cancel(state: State<'_, AgentState>) -> bool {
     // Do not clear active until the receiver has drained the persistence tail.
     let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, handle)) = active.as_ref() {
         handle.cancel();
         state.hub.drop_all();
         state.questions.drop_all();
+        true
+    } else {
+        false
     }
 }
 

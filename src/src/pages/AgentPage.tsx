@@ -746,7 +746,10 @@ export default function AgentPage() {
   const handleStop = useCallback(async () => {
     if (useAgentStore.getState().settling || useAgentStore.getState().sessionBusy) return;
     try {
-      await invoke('agent_cancel');
+      // 启动准备阶段（checkpoint / 存储写入）尚未登记 active 时取消是空操作：
+      // 明确告知而不是静默失败，让用户知道为什么没有反应。
+      const cancelled = await invoke<boolean>('agent_cancel');
+      if (!cancelled) setError('没有可停止的运行中任务（若刚发送，仍在准备阶段，请稍候）');
     } catch (error) {
       setError(`停止失败：${String(error)}`);
     }

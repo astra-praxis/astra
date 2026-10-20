@@ -14,6 +14,8 @@ function load(listen = async () => () => {}, invoke = async () => {}, localStora
   const exports = {};
   vm.runInNewContext(outputText, {
     exports, console, localStorage,
+    // settling 看门狗用；unref 让 node --test 进程不被挂起的定时器钉住
+    setInterval: (fn, ms) => setInterval(fn, ms).unref(),
     require: (id) => {
       if (id === 'zustand') return require('zustand');
       if (id === '@tauri-apps/api/core') return { invoke };

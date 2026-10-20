@@ -1179,6 +1179,33 @@ function settleRun(payload: AgentSettledPayload): void {
   else if (parked && parked.running) void saveSessionSnapshot(payload.session_id, parked);
 }
 
+// ===== settling 自愈看门狗 =====
+// terminal 事件 → agent-run-settled 之间的屏障（write-through）正常亚秒级；
+// 超过阈值仍 settling 说明 settled 事件丢失或后端屏障卡住，主动向后端对账
+// （refreshAgentStatus）把 UI 恢复到真实状态，避免「永远 loading / 停止按钮
+// 永远灰」只能重启应用。
+const SETTLE_WATCHDOG_MS = 30_000;
+const settlingArmedAt = new Map<string, number>();
+let settleWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 标记会话进入 settling；看门狗超时后向后端对账。新一轮 Run 会刷新时间戳。 */
+function armSettleWatchdog(sessionId: string): void {
+  settlingArmedAt.set(sessionId, Date.now());
+  if (settleWatchdogTimer !== null) return;
+  settleWatchdogTimer = setInterval(() => {
+    const st = useAgentStore.getState();
+    const candidates: string[] = [];
+    if (st.settling) candidates.push(st.sessionId);
+    for (const [id, p] of Object.entries(st.parked)) if (p.settling) candidates.push(id);
+    for (const id of candidates) {
+      const armedAt = settlingArmedAt.get(id);
+      if (armedAt === undefined || Date.now() - armedAt < SETTLE_WATCHDOG_MS) continue;
+      settlingArmedAt.delete(id);
+      void refreshAgentStatus();
+    }
+  }, SETTLE_WATCHDOG_MS / 3);
+}
+
 // Status is a snapshot, not an event: never let an older request overwrite a new Run/settlement.
 let lifecycleRevision = 0;
 let statusRequest = 0;
@@ -1223,6 +1250,7 @@ export async function refreshAgentStatus(): Promise<void> {
       } else if (st.parked[sid]) {
         // 运行中的会话当前处于驻留态：保持事件路由生效
         const p = st.parked[sid]!;
+        armSettleWatchdog(sid);
         useAgentStore.setState((s) => ({
           parked: {
             ...s.parked,
@@ -1248,6 +1276,7 @@ export async function refreshAgentStatus(): Promise<void> {
           error: persistenceMessage(status.persistence_errors[sid]),
           lastActive: Date.now(),
         };
+        armSettleWatchdog(sid);
         useAgentStore.setState((s) => ({
           parked: { ...s.parked, [sid]: recovered },
           openTabs: s.openTabs.includes(sid) ? s.openTabs : [...s.openTabs, sid],
@@ -1283,9 +1312,12 @@ export function ensureAgentListeners(): Promise<void> {
           if (st.settling) return;
           const next = reduceAgentEvent(st, e.payload);
           if (next === st) return;
-          useAgentStore.setState(isTerminal(e.payload)
-            ? { ...next, running: true, settling: true, status: 'persisting' }
-            : next);
+          if (isTerminal(e.payload)) {
+            armSettleWatchdog(e.payload.session_id);
+            useAgentStore.setState({ ...next, running: true, settling: true, status: 'persisting' });
+          } else {
+            useAgentStore.setState(next);
+          }
           return;
         }
         // 非激活会话：路由到驻留快照（运行中的 parked 会话持续吸收事件，切回零重建）
@@ -1293,6 +1325,7 @@ export function ensureAgentListeners(): Promise<void> {
         if (!p || p.settling) return;
         const next = reduceAgentEvent(p, e.payload);
         if (next === p) return;
+        if (isTerminal(e.payload)) armSettleWatchdog(p.sessionId);
         useAgentStore.setState((s) => ({
           parked: {
             ...s.parked,

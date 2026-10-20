@@ -63,18 +63,37 @@ export type ToolStatus = 'running' | 'completed' | 'failed' | 'denied' | 'interr
 
 export type PermState = 'pending' | 'allowed' | 'denied' | 'expired';
 
+/**
+ * 条目稳定 ID：创建时生成、终身不变。
+ * React key（及未来虚拟化列表的测量缓存）按它关联——数组下标在条目中间
+ * 变更（checkpoint 回退 / 消息编辑重发）时会整体错位，导致高度缓存张冠李戴。
+ */
+export interface EntryIdent {
+  id: string;
+}
+
+let entrySeq = 0;
+export function newEntryId(): string {
+  return `e${Date.now().toString(36)}-${(entrySeq++).toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** 创建条目的统一入口：在此分配稳定 ID */
+export function withId<T extends object>(entry: T): T & EntryIdent {
+  return { ...entry, id: newEntryId() };
+}
+
 export type Entry =
-  | { kind: 'notice'; text: string }
-  | { kind: 'user'; text: string; images?: UserImage[] }
-  | { kind: 'assistant'; text: string; streaming: boolean }
-  | {
+  | ({ kind: 'notice'; text: string } & EntryIdent)
+  | ({ kind: 'user'; text: string; images?: UserImage[] } & EntryIdent)
+  | ({ kind: 'assistant'; text: string; streaming: boolean } & EntryIdent)
+  | ({
       /** 模型思考过程（reasoning），流式追加；参考 Zed 的 thinking 块 */
       kind: 'thinking';
       text: string;
       /** 思考结束（后续事件到达即视为结束）；历史恢复的条目缺省视为已完成 */
       done?: boolean;
-    }
-  | {
+    } & EntryIdent)
+  | ({
       kind: 'tool';
       callId: string;
       toolName: string;
@@ -88,15 +107,15 @@ export type Entry =
       perm?: { state: PermState; summary: string };
       /** 参数流式生成中的原始 JSON 累计（tool_call_args_delta 到来时更新） */
       argsStreaming?: string;
-    }
-  | {
+    } & EntryIdent)
+  | ({
       kind: 'permission';
       callId: string;
       toolName: string;
       summary: string;
       state: PermState;
-    }
-  | {
+    } & EntryIdent)
+  | ({
       kind: 'question';
       questionId: string;
       question: string;
@@ -106,8 +125,8 @@ export type Entry =
       answer?: string;
       /** 用户取消/拒绝回答 */
       declined?: boolean;
-    }
-  | { kind: 'terminal'; outcome: 'completed' | 'failed'; text?: string };
+    } & EntryIdent)
+  | ({ kind: 'terminal'; outcome: 'completed' | 'failed'; text?: string } & EntryIdent);
 
 /** 用户附带图片（规范 PNG 的 base64 与尺寸，与后端 AgentImageInput / NormalizedImage 对齐） */
 export interface UserImage {
@@ -150,9 +169,15 @@ function parseAutoCompact(raw: string | null | undefined): number {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 60000;
 }
 
+/** 为缺 id 的条目补稳定 ID（旧会话 JSON 无 id 字段，加载/恢复时一次性回填） */
+function ensureId<T extends { id?: string }>(e: T): T & { id: string } {
+  return e.id ? (e as T & { id: string }) : { ...e, id: newEntryId() };
+}
+
 /** 终态和历史回放共用：不让遗留卡片继续等待或可操作。 */
 export function normalizeEntries(entries: Entry[]): Entry[] {
-  return entries.map((e): Entry => {
+  return entries.map((raw): Entry => {
+    const e = ensureId(raw);
     if (e.kind === 'assistant') return e.streaming ? { ...e, streaming: false } : e;
     if (e.kind === 'thinking') return e.done ? e : { ...e, done: true };
     if (e.kind === 'tool') return {
@@ -288,7 +313,7 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
         next[next.length - 1] = { ...last, text: last.text + text };
         return next;
       }
-      return [...prev, { kind: 'assistant', text, streaming: true }];
+      return [...prev, withId({ kind: 'assistant' as const, text, streaming: true })];
     }
     case 'thinking_delta': {
       // 思考增量：追加到末尾的 thinking 条目（参考 Zed 的 thinking 块）
@@ -299,7 +324,7 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
         next[next.length - 1] = { ...last, text: last.text + text };
         return next;
       }
-      return [...prev, { kind: 'thinking', text }];
+      return [...prev, withId({ kind: 'thinking' as const, text })];
     }
     case 'tool_call_args_delta': {
       // 参数流式生成：fragment 为空 = 首帧（建卡），非空 = 追加原始 JSON 片段。
@@ -316,28 +341,28 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
       }
       return [
         ...prev,
-        {
+        withId({
           kind: 'tool' as const,
           callId: env.tool_call_id!,
           toolName: env.tool_name ?? '',
           argsSummary: '',
           status: 'running' as const,
           argsStreaming: fragment,
-        },
+        }),
       ];
     }
     case 'tool_call_started': {
       const rest = prev.filter((e) => !(e.kind === 'tool' && e.callId === env.tool_call_id));
       return [
         ...rest,
-        {
-          kind: 'tool',
+        withId({
+          kind: 'tool' as const,
           callId: env.tool_call_id!,
           toolName: env.tool_name!,
           argsSummary: env.args_summary ?? '',
           args: env.args,
-          status: 'running',
-        },
+          status: 'running' as const,
+        }),
       ];
     }
     case 'tool_call_completed':
@@ -372,13 +397,13 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
       if (exists) return prev;
       return [
         ...prev,
-        {
-          kind: 'permission',
+        withId({
+          kind: 'permission' as const,
           callId: env.tool_call_id!,
           toolName: env.tool_name!,
           summary: env.summary ?? '',
-          state: 'pending',
-        },
+          state: 'pending' as const,
+        }),
       ];
     }
     case 'permission_decided':
@@ -404,16 +429,16 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
           return closed;
         }
         // 没有文本产出的 Run（如全部工具失败）：补一条终态
-        return [...closed, { kind: 'terminal', outcome: 'completed' }];
+        return [...closed, withId({ kind: 'terminal' as const, outcome: 'completed' as const })];
       }
       if (env.type === 'run_failed') {
-        return [...closed, { kind: 'terminal', outcome: 'failed', text: env.error }];
+        return [...closed, withId({ kind: 'terminal' as const, outcome: 'failed' as const, text: env.error })];
       }
       // run_cancelled：不追加“已取消”终态条目，直接收尾（用户主动停止无需提示）
       return closed;
     }
     case 'compaction_completed':
-      return [...prev, { kind: 'notice', text: '上下文已压缩' }];
+      return [...prev, withId({ kind: 'notice' as const, text: '上下文已压缩' })];
     default:
       return prev;
   }
@@ -645,7 +670,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       entries: [
         ...s.entries,
         // 纯图片消息合法；无图时不写字段，保持旧会话 JSON 形状不变
-        ...(images && images.length > 0 ? [{ kind: 'user' as const, text, images }] : [{ kind: 'user' as const, text }]),
+        ...(images && images.length > 0
+          ? [withId({ kind: 'user' as const, text, images })]
+          : [withId({ kind: 'user' as const, text })]),
       ],
       isDraft: false,
       // 首条消息触发：隐式草稿补上 tab 转正
@@ -666,19 +693,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }),
     ),
   pushTerminal: (outcome, text) =>
-    set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), { kind: 'terminal', outcome, text }] })),
+    set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), withId({ kind: 'terminal' as const, outcome, text })] })),
   pushQuestion: (q) =>
     set((s) => {
       // 幂等防御：同一 questionId 只入列一次（防事件层重复投递）
       const dup = (entries: Entry[]) =>
         entries.some((e) => e.kind === 'question' && e.questionId === q.question_id);
-      const card = {
+      const card = withId({
         kind: 'question' as const,
         questionId: q.question_id,
         question: q.question,
         options: q.options,
         allowFreeText: q.allow_free_text,
-      };
+      });
       if (q.session_id === s.sessionId) {
         if (!s.running || s.settling || dup(s.entries)) return s;
         return { entries: [...s.entries, card] };

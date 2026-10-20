@@ -54,6 +54,7 @@ import {
   type ThinkingEffort,
   type UserImage,
   userImageUrl,
+  withId,
 } from '@/stores/agent';
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter } from '@/hooks/useMention';
@@ -135,9 +136,11 @@ function chatMessageToEntries(messages: Array<Record<string, unknown>>): Entry[]
     const text = textParts.join('');
     if (role === 'user') {
       if (!text && images.length === 0) continue;
-      entries.push(images.length > 0 ? { kind: 'user', text, images } : { kind: 'user', text });
+      entries.push(
+        withId(images.length > 0 ? { kind: 'user' as const, text, images } : { kind: 'user' as const, text }),
+      );
     } else if (role === 'assistant' && text) {
-      entries.push({ kind: 'assistant', text, streaming: false });
+      entries.push(withId({ kind: 'assistant' as const, text, streaming: false }));
     }
   }
   return entries;
@@ -1075,7 +1078,7 @@ export default function AgentPage() {
 
             {entries.map((e, i) => (
               <EntryView
-                key={i}
+                key={e.id}
                 entry={e}
                 index={i}
                 isLast={i === entries.length - 1}

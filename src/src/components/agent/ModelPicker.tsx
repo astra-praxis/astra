@@ -22,8 +22,8 @@ type RecentEntry =
 
 const RECENT_KEY = 'astra-agent-mpick-recent';
 const RECENT_MAX = 6;
-/** 大分组默认展开的模型数；超出折叠，可一键展开 */
-const GROUP_PREVIEW = 6;
+/** 分组收起状态（localStorage 持久化，跨会话记忆） */
+const COLLAPSED_KEY = 'astra-agent-mpick-collapsed';
 
 function loadRecents(): RecentEntry[] {
   try {
@@ -32,6 +32,16 @@ function loadRecents(): RecentEntry[] {
     return Array.isArray(parsed) ? parsed.slice(0, RECENT_MAX) : [];
   } catch {
     return [];
+  }
+}
+
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
   }
 }
 
@@ -68,8 +78,8 @@ export default function ModelPicker() {
   const [query, setQuery] = useState('');
   // 最近使用（打开弹层时读取一次；选择后更新）
   const [recents, setRecents] = useState<RecentEntry[]>([]);
-  // 大分组展开状态（按 provider id）
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // 分组收起状态（localStorage 持久化；key：provider id / 'local'）
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // 键盘指向：可见 .mpick__item 序列中的下标（命令式高亮，避免随渲染重建）
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const kbdIdxRef = useRef(-1);
@@ -127,7 +137,7 @@ export default function ModelPicker() {
     if (!open) return;
     setQuery('');
     setRecents(loadRecents());
-    setExpanded(new Set());
+    setCollapsed(loadCollapsed());
     // 等弹层渲染完成后聚焦，直接可打字搜索
     requestAnimationFrame(() => searchRef.current?.focus());
     void useChatToolbarStore.getState().refreshRunningModels();
@@ -142,6 +152,21 @@ export default function ModelPicker() {
         .catch(() => setProviderModels((prev) => ({ ...prev, [p.id]: [] })));
     }
   }, [open, providers]);
+
+  /** 展开/收起分组；状态持久化到 localStorage */
+  function toggleGroup(id: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        /* 忽略持久化失败 */
+      }
+      return next;
+    });
+  }
 
   function pickLocal(port: number, name?: string) {
     const st = useChatToolbarStore.getState();
@@ -312,19 +337,42 @@ export default function ModelPicker() {
 
           {hitLocal.length > 0 && (
             <div className="mpick__group">
-              <div className="mpick__group-name">
+              <button
+                type="button"
+                className="mpick__group-name"
+                onClick={() => toggleGroup('local')}
+                aria-expanded={!collapsed.has('local')}
+              >
+                <ChevronDown
+                  size={12}
+                  strokeWidth={2.2}
+                  className={`mpick__group-chev${collapsed.has('local') ? '' : ' is-open'}`}
+                />
                 本地模型
-                <button
-                  type="button"
+                <span className="mpick__group-count">{hitLocal.length}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
                   className="mpick__refresh"
-                  onClick={() => void useChatToolbarStore.getState().refreshRunningModels()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void useChatToolbarStore.getState().refreshRunningModels();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void useChatToolbarStore.getState().refreshRunningModels();
+                    }
+                  }}
                   title="刷新运行中的本地模型"
                   aria-label="刷新本地模型"
                 >
                   <RefreshCw size={11} strokeWidth={2.2} />
-                </button>
-              </div>
-              {hitLocal.map((m) => {
+                </span>
+              </button>
+              {!collapsed.has('local') &&
+                hitLocal.map((m) => {
                 const active = sourceType === 'model' && selectedModelPort === m.port;
                 return (
                   <button
@@ -345,27 +393,34 @@ export default function ModelPicker() {
 
           {hitProviders.map(({ provider: p, models }) => {
             const currentModel = overrideModelName ?? p.active_model;
-            // 大分组折叠：超过 GROUP_PREVIEW 时只展示前 N 个，搜索时全量展示
-            const isExpanded = expanded.has(p.id) || q !== '';
+            const isCollapsed = collapsed.has(p.id) && q === '';
             const modelList = Array.isArray(models) ? models : [];
-            const visibleModels = isExpanded ? modelList : modelList.slice(0, GROUP_PREVIEW);
-            const hiddenCount = isExpanded ? 0 : modelList.length - GROUP_PREVIEW;
             return (
               <div className="mpick__group" key={p.id}>
-                <div className="mpick__group-name">
+                <button
+                  type="button"
+                  className="mpick__group-name"
+                  onClick={() => toggleGroup(p.id)}
+                  aria-expanded={!isCollapsed}
+                >
+                  <ChevronDown
+                    size={12}
+                    strokeWidth={2.2}
+                    className={`mpick__group-chev${isCollapsed ? '' : ' is-open'}`}
+                  />
                   {p.name}
                   {modelList.length > 0 && (
                     <span className="mpick__group-count">{modelList.length}</span>
                   )}
-                </div>
-                {models === undefined || models === 'loading' ? (
-                  <div className="mpick__hint">
-                    <Loader2 size={11} strokeWidth={2.2} className="mpick__spin" />
-                    加载中…
-                  </div>
-                ) : (
-                  <>
-                    {visibleModels.map((m) => {
+                </button>
+                {!isCollapsed &&
+                  (models === undefined || models === 'loading' ? (
+                    <div className="mpick__hint">
+                      <Loader2 size={11} strokeWidth={2.2} className="mpick__spin" />
+                      加载中…
+                    </div>
+                  ) : (
+                    modelList.map((m) => {
                       const active =
                         sourceType === 'provider' && selectedProviderId === p.id && currentModel === m.id;
                       return (
@@ -381,21 +436,8 @@ export default function ModelPicker() {
                           <span className="mpick__item-label mono">{m.id}</span>
                         </button>
                       );
-                    })}
-                    {hiddenCount > 0 && (
-                      <button
-                        type="button"
-                        className="mpick__more"
-                        onClick={() =>
-                          setExpanded((prev) => new Set(prev).add(p.id))
-                        }
-                      >
-                        显示全部 {modelList.length} 个模型
-                        <ChevronDown size={11} strokeWidth={2.2} />
-                      </button>
-                    )}
-                  </>
-                )}
+                    })
+                  ))}
               </div>
             );
           })}

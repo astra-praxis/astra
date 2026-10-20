@@ -22,6 +22,7 @@ export interface ProviderConfig {
   base_url: string;
   api_key: string;
   active_model: string | null;
+  kind: 'openai' | 'anthropic';
 }
 
 export interface ModelInfo {
@@ -105,6 +106,7 @@ export const useChatToolbarStore = create<ChatToolbarState>((set, get) => ({
       const models = await invoke<ModelInfo[]>('fetch_provider_models', {
         baseUrl: provider.base_url,
         apiKey: provider.api_key,
+        kind: provider.kind,
       });
       const validIds = new Set(models.map((m) => m.id));
       const override = get().overrideModelName;

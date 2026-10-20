@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use agent_core::model::AnthropicBackend;
 use agent_core::model::ImageContent;
 use agent_core::skill_tools::truncate_desc;
 use agent_core::{
@@ -1190,12 +1191,14 @@ pub async fn agent_start_run(
         .open(&directory, Arc::clone(&state.persistence_errors))
         .await?;
 
-    // 1. 模型来源（URL 约定与 chat.rs 一致）
-    let (base_url, api_key, model_name) = if let Some(port) = req.model_port {
+    // 1. 模型来源（URL 约定与 chat.rs 一致）。kind 决定后端协议：
+    // openai = chat/completions（本地端口与旧数据默认），anthropic = Messages API。
+    let (base_url, api_key, model_name, anthropic) = if let Some(port) = req.model_port {
         (
             format!("http://localhost:{port}/v1"),
             String::new(),
             req.model.unwrap_or_else(|| "local".into()),
+            false,
         )
     } else if let Some(pid) = &req.provider_id {
         let p = providers::get_provider_inner(&app, pid)?;
@@ -1203,9 +1206,18 @@ pub async fn agent_start_run(
             .model
             .or(p.active_model)
             .ok_or_else(|| format!("provider '{}' 没有设置活动模型", pid))?;
-        (p.base_url, p.api_key, model)
+        let anthropic = p.kind == crate::providers::ProviderKind::Anthropic;
+        (p.base_url, p.api_key, model, anthropic)
     } else {
         return Err("请先选择模型来源".into());
+    };
+    // bind_image_config 的目的地键：协议类型参与变更判定（同一 endpoint+model
+    // 在两种协议间切换也必须重建 Thread）。openai 保持裸 URL，旧会话记录不因
+    // 本次升级产生虚假的目的地变更。
+    let dest_endpoint = if anthropic {
+        format!("anthropic://{base_url}")
+    } else {
+        base_url.clone()
     };
 
     // 2. 项目根（提供了但无效 → 明确报错，不静默降级为纯聊天）
@@ -1240,7 +1252,12 @@ pub async fn agent_start_run(
         .unwrap_or_default();
 
     let dest_changed = threads
-        .bind_image_config(&session_id, req.image_recognition, &base_url, &model_name)
+        .bind_image_config(
+            &session_id,
+            req.image_recognition,
+            &dest_endpoint,
+            &model_name,
+        )
         .await?;
 
     // 2.6 多模态 M5（MULTIMODAL_SPEC §10）：读取生成配置并按需构建 provider。
@@ -1305,10 +1322,16 @@ pub async fn agent_start_run(
             config.texts = std::sync::Arc::new(agent_core::TextPack::zh());
             config.thinking_enabled = req.thinking_enabled;
             config.thinking_effort = req.thinking_effort.clone();
-            let backend: Arc<dyn ModelBackend> = Arc::new(
-                RigBackend::new(base_url, api_key, model_name)
-                    .with_image_encoding(image_encoding(req.image_recognition)),
-            );
+            // Anthropic 原生 Messages API 后端（vision/tool_call 为协议内建
+            // 能力，无需 image_encoding 开关）；其余走 OpenAI 兼容 SSE。
+            let backend: Arc<dyn ModelBackend> = if anthropic {
+                Arc::new(AnthropicBackend::new(base_url, api_key, model_name))
+            } else {
+                Arc::new(
+                    RigBackend::new(base_url, api_key, model_name)
+                        .with_image_encoding(image_encoding(req.image_recognition)),
+                )
+            };
             let bridge: Arc<dyn PermissionBridge> = Arc::new(HubBridge {
                 hub: Arc::clone(&state.hub),
                 app: app.clone(),

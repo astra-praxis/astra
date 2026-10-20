@@ -240,6 +240,49 @@
   white-space: nowrap;
 }
 
+.providers-page__meta-tag--kind {
+  font-family: inherit;
+  color: var(--accent);
+  max-width: none;
+}
+
+// ===== 接口类型分段选择（添加/编辑弹窗共用） =====
+.kind-seg {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.kind-seg__btn {
+  flex: 1;
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--bg-subtle);
+  }
+
+  & + & {
+    border-left: 1px solid var(--border);
+  }
+
+  &--active {
+    color: var(--text-inverse);
+    background: var(--accent);
+
+    &:hover {
+      background: var(--accent);
+    }
+  }
+}
+
 .providers-page__details {
   display: flex;
   flex-direction: column;

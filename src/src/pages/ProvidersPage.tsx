@@ -8,15 +8,23 @@ import Modal from '@/components/ui/Modal';
 import './ProvidersPage.scss';
 
 // ===== 类型 =====
+type ProviderKind = 'openai' | 'anthropic';
+
 interface ProviderConfig {
   id: string;
   name: string;
   base_url: string;
   api_key: string;
   active_model: string | null;
+  kind: ProviderKind;
   created_at: number;
   updated_at: number;
 }
+
+const KIND_LABEL: Record<ProviderKind, string> = {
+  openai: 'OpenAI 兼容',
+  anthropic: 'Anthropic',
+};
 
 export default function ProvidersPage() {
   const navigate = useNavigate();
@@ -33,6 +41,7 @@ export default function ProvidersPage() {
   const [newName, setNewName] = useState('');
   const [newBaseUrl, setNewBaseUrl] = useState('');
   const [newApiKey, setNewApiKey] = useState('');
+  const [newKind, setNewKind] = useState<ProviderKind>('openai');
   const [formError, setFormError] = useState('');
   const [formSaving, setFormSaving] = useState(false);
   const [testing, setTesting] = useState<ProviderConfig | null>(null);
@@ -43,6 +52,7 @@ export default function ProvidersPage() {
   const [editName, setEditName] = useState('');
   const [editBaseUrl, setEditBaseUrl] = useState('');
   const [editApiKey, setEditApiKey] = useState('');
+  const [editKind, setEditKind] = useState<ProviderKind>('openai');
   const [editError, setEditError] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
@@ -69,6 +79,7 @@ export default function ProvidersPage() {
     setNewName('');
     setNewBaseUrl('');
     setNewApiKey('');
+    setNewKind('openai');
     setFormError('');
     setFormSaving(false);
     setShowAddModal(true);
@@ -92,6 +103,7 @@ export default function ProvidersPage() {
         baseUrl: newBaseUrl.trim(),
         apiKey: newApiKey.trim(),
         activeModel: null,
+        kind: newKind,
       });
       setShowAddModal(false);
       await loadProviders();
@@ -109,6 +121,7 @@ export default function ProvidersPage() {
     setEditName(provider.name);
     setEditBaseUrl(provider.base_url);
     setEditApiKey(provider.api_key);
+    setEditKind(provider.kind);
     setEditError('');
     setEditSaving(false);
     setShowEditModal(true);
@@ -134,6 +147,7 @@ export default function ProvidersPage() {
         baseUrl: editBaseUrl.trim(),
         apiKey: editApiKey.trim(),
         activeModel: editTarget.active_model,
+        kind: editKind,
       });
       setShowEditModal(false);
       setEditTarget(null);
@@ -168,6 +182,7 @@ export default function ProvidersPage() {
       const models = await invoke<unknown[]>('fetch_provider_models', {
         baseUrl: provider.base_url,
         apiKey: provider.api_key,
+        kind: provider.kind,
       });
       if (models.length > 0) {
         alert(`连接成功！发现 ${models.length} 个可用模型`);
@@ -196,7 +211,7 @@ export default function ProvidersPage() {
             返回设置
           </Link>
           <h1 className="providers-page__title">AI 服务商</h1>
-          <p className="providers-page__subtitle">配置 OpenAI 兼容的服务商与 API 密钥</p>
+          <p className="providers-page__subtitle">配置 OpenAI 兼容 / Anthropic 服务商与 API 密钥</p>
         </div>
         <div className="providers-page__actions">
           <button
@@ -253,6 +268,9 @@ export default function ProvidersPage() {
                       <h3 className="providers-page__name">{provider.name}</h3>
                       <div className="providers-page__meta">
                         <span className="providers-page__meta-tag">{provider.base_url}</span>
+                        <span className="providers-page__meta-tag providers-page__meta-tag--kind">
+                          {KIND_LABEL[provider.kind] ?? 'OpenAI 兼容'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -345,6 +363,30 @@ export default function ProvidersPage() {
         >
           {formError && <div className="form-error">{formError}</div>}
           <div className="form-group">
+            <label>接口类型</label>
+            <div className="kind-seg">
+              <button
+                type="button"
+                className={`kind-seg__btn ${newKind === 'openai' ? 'kind-seg__btn--active' : ''}`}
+                onClick={() => setNewKind('openai')}
+              >
+                OpenAI 兼容
+              </button>
+              <button
+                type="button"
+                className={`kind-seg__btn ${newKind === 'anthropic' ? 'kind-seg__btn--active' : ''}`}
+                onClick={() => setNewKind('anthropic')}
+              >
+                Anthropic
+              </button>
+            </div>
+            <p className="input-hint">
+              {newKind === 'anthropic'
+                ? 'Anthropic 原生 Messages API，走 x-api-key 认证'
+                : '适用于 OpenAI 兼容网关与本地服务（默认）'}
+            </p>
+          </div>
+          <div className="form-group">
             <label>名称</label>
             <input
               type="text"
@@ -359,10 +401,10 @@ export default function ProvidersPage() {
               type="text"
               value={newBaseUrl}
               onChange={(e) => setNewBaseUrl(e.target.value)}
-              placeholder="http://gateway.internal:8002/v1"
+              placeholder={newKind === 'anthropic' ? 'https://api.anthropic.com/v1' : 'http://gateway.internal:8002/v1'}
             />
             <p className="input-hint">
-              OpenAI 兼容的 API 地址，通常以 <code>/v1</code> 结尾
+              API 地址，通常以 <code>/v1</code> 结尾
             </p>
           </div>
           <div className="form-group">
@@ -395,6 +437,30 @@ export default function ProvidersPage() {
         >
           {editError && <div className="form-error">{editError}</div>}
           <div className="form-group">
+            <label>接口类型</label>
+            <div className="kind-seg">
+              <button
+                type="button"
+                className={`kind-seg__btn ${editKind === 'openai' ? 'kind-seg__btn--active' : ''}`}
+                onClick={() => setEditKind('openai')}
+              >
+                OpenAI 兼容
+              </button>
+              <button
+                type="button"
+                className={`kind-seg__btn ${editKind === 'anthropic' ? 'kind-seg__btn--active' : ''}`}
+                onClick={() => setEditKind('anthropic')}
+              >
+                Anthropic
+              </button>
+            </div>
+            <p className="input-hint">
+              {editKind === 'anthropic'
+                ? 'Anthropic 原生 Messages API，走 x-api-key 认证'
+                : '适用于 OpenAI 兼容网关与本地服务（默认）'}
+            </p>
+          </div>
+          <div className="form-group">
             <label>名称</label>
             <input
               type="text"
@@ -409,10 +475,10 @@ export default function ProvidersPage() {
               type="text"
               value={editBaseUrl}
               onChange={(e) => setEditBaseUrl(e.target.value)}
-              placeholder="http://gateway.internal:8002/v1"
+              placeholder={editKind === 'anthropic' ? 'https://api.anthropic.com/v1' : 'http://gateway.internal:8002/v1'}
             />
             <p className="input-hint">
-              OpenAI 兼容的 API 地址，通常以 <code>/v1</code> 结尾
+              API 地址，通常以 <code>/v1</code> 结尾
             </p>
           </div>
           <div className="form-group">

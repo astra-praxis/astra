@@ -88,7 +88,11 @@ export default function ModelPicker() {
     void useChatToolbarStore.getState().refreshRunningModels();
     for (const p of providers) {
       setProviderModels((prev) => ({ ...prev, [p.id]: 'loading' }));
-      invoke<ModelInfo[]>('fetch_provider_models', { baseUrl: p.base_url, apiKey: p.api_key })
+      invoke<ModelInfo[]>("fetch_provider_models", {
+        baseUrl: p.base_url,
+        apiKey: p.api_key,
+        kind: p.kind,
+      })
         .then((models) => setProviderModels((prev) => ({ ...prev, [p.id]: models })))
         .catch(() => setProviderModels((prev) => ({ ...prev, [p.id]: [] })));
     }

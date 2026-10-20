@@ -5,6 +5,16 @@ use tauri::{AppHandle, Manager};
 
 // ===== 类型定义 =====
 
+/// 服务商协议类型。`openai` = OpenAI 兼容（chat/completions，默认，兼容旧
+/// providers.json）；`anthropic` = Anthropic 原生 Messages API。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    #[default]
+    OpenAi,
+    Anthropic,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub id: String,
@@ -12,6 +22,8 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub api_key: String,
     pub active_model: Option<String>,
+    #[serde(default)]
+    pub kind: ProviderKind,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -26,7 +38,8 @@ pub struct ModelInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelsResponse {
-    pub object: String,
+    /// OpenAI 返回 "list"；Anthropic /models 无此字段 → Option 兼容两种协议
+    pub object: Option<String>,
     pub data: Vec<ModelInfo>,
 }
 
@@ -83,6 +96,7 @@ pub fn save_provider(
     base_url: String,
     api_key: String,
     active_model: Option<String>,
+    kind: Option<ProviderKind>,
 ) -> Result<ProviderConfig, String> {
     let path = ensure_providers_file(&app)?;
 
@@ -99,6 +113,9 @@ pub fn save_provider(
             provider.base_url = base_url;
             provider.api_key = api_key;
             provider.active_model = active_model;
+            if let Some(kind) = kind {
+                provider.kind = kind;
+            }
             provider.updated_at = now;
 
             let result = provider.clone();
@@ -117,6 +134,7 @@ pub fn save_provider(
             base_url,
             api_key,
             active_model,
+            kind: kind.unwrap_or_default(),
             created_at: now,
             updated_at: now,
         };
@@ -155,37 +173,51 @@ pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
 pub async fn fetch_provider_models(
     base_url: String,
     api_key: String,
+    kind: Option<ProviderKind>,
 ) -> Result<Vec<ModelInfo>, String> {
-    // 第一步：优先请求标准的 /models 接口
-    let step1 = try_get_models_list(&base_url, &api_key).await;
-    if let Ok(models) = &step1 {
-        if !models.is_empty() {
-            return Ok(models.clone());
+    match kind.unwrap_or_default() {
+        // Anthropic 原生 /models：x-api-key 认证，无 chat 探测回退
+        // （chat/completions 探测对 Messages API 无意义，只会得到 404）
+        ProviderKind::Anthropic => {
+            try_get_models_list(&base_url, &api_key, ProviderKind::Anthropic).await
+        }
+        ProviderKind::OpenAi => {
+            // 第一步：优先请求标准的 /models 接口
+            let step1 = try_get_models_list(&base_url, &api_key, ProviderKind::OpenAi).await;
+            if let Ok(models) = &step1 {
+                if !models.is_empty() {
+                    return Ok(models.clone());
+                }
+            }
+
+            // 第二步：models 为空 / 请求失败时，回降为探测 chat/completions
+            // 一些 LLM 网关（如本例的 domain=gateway）不在 /models 暴露模型，
+            // 但在请求非法模型名时，错误信息里会给出可用模型列表。
+            let step2 = try_probe_models_via_chat(&base_url, &api_key).await;
+            if let Ok(models) = &step2 {
+                if !models.is_empty() {
+                    return Ok(models.clone());
+                }
+            }
+
+            // 任一步成功但都没数据 → 返回空（让前端提示手动添加）
+            if step1.is_ok() || step2.is_ok() {
+                return Ok(vec![]);
+            }
+
+            // 两步都真正失败 → 返回错误信息（优先第一步的错误）
+            Err(step1.err().unwrap_or_else(|| "获取模型失败".to_string()))
         }
     }
-
-    // 第二步：models 为空 / 请求失败时，回降为探测 chat/completions
-    // 一些 LLM 网关（如本例的 domain=gateway）不在 /models 暴露模型，
-    // 但在请求非法模型名时，错误信息里会给出可用模型列表。
-    let step2 = try_probe_models_via_chat(&base_url, &api_key).await;
-    if let Ok(models) = &step2 {
-        if !models.is_empty() {
-            return Ok(models.clone());
-        }
-    }
-
-    // 任一步成功但都没数据 → 返回空（让前端提示手动添加）
-    if step1.is_ok() || step2.is_ok() {
-        return Ok(vec![]);
-    }
-
-    // 两步都真正失败 → 返回错误信息（优先第一步的错误）
-    Err(step1.err().unwrap_or_else(|| "获取模型失败".to_string()))
 }
 
 // ===== 内部辅助 =====
 
-async fn try_get_models_list(base_url: &str, api_key: &str) -> Result<Vec<ModelInfo>, String> {
+async fn try_get_models_list(
+    base_url: &str,
+    api_key: &str,
+    kind: ProviderKind,
+) -> Result<Vec<ModelInfo>, String> {
     let url = if base_url.ends_with('/') {
         format!("{}models", base_url)
     } else {
@@ -193,9 +225,18 @@ async fn try_get_models_list(base_url: &str, api_key: &str) -> Result<Vec<ModelI
     };
 
     let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+    let mut request = client.get(&url);
+    match kind {
+        ProviderKind::OpenAi => {
+            request = request.header("Authorization", format!("Bearer {}", api_key));
+        }
+        ProviderKind::Anthropic => {
+            request = request
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01");
+        }
+    }
+    let response = request
         .send()
         .await
         .map_err(|e| format!("/models 请求失败: {}", e))?;

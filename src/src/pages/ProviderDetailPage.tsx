@@ -19,15 +19,23 @@ import Modal from '@/components/ui/Modal';
 import './ProviderDetailPage.scss';
 
 // ===== 类型 =====
+type ProviderKind = 'openai' | 'anthropic';
+
 interface ProviderConfig {
   id: string;
   name: string;
   base_url: string;
   api_key: string;
   active_model: string | null;
+  kind: ProviderKind;
   created_at: number;
   updated_at: number;
 }
+
+const KIND_LABEL: Record<ProviderKind, string> = {
+  openai: 'OpenAI 兼容 API',
+  anthropic: 'Anthropic Messages API',
+};
 
 interface ModelInfo {
   id: string;
@@ -57,6 +65,7 @@ export default function ProviderDetailPage() {
   const [editName, setEditName] = useState('');
   const [editBaseUrl, setEditBaseUrl] = useState('');
   const [editApiKey, setEditApiKey] = useState('');
+  const [editKind, setEditKind] = useState<ProviderKind>('openai');
   const [editError, setEditError] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
@@ -66,21 +75,44 @@ export default function ProviderDetailPage() {
   const copyTimerRef = useRef<number | null>(null);
   const configTimerRef = useRef<number | null>(null);
 
-  // ===== 派生 =====
-  const curlExample = provider
-    ? `curl ${provider.base_url}/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer ${provider.api_key || 'YOUR_API_KEY'}" \\
-  -d '{
+  // ===== 派生：按协议类型生成调用示例 =====
+  const curlExample = !provider
+    ? ''
+    : provider.kind === 'anthropic'
+      ? `curl ${provider.base_url}/messages \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: ${provider.api_key || 'YOUR_API_KEY'}" \\\n  -H "anthropic-version: 2023-06-01" \\\n  -d '{
     "model": "${provider.active_model ?? 'MODEL_NAME'}",
+    "max_tokens": 1024,
     "messages": [
       { "role": "user", "content": "Hello" }
     ]
   }'`
-    : '';
+      : `curl ${provider.base_url}/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${provider.api_key || 'YOUR_API_KEY'}" \\\n  -d '{
+    "model": "${provider.active_model ?? 'MODEL_NAME'}",
+    "messages": [
+      { "role": "user", "content": "Hello" }
+    ]
+  }'`;
 
-  const pythonExample = provider
-    ? `from openai import OpenAI
+  const pythonExample = !provider
+    ? ''
+    : provider.kind === 'anthropic'
+      ? `from anthropic import Anthropic
+
+  client = Anthropic(
+      base_url="${provider.base_url}",
+      api_key="${provider.api_key || 'YOUR_API_KEY'}",
+  )
+
+  message = client.messages.create(
+      model="${provider.active_model ?? 'MODEL_NAME'}",
+      max_tokens=1024,
+      messages=[
+          {"role": "user", "content": "Hello"}
+      ],
+  )
+
+  print(message.content[0].text)`
+      : `from openai import OpenAI
 
   client = OpenAI(
       base_url="${provider.base_url}",
@@ -94,8 +126,7 @@ export default function ProviderDetailPage() {
       ],
   )
 
-  print(response.choices[0].message.content)`
-    : '';
+  print(response.choices[0].message.content)`;
 
   // ===== 模型配置文档 =====
   const modelConfigJson =
@@ -170,6 +201,7 @@ export default function ProviderDetailPage() {
         await invoke<ModelInfo[]>('fetch_provider_models', {
           baseUrl: p.base_url,
           apiKey: p.api_key,
+          kind: p.kind,
         }),
       );
       setModelsLoaded(true);
@@ -218,6 +250,7 @@ export default function ProviderDetailPage() {
     setEditName(provider.name);
     setEditBaseUrl(provider.base_url);
     setEditApiKey(provider.api_key);
+    setEditKind(provider.kind);
     setEditError('');
     setEditSaving(false);
     setShowEditModal(true);
@@ -243,6 +276,7 @@ export default function ProviderDetailPage() {
         baseUrl: editBaseUrl.trim(),
         apiKey: editApiKey.trim(),
         activeModel: provider.active_model,
+        kind: editKind,
       });
       setShowEditModal(false);
       await loadProvider();
@@ -332,7 +366,9 @@ export default function ProviderDetailPage() {
                 <span className="provider-detail__icon">🔌</span>
                 <div>
                   <h1 className="provider-detail__title">{provider.name}</h1>
-                  <p className="provider-detail__subtitle">OpenAI 兼容 API</p>
+                  <p className="provider-detail__subtitle">
+                    {KIND_LABEL[provider.kind] ?? 'OpenAI 兼容 API'}
+                  </p>
                 </div>
               </div>
               <div className="provider-detail__header-actions">
@@ -368,6 +404,12 @@ export default function ProviderDetailPage() {
                 <span className="provider-detail__info-label">当前模型</span>
                 <span className="provider-detail__info-value provider-detail__info-value--mono provider-detail__info-value--highlight">
                   {provider.active_model ?? '未选择'}
+                </span>
+              </div>
+              <div className="provider-detail__info-item">
+                <span className="provider-detail__info-label">接口类型</span>
+                <span className="provider-detail__info-value">
+                  {KIND_LABEL[provider.kind] ?? 'OpenAI 兼容'}
                 </span>
               </div>
               <div className="provider-detail__info-item">
@@ -584,6 +626,30 @@ export default function ProviderDetailPage() {
         >
           {editError && <div className="form-error">{editError}</div>}
           <div className="form-group">
+            <label>接口类型</label>
+            <div className="kind-seg">
+              <button
+                type="button"
+                className={`kind-seg__btn ${editKind === 'openai' ? 'kind-seg__btn--active' : ''}`}
+                onClick={() => setEditKind('openai')}
+              >
+                OpenAI 兼容
+              </button>
+              <button
+                type="button"
+                className={`kind-seg__btn ${editKind === 'anthropic' ? 'kind-seg__btn--active' : ''}`}
+                onClick={() => setEditKind('anthropic')}
+              >
+                Anthropic
+              </button>
+            </div>
+            <p className="input-hint">
+              {editKind === 'anthropic'
+                ? 'Anthropic 原生 Messages API，走 x-api-key 认证'
+                : '适用于 OpenAI 兼容网关与本地服务（默认）'}
+            </p>
+          </div>
+          <div className="form-group">
             <label>名称</label>
             <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} />
           </div>
@@ -593,6 +659,7 @@ export default function ProviderDetailPage() {
               type="text"
               value={editBaseUrl}
               onChange={(e) => setEditBaseUrl(e.target.value)}
+              placeholder={editKind === 'anthropic' ? 'https://api.anthropic.com/v1' : 'http://gateway.internal:8002/v1'}
             />
           </div>
           <div className="form-group">

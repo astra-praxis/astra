@@ -355,6 +355,12 @@ body .content:has(.agent-root) {
   gap: 12px;
 }
 
+// 虚拟化条目包装（react-virtuoso）：条目绝对定位，flex gap 失效，
+// 间距改由条目自身承担（纳入测量高度，滚动定位不累积误差）
+.agent-entries__item {
+  padding-bottom: 12px;
+}
+
 /* ===== 空状态 ===== */
 
 .agent-empty {

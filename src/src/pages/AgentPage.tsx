@@ -7,8 +7,8 @@
  * - 事件流：Tauri `agent-event`（Envelope：type 标签 + snake_case 载荷）
  * - 权限确认卡：批准/拒绝 → agent_permission_decide，UI 状态由 permission_decided 事件回写
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useOutputScroll } from '@/hooks/useOutputScroll';
+import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react';
+import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -386,8 +386,10 @@ export default function AgentPage() {
 
   // ===== 事件订阅：见 stores/agent.ts 的模块级单例（ensureAgentListeners） =====
 
-  // ===== 动作 =====
-  const { viewportRef, contentRef, controller: outputScroll } = useOutputScroll(sessionId);
+  // ===== 滚动（react-virtuoso 虚拟化）：只渲染视口内条目；followOutput 承担粘底跟随，
+  // 上滚离开底部自动暂停、滚回底部自动恢复（Zed 列表 Tail 语义），取代手写 outputScroll =====
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [follow, setFollow] = useState(true);
 
   // ===== 右侧圆点导轨：用户消息快速定位 =====
   const userMsgIdx = useMemo(
@@ -425,36 +427,30 @@ export default function AgentPage() {
   }, [entries]);
   const [activeDot, setActiveDot] = useState(-1);
 
-  /** 滚动时计算当前视口顶部所在的用户提问序号（未过任何提问时为 -1） */
-  const updateActiveDot = useCallback(() => {
-    const viewport = viewportRef.current;
-    const content = contentRef.current;
-    if (!viewport || !content) return;
-    const top = viewport.scrollTop + 80; // 视口顶部附近即视为“当前”
-    let active = -1;
-    for (let n = 0; n < userMsgIdx.length; n++) {
-      const el = content.querySelector<HTMLElement>(`[data-idx="${userMsgIdx[n]}"]`);
-      if (el && el.offsetTop <= top) active = n;
-      else break;
-    }
-    setActiveDot(active);
-  }, [userMsgIdx, viewportRef, contentRef]);
-
-  /** 点击圆点：暂停自动跟随滚动并定位到对应用户消息 */
-  const jumpToEntry = useCallback(
-    (idx: number) => {
-      const el = contentRef.current?.querySelector<HTMLElement>(`[data-idx="${idx}"]`);
-      if (!el) return;
-      outputScroll.pause();
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  /** 可见范围变化时计算活动提问：视口顶部之上最近的用户消息（未过任何提问时为 -1）。
+   *  虚拟化后视口外条目不在 DOM，改用 Virtuoso 的 rangeChanged，不再测 offsetTop */
+  const handleRangeChanged = useCallback(
+    (range: ListRange) => {
+      let active = -1;
+      for (let n = 0; n < userMsgIdx.length; n++) {
+        if (userMsgIdx[n] <= range.startIndex) active = n;
+        else break;
+      }
+      setActiveDot(active);
     },
-    [contentRef, outputScroll],
+    [userMsgIdx],
   );
 
-  // 会话切换或条目变化后重算当前定位（新提问入列时游标跟上）
+  /** 点击圆点：脱离粘底跟随并定位到对应用户消息（scrollToIndex 取代 DOM 查询） */
+  const jumpToEntry = useCallback((idx: number) => {
+    setFollow(false);
+    virtuosoRef.current?.scrollToIndex({ index: idx, align: 'start', behavior: 'smooth' });
+  }, []);
+
+  // 会话切换：重置粘底跟随（Virtuoso 由 initialTopMostItemIndex 定位到末尾）
   useEffect(() => {
-    updateActiveDot();
-  }, [sessionId, entries.length, updateActiveDot]);
+    setFollow(true);
+  }, [sessionId]);
 
   /** /技能名 前缀解析：命中已知技能 → 剥离前缀；/xxx 非法 → 提示并返回 null */
   const parseSendInput = useCallback(
@@ -538,7 +534,7 @@ export default function AgentPage() {
         }
         setEditing(null);
       }
-      outputScroll.resume();
+      setFollow(true);
       setInput('');
       setError('');
       onAdmitted?.();
@@ -572,7 +568,7 @@ export default function AgentPage() {
         pushTerminal('failed', String(e));
       }
     },
-    [projectPath, selectedProvider, systemPrompt, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, outputScroll, editing, rewindToUserTurn],
+    [projectPath, selectedProvider, systemPrompt, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, setFollow, editing, rewindToUserTurn],
   );
 
   const handleSend = useCallback(async () => {
@@ -1049,53 +1045,52 @@ export default function AgentPage() {
         )}
 
         <div className="agent-main">
-          <div className="agent-entries" ref={viewportRef}
-            onScroll={() => {
-              outputScroll.onScroll();
-              updateActiveDot();
-            }}
-            onWheel={(event) => { if (event.deltaY < 0) outputScroll.pause(); }}
-            onTouchMove={() => outputScroll.pause()}
-            onKeyDown={(event) => {
-              if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) outputScroll.pause();
-            }}
-            tabIndex={0}
-          >
-            <div ref={contentRef} className="agent-entries__content" key={sessionId}>
-            {entries.length === 0 && (
-              <div className="agent-empty">
-                <div className="agent-empty__art">
-                  <OrbArt size={128} />
+          {entries.length === 0 ? (
+            // 空会话不需要虚拟化：保留原布局（flex 撑满 + 内容居中）
+            <div className="agent-entries" tabIndex={0}>
+              <div className="agent-entries__content">
+                <div className="agent-empty">
+                  <div className="agent-empty__art">
+                    <OrbArt size={128} />
+                  </div>
+                  <h2>Agent 模式</h2>
+                  <p>
+                    选择项目文件夹后，输入 @ 引用项目内文件，Agent 可以读取并按你的指令执行任务。
+                    <br />
+                    写文件操作会先请求确认；不选项目则为纯聊天。
+                  </p>
                 </div>
-                <h2>Agent 模式</h2>
-                <p>
-                  选择项目文件夹后，输入 @ 引用项目内文件，Agent 可以读取并按你的指令执行任务。
-                  <br />
-                  写文件操作会先请求确认；不选项目则为纯聊天。
-                </p>
               </div>
-            )}
-
-            {entries.map((e, i) => (
-              <EntryView
-                key={e.id}
-                entry={e}
-                index={i}
-                isLast={i === entries.length - 1}
-                fullText={fullRunTexts.get(i)}
-                onDecide={handleDecide}
-                onAnswer={handleAnswer}
-                onEdit={handleEditUserMessage}
-                onFailureRewind={handleFailureRewind}
-                skills={skills}
-                fileSet={fileSet}
-              />
-            ))}
-
-            {running && <StatusLine status={status} />}
-          </div>
-
-          </div>
+            </div>
+          ) : (
+            <Virtuoso
+              key={sessionId}
+              ref={virtuosoRef}
+              className="agent-entries"
+              tabIndex={0}
+              data={entries}
+              initialTopMostItemIndex={entries.length - 1}
+              followOutput={follow ? 'auto' : false}
+              atBottomStateChange={setFollow}
+              rangeChanged={handleRangeChanged}
+              increaseViewportBy={{ top: 480, bottom: 480 }}
+              components={VIRTUOSO_COMPONENTS}
+              itemContent={(i, e) => (
+                <EntryView
+                  entry={e}
+                  index={i}
+                  isLast={i === entries.length - 1}
+                  fullText={fullRunTexts.get(i)}
+                  onDecide={handleDecide}
+                  onAnswer={handleAnswer}
+                  onEdit={handleEditUserMessage}
+                  onFailureRewind={handleFailureRewind}
+                  skills={skills}
+                  fileSet={fileSet}
+                />
+              )}
+            />
+          )}
 
           {/* 右侧圆点导轨：每个用户消息一颗，点击快速定位（悬停预览原文） */}
           {userMsgIdx.length > 0 && (
@@ -1412,6 +1407,25 @@ function AssistantCopyFooter({ text }: { text: string }) {
  * 运行中状态指示：三点脉冲 loading（状态文案与停止操作已按需求移除；
  * 悬停 title 保留当前状态，取消走输入框右侧的停止按钮）
  */
+// Virtuoso 条目包装：虚拟化条目是绝对定位的，原 __content 的 flex gap 改为条目自身 padding
+// （padding-bottom 纳入条目测量高度，滚动定位才不会累积误差）
+const EntryItem = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+  function EntryItem(props, ref) {
+    return <div ref={ref} {...props} className="agent-entries__item" />;
+  },
+);
+
+// 虚拟化列表的 Footer：运行中的状态条。必须用模块级稳定组件订阅 store，
+// 不能在 AgentPage 渲染时内联定义（会因组件引用变化反复重挂导致闪烁）
+function EntriesFooter() {
+  const running = useAgentStore((s) => s.running);
+  const status = useAgentStore((s) => s.status);
+  if (!running) return null;
+  return <StatusLine status={status} />;
+}
+
+const VIRTUOSO_COMPONENTS = { Item: EntryItem, Footer: EntriesFooter };
+
 function StatusLine({ status }: { status: string | null }) {
   return (
     <div className="agent-statusline" title={(status && STATUS_LABEL[status]) || '运行中'}>

@@ -375,13 +375,13 @@ pub fn list_user_skills(app: AppHandle) -> Result<Vec<UserSkillMeta>, String> {
 
 // ===== 内置技能（随应用分发） =====
 
-/// 内置记忆技能：让 agent 知道自己拥有跨会话记忆能力，并提供两个工具
-/// （memory_remember / memory_search）的使用时机与约束。目录名避开常用
-/// 名，降低被 sync_global_skills 同名覆盖的概率。
+/// 内置记忆技能：让 agent 知道自己拥有跨会话记忆能力，并提供三个工具
+/// （memory_remember / memory_search / memory_forget）的使用时机与约束。
+/// 目录名避开常用名，降低被 sync_global_skills 同名覆盖的概率。
 const BUILTIN_MEMORY_SKILL_NAME: &str = "astra-memory";
 const BUILTIN_MEMORY_SKILL_MD: &str = r#"---
 name: astra-memory
-description: Astra 跨会话记忆系统的使用指南。说明自动记忆如何工作，以及 memory_remember（主动记住）与 memory_search（主动查记忆）两个工具何时用、怎么用。当用户要求记住信息、询问之前的决定/偏好/排查经验，或需要判断哪些信息值得长期保存时使用本 skill。
+description: Astra 跨会话记忆系统的使用指南。说明自动记忆如何工作，以及 memory_remember（主动记住）、memory_search（主动查记忆）与 memory_forget（遗忘过时记忆）三个工具何时用、怎么用。当用户要求记住/查找/忘记信息、询问之前的决定/偏好/排查经验，或需要判断哪些信息值得长期保存时使用本 skill。
 ---
 
 # Astra 跨会话记忆
@@ -424,7 +424,35 @@ description: Astra 跨会话记忆系统的使用指南。说明自动记忆如�
 fact=环境/项目事实｜experience=经验/解决方案｜task=待续任务。
 
 注意：写入即生效并永久保存；同一内容重复提交只会强化，不会产生重复。
-当前版本不支持通过工具删除单条记忆，用户要求删除时如实说明此限制。
+
+**复杂经验的内容分层**（经验含多个可复用点时，一条记忆内用固定行结构，
+便于检索与按需展开）：
+
+```
+标题：DOCX 图片 OCR — macOS（一句话，含实体词，便于检索）
+摘要：适用场景与总体策略（一两行）
+执行内容：具体命令、参数、限制、失败恢复方法
+```
+
+正文首行即标题行。检索命中的是标题与摘要，需要执行细节时 agent
+再读全文——不要把命令埋在叙事段落里。
+
+### memory_forget：让过时记忆退出召回
+
+**该用**：
+- 工具路径/环境已变更，旧 fact 不再成立（新事实已写入后，旧的应退出）
+- 决策被用户明确推翻，旧 decision 仍会被自动注入时
+- 用户明确说「别再提这个了」「把这个忘掉」
+
+**用法**：先用 memory_search 拿到记忆 id，再传给 memory_forget。
+
+**不该用**：
+- 不确定是否真的过时——先向用户确认，不要凭猜测遗忘
+- 只是因为检索结果不顺眼——遗忘是不可轻易逆转的上下文变更
+
+**边界**：工具只能逻辑遗忘（立即退出召回，历史行保留供审计）。
+彻底删除（连历史一起清除）只能在用户设置界面操作，用户要求时如实说明。
+遗忘后可用 memory_search 确认已搜不到。
 
 ### memory_search：主动查记忆
 

@@ -394,14 +394,23 @@ pub async fn memory_remember(
     Ok(item_from_memory(memory))
 }
 
-/// 硬删除单条（级联关系与版本链引用）。
+/// 遗忘单条（docs/13 D2 双模式）：默认逻辑遗忘 —— `valid_until = now`，
+/// 立即退出召回但保留行供审计；`purge = true` 才物理删除（级联关系与
+/// 版本链引用）。未知 id 两种模式都返回错误，不静默。
 #[tauri::command]
 pub async fn memory_forget(
     state: tauri::State<'_, crate::agent::AgentState>,
     id: String,
+    purge: Option<bool>,
 ) -> Result<(), String> {
     let host = host_or_err(&state)?;
-    if !host.engine.forget(&id).await.map_err(|e| e.to_string())? {
+    let forgotten = if purge.unwrap_or(false) {
+        host.engine.forget(&id).await
+    } else {
+        host.engine.logically_forget(&id).await
+    }
+    .map_err(|e| e.to_string())?;
+    if !forgotten {
         return Err("memory not found".to_string());
     }
     Ok(())

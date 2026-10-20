@@ -148,7 +148,8 @@ impl AgentTool for MemorySearchTool {
     fn description(&self) -> &str {
         "检索跨会话长期记忆（用户偏好、历史决策、工具经验、项目事实），\
          范围 = 全局 + 当前项目。当用户提到「上次/之前/我记得/我们之前决定的」\
-         且对话上下文里没有答案时，先用它查，不要凭空猜测"
+         且对话上下文里没有答案时，先用它查，不要凭空猜测。结果含记忆 id，\
+         配合 memory_forget 可让过时记忆退出召回"
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -197,8 +198,9 @@ impl AgentTool for MemorySearchTool {
             let kind = hit.memory.kind;
             let content = hit.memory.content.replace('\n', " ");
             lines.push(format!(
-                "- [{}] (confidence {:.2}) {content}",
+                "- [{}] (id={}, confidence {:.2}) {content}",
                 kind_label(kind),
+                hit.memory.id,
                 hit.memory.confidence
             ));
         }
@@ -210,16 +212,88 @@ impl AgentTool for MemorySearchTool {
     }
 }
 
+// ===== memory_forget =====
+
+/// 对话内遗忘：只能逻辑遗忘（立即退出召回，保留行供审计）。物理删除
+/// 不暴露给 agent——删除正文属于用户在 UI 的显式操作，不属于模型权限
+/// （docs/13 D2：物理删除需显式传参，且审计不留正文）。
+pub struct MemoryForgetTool {
+    engine: Arc<MemoryEngine<CmeSqliteStore>>,
+}
+
+impl MemoryForgetTool {
+    pub fn new(engine: Arc<MemoryEngine<CmeSqliteStore>>) -> Self {
+        Self { engine }
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentTool for MemoryForgetTool {
+    fn name(&self) -> &str {
+        "memory_forget"
+    }
+    fn description(&self) -> &str {
+        "让一条已过时/已失效/用户不再希望自动注入的记忆立即退出召回（逻辑遗忘）。\
+         需要 memory_search 先拿到记忆 id。只用于明确的失效场景：工具路径变更、\
+         决策被推翻、用户说「别再提这个了」。不确定时先询问用户，不要凭猜测遗忘"
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "要遗忘的记忆 id（从 memory_search 结果获取；\
+                                    当前搜索结果不含 id 时无法遗忘）"
+                }
+            }
+        })
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::External
+    }
+    fn risk(&self) -> ToolRisk {
+        ToolRisk::Low
+    }
+    async fn call(&self, args: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let _ = ctx;
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| Error::tool("memory_forget", "id 不能为空"))?;
+        let forgotten = self
+            .engine
+            .logically_forget(id)
+            .await
+            .map_err(|e| Error::tool("memory_forget", e.to_string()))?;
+        if forgotten {
+            Ok(ToolOutput::from(
+                "已遗忘：该记忆立即退出自动召回（历史行保留供审计，可用 memory_search 确认）。\
+                 如需彻底删除，请让用户在设置界面操作。"
+                    .to_string(),
+            ))
+        } else {
+            Ok(ToolOutput::from(format!(
+                "未找到 id 为 {id} 的记忆，未做任何更改。请先用 memory_search 确认。"
+            )))
+        }
+    }
+}
+
 // ===== 注册 =====
 
-/// 记忆可用（MemoryHost 初始化成功）时注册两个工具；memory-off 时一个都
+/// 记忆可用（MemoryHost 初始化成功）时注册记忆工具；memory-off 时一个都
 /// 不注册——agent 不会看到无法调用的工具。
 pub fn register(
     reg: agent_core::ToolRegistry,
     engine: Arc<MemoryEngine<CmeSqliteStore>>,
 ) -> agent_core::ToolRegistry {
     reg.register(MemoryRememberTool::new(Arc::clone(&engine)))
-        .register(MemorySearchTool::new(engine))
+        .register(MemorySearchTool::new(Arc::clone(&engine)))
+        .register(MemoryForgetTool::new(engine))
 }
 
 #[cfg(test)]
@@ -294,10 +368,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_adds_both_tools() {
+    async fn register_adds_all_memory_tools() {
         let engine = test_engine();
         let reg = register(agent_core::ToolRegistry::default(), engine);
         assert!(reg.get("memory_remember").is_some());
         assert!(reg.get("memory_search").is_some());
+        assert!(reg.get("memory_forget").is_some());
+    }
+
+    /// 忘记闭环：search 返回 id → forget 逻辑遗忘 → 再搜不到；row 仍可审计。
+    #[tokio::test]
+    async fn forget_after_search_roundtrip() {
+        let engine = test_engine();
+        let remember = MemoryRememberTool::new(Arc::clone(&engine));
+        let search = MemorySearchTool::new(Arc::clone(&engine));
+        let forget = MemoryForgetTool::new(Arc::clone(&engine));
+        let ctx = test_ctx(None);
+
+        remember
+            .call(
+                json!({"content": "stale endpoint is http://old.internal", "kind": "fact"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let out = search
+            .call(json!({"query": "old.internal"}), &ctx)
+            .await
+            .unwrap();
+        assert!(out.content.contains("id="), "search must expose ids");
+        let id = out
+            .content
+            .split("(id=")
+            .nth(1)
+            .and_then(|s| s.split(',').next())
+            .expect("id parseable");
+
+        let out = forget.call(json!({"id": id}), &ctx).await.unwrap();
+        assert!(out.content.contains("已遗忘"));
+
+        let miss = search
+            .call(json!({"query": "old.internal"}), &ctx)
+            .await
+            .unwrap();
+        assert!(miss.content.contains("没有相关内容"));
+
+        // Unknown id: informative output, no error.
+        let out = forget.call(json!({"id": "mem-nope"}), &ctx).await.unwrap();
+        assert!(out.content.contains("未找到"));
+    }
+
+    #[tokio::test]
+    async fn forget_rejects_empty_id() {
+        let engine = test_engine();
+        let forget = MemoryForgetTool::new(engine);
+        let err = forget
+            .call(json!({"id": "   "}), &test_ctx(None))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("id 不能为空"));
     }
 }

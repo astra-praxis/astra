@@ -606,8 +606,11 @@ fn host_tool_policy() -> ToolPolicy {
     // 记忆库（非文件系统/系统变更，可经 engine.forget 回退），且设计
     // 要求「显式记住立即生效」——走 Confirm 弹窗会破坏这个语义，
     // 故 Allow（memory-off 时工具根本不注册，不存在未声明即放行）。
+    // forget 仅逻辑遗忘（valid_until=now，可逆：重新 remember 同内容
+    // 即恢复），物理删除不暴露给 agent，故同为 Allow（docs/13 D2）。
     policy.allowed_readonly.push("memory_search".into());
     policy.allowed_readonly.push("memory_remember".into());
+    policy.allowed_readonly.push("memory_forget".into());
     policy
 }
 

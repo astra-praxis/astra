@@ -407,7 +407,7 @@ export default function ProviderDetailPage() {
                 </span>
               </div>
               <div className="provider-detail__info-item">
-                <span className="provider-detail__info-label">接口类型</span>
+                <span className="provider-detail__info-label">服务商类型</span>
                 <span className="provider-detail__info-value">
                   {KIND_LABEL[provider.kind] ?? 'OpenAI 兼容'}
                 </span>
@@ -615,7 +615,7 @@ export default function ProviderDetailPage() {
       {showEditModal && (
         <Modal
           open
-          title="编辑接口"
+          title="编辑服务商"
           onClose={() => setShowEditModal(false)}
           closeOnOverlay={false}
           footer={
@@ -626,7 +626,7 @@ export default function ProviderDetailPage() {
         >
           {editError && <div className="form-error">{editError}</div>}
           <div className="form-group">
-            <label>接口类型</label>
+            <label>服务商类型</label>
             <div className="kind-seg">
               <button
                 type="button"
@@ -688,7 +688,7 @@ export default function ProviderDetailPage() {
         >
           <div className="confirm-icon">⚠️</div>
           <p className="confirm-text">
-            确定要删除接口 <strong>{provider?.name}</strong> 吗？此操作不可撤销。
+            确定要删除服务商 <strong>{provider?.name}</strong> 吗？此操作不可撤销。
           </p>
         </Modal>
       )}

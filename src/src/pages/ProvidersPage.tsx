@@ -224,7 +224,7 @@ export default function ProvidersPage() {
           </button>
           <button className="btn-add" onClick={openAddModal}>
             <Plus size={16} strokeWidth={2.5} />
-            添加接口
+            增加服务商
           </button>
         </div>
       </div>
@@ -249,14 +249,14 @@ export default function ProvidersPage() {
       {!loading && providers.length === 0 && !error && (
         <div className="providers-page__empty">
           <span className="providers-page__empty-icon">🔌</span>
-          <h3>还没有配置任何 API 接口</h3>
-          <p>点击上方"添加接口"按钮，配置第一个 OpenAI 兼容 API</p>
+          <h3>还没有添加任何服务商</h3>
+          <p>点击上方"增加服务商"按钮，添加第一个服务商</p>
         </div>
       )}
 
       {!loading && providers.length > 0 && (
         <>
-          <div className="providers-page__count">{providers.length} 个接口</div>
+          <div className="providers-page__count">{providers.length} 个服务商</div>
           <div className="providers-page__grid">
             {providers.map((provider) => {
               const isTesting = testing?.id === provider.id;
@@ -352,7 +352,7 @@ export default function ProvidersPage() {
       {showAddModal && (
         <Modal
           open
-          title="添加 API 接口"
+          title="添加服务商"
           onClose={() => setShowAddModal(false)}
           closeOnOverlay={false}
           footer={
@@ -363,7 +363,7 @@ export default function ProvidersPage() {
         >
           {formError && <div className="form-error">{formError}</div>}
           <div className="form-group">
-            <label>接口类型</label>
+            <label>服务商类型</label>
             <div className="kind-seg">
               <button
                 type="button"
@@ -428,11 +428,11 @@ export default function ProvidersPage() {
         </Modal>
       )}
 
-      {/* 编辑接口弹窗 */}
+      {/* 编辑服务商弹窗 */}
       {showEditModal && (
         <Modal
           open
-          title="编辑接口"
+          title="编辑服务商"
           onClose={() => setShowEditModal(false)}
           closeOnOverlay={false}
           footer={
@@ -443,7 +443,7 @@ export default function ProvidersPage() {
         >
           {editError && <div className="form-error">{editError}</div>}
           <div className="form-group">
-            <label>接口类型</label>
+            <label>服务商类型</label>
             <div className="kind-seg">
               <button
                 type="button"
@@ -522,7 +522,7 @@ export default function ProvidersPage() {
           }
         >
           <div className="confirm-text">
-            确定要删除接口 <strong>{deleteTarget.name}</strong> 吗？
+            确定要删除服务商 <strong>{deleteTarget.name}</strong> 吗？
           </div>
         </Modal>
       )}

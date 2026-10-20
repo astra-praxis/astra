@@ -196,11 +196,12 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  cursor: pointer;
   transition: all 0.2s ease;
 
   &:hover {
     box-shadow: 0 4px 12px var(--shadow-hover);
-    border-color: var(--border);
+    border-color: var(--accent);
   }
 }
 
@@ -253,55 +254,12 @@
   line-height: 1.5;
 }
 
-.skill-path {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: ui-monospace, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-
-  svg {
-    flex-shrink: 0;
-  }
-
-  span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
 .skill-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border-light);
-}
-
-.btn-detail {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
-  background: none;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--accent);
-  cursor: pointer;
-  text-decoration: none;
-  transition: all 0.2s;
-
-  &:hover {
-    background: var(--accent-bg);
-    border-color: var(--accent);
-  }
 }
 
 .btn-delete {

@@ -3,15 +3,13 @@
  * 移植自 src/routes/skills/+page.svelte
  */
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+import { useNavigate, Link } from 'react-router';
 import { invoke } from '@tauri-apps/api/core';
 import {
   ChevronLeft,
   Download,
   RefreshCw,
-  Folder,
   Trash2,
-  Eye,
 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import './SkillsPage.scss';
@@ -44,6 +42,7 @@ function skillIcon(name: string): string {
 }
 
 export default function SkillsPage() {
+  const navigate = useNavigate();
   const [skills, setSkills] = useState<SkillCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -212,7 +211,11 @@ export default function SkillsPage() {
           <div className="skills-count">{skills.length} 个技能</div>
           <div className="skills-grid">
             {skills.map((skill) => (
-              <div key={skill.path} className="skill-card">
+              <div
+                key={skill.path}
+                className="skill-card"
+                onClick={() => navigate(`/skills/${skill.name}`)}
+              >
                 <div className="skill-header">
                   <span className="skill-icon">{skillIcon(skill.name)}</span>
                   <div className="skill-info">
@@ -223,15 +226,14 @@ export default function SkillsPage() {
                   </div>
                 </div>
                 {skill.description && <p className="skill-desc">{skill.description}</p>}
-                <div className="skill-path" title={skill.path}>
-                  <Folder size={12} strokeWidth={2} />
-                  <span>{skill.path}</span>
-                </div>
                 <div className="skill-footer">
                   {skill.is_git ? (
                     <button
                       className="btn-update"
-                      onClick={() => updateSingleSkill(skill)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        updateSingleSkill(skill);
+                      }}
                       disabled={updatingSkills.has(skill.path)}
                     >
                       {updatingSkills.has(skill.path) ? (
@@ -249,14 +251,16 @@ export default function SkillsPage() {
                   ) : (
                     <span className="skill-local-hint">本地生成</span>
                   )}
-                  <button className="btn-delete" onClick={() => setDeleteTarget(skill)}>
+                  <button
+                    className="btn-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(skill);
+                    }}
+                  >
                     <Trash2 size={14} strokeWidth={2.5} />
                     删除
                   </button>
-                  <Link to={`/skills/${skill.name}`} className="btn-detail">
-                    <Eye size={14} strokeWidth={2.5} />
-                    详情
-                  </Link>
                 </div>
                 {updateResults.has(skill.path) && (
                   <div className="update-result">

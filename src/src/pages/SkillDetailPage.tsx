@@ -9,7 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { ChevronLeft, Folder, FileText } from 'lucide-react';
+import { ChevronLeft, FileText } from 'lucide-react';
 import 'highlight.js/styles/github-dark.css';
 import './SkillDetailPage.scss';
 
@@ -136,10 +136,6 @@ export default function SkillDetailPage() {
                 )}
                 {skill.description && <p className="skill-desc-text">{skill.description}</p>}
               </div>
-            </div>
-            <div className="skill-path-row" title={skill.path}>
-              <Folder size={14} strokeWidth={2} />
-              <span>{skill.path}</span>
             </div>
           </div>
 

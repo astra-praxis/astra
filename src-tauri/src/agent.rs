@@ -1264,8 +1264,7 @@ pub async fn agent_start_run(
     let observe_text = user_text.clone();
     let observe_project = bound_project.clone();
     tokio::spawn(async move {
-        // 边转发边采集（采集边界见 MemoryRunCollector 文档）：提炼是确定性
-        // 规则，无模型调用；异步 spawn，不阻塞 Run 结束路径。任何失败只记
+        // 边转发边采集（采集边界见 MemoryRunCollector 文档）。任何失败只记
         // 日志：记忆故障永不阻断 agent（D21）。
         let mut collector = MemoryRunCollector::new();
         while let Some(env) = rx.recv().await {
@@ -1273,6 +1272,26 @@ pub async fn agent_start_run(
             log_event(&forward_app, &env);
             let _ = forward_app.emit("agent-event", &env);
         }
+        // 先结算后记忆：流关闭即释放准入并通知 UI（底部 loading 随渲染
+        // 完成立即消失），记忆提交放在 settled 之后后台执行——开 agent
+        // 提炼时 process_pending 要调 LLM（可达十几秒），不能让用户看着
+        // loading 等记忆。与下一 Run 的记忆提交并发时由 CME 游标 CAS 兜底
+        // （冲突只记日志，不丢消息）。
+        let persistence_error = errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&settled_session)
+            .cloned();
+        *active.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        // Release admission before notifying the UI that another send is safe.
+        drop(threads);
+        let _ = forward_app.emit(
+            "agent-run-settled",
+            json!({
+                "session_id": settled_session,
+                "persistence_error": persistence_error,
+            }),
+        );
         if let Some(engine) = observe_engine {
             // 项目绑定：本 Run 提炼的记忆落到对应项目作用域，避免跨项目串线。
             // best-effort：失败只记日志。键与 recall 侧 ProjectBoundProvider
@@ -1292,21 +1311,6 @@ pub async fn agent_start_run(
             )
             .await;
         }
-        let persistence_error = errors
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&settled_session)
-            .cloned();
-        *active.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        // Release admission before notifying the UI that another send is safe.
-        drop(threads);
-        let _ = forward_app.emit(
-            "agent-run-settled",
-            json!({
-                "session_id": settled_session,
-                "persistence_error": persistence_error,
-            }),
-        );
     });
 
     Ok(session_id)

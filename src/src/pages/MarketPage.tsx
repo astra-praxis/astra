@@ -93,17 +93,6 @@ interface SessionRuntimeStatus {
   acp: AcpRuntimeStatus[];
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  ready: '运行中',
-  starting: '加载中',
-  failed: '加载失败',
-  stopped: '未加载',
-};
-
-function statusLabel(s: string): string {
-  return STATUS_LABEL[s] ?? s;
-}
-
 function kindLabel(kind: DeleteKind): string {
   if (kind === 'mcp') return 'MCP 扩展';
   if (kind === 'acp') return 'ACP Agent';
@@ -263,22 +252,22 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
     navigate('/agent');
   }
 
-  // 卡片上的运行状态徽标：配置里「启用」≠ 实际加载成功，这里反映真实状态
+  // 卡片上的可用状态：小圆点（绿 = 可用，红 = 不可用，灰 = 未加载）。
+  // 按需求不区分「加载失败」细节、不展示报错文本——用户只关心可用与否；
+  // 具体错误仍可从 hover 原文与后端日志排查。
   function renderStatus(t: Kind, id: string) {
     const entry = runtimeMap.get(`${t}/${id}`);
     if (!entry) return null;
+    const dotClass =
+      entry.status === 'ready' || entry.status === 'starting' ? 'is-ok' : 'is-down';
+    const tip =
+      entry.status === 'ready'
+        ? `可用${entry.toolCount > 0 ? ` · ${entry.toolCount} 个工具` : ''}`
+        : entry.status === 'starting'
+          ? '加载中'
+          : '未加载（新会话自动重试）';
     return (
-      <div className="card-status">
-        <span className={`status-badge ${entry.status}`}>
-          {statusLabel(entry.status)}
-          {entry.toolCount > 0 && ` · ${entry.toolCount} 个工具`}
-        </span>
-        {entry.status === 'failed' && entry.error && (
-          <span className="status-error" title={entry.error}>
-            {entry.error}
-          </span>
-        )}
-      </div>
+      <span className={`status-dot ${dotClass}`} title={tip} />
     );
   }
 
@@ -408,7 +397,6 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                       </div>
                     )}
                     {renderStatus('mcp', e.id)}
-                    <div className="install-done">✓ 已配置（新会话生效）</div>
                   </div>
                 );
               })}
@@ -452,7 +440,6 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                       权限模式: {e.permission} · 会话策略: {e.sessionPolicy}
                     </div>
                     {renderStatus('acp', e.id)}
-                    <div className="install-done">✓ 已配置（新会话生效）</div>
                   </div>
                 );
               })}

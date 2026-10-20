@@ -28,11 +28,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "../../astra-memory/checkpoints/astra-memory-v3/": "memory-model/",
-      "../../astra-memory/checkpoints/bge-small-zh-v1.5-onnx/": "embed-model/",
-      "resources/onnxruntime/": "onnxruntime/"
-    },
     "windows": {
       "webviewInstallMode": {
         "type": "skip"

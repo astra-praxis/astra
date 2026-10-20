@@ -19,10 +19,10 @@ agent-core = { package = "astra-agent", path = "../../astra-core", version = "=1
 astra-mcp = { path = "../../astra-core/crates/astra-mcp", version = "=1.0.0-rc.1" }
 astra-acp = { path = "../../astra-core/crates/astra-acp", version = "=1.0.0-rc.1" }
 astra-process = { path = "../../astra-core/crates/astra-process", version = "=1.0.0-rc.1" }
-# 记忆集成：引擎（加密 sqlite）+ agent-core MemoryProvider 适配器。
-# onnx feature：v2 全量 formation —— 进程内 OnnxJudge（load-dynamic，
-# dylib 在 src-tauri/resources/onnxruntime/，模型目录走 bundle resources）
-astra-memory = { path = "../../astra-memory", features = ["sqlite", "onnx", "llm-proposer"] }
+# 记忆集成：CME 引擎（加密 sqlite）+ agent-core MemoryProvider 适配器。
+# 提炼/召回为确定性规则 + 词法检索，无 ONNX / LLM 模型依赖；
+# legacy Formation/Judge 管线冻结在 astra-memory/src/legacy，宿主不启用。
+astra-memory = { path = "../../astra-memory", features = ["sqlite"] }
 astra-memory-provider = { path = "../../astra-memory/crates/astra-memory-provider" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"

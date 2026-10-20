@@ -368,44 +368,151 @@
   color: var(--accent);
 }
 
+/* 外观主题：迷你预览卡片（预览用固定色值展示目标主题，不随当前主题变） */
 .theme-grid {
+  /* .row-control 是 flex 行布局，grid 作为 flex item 需显式撑满整行，
+     否则按内容收缩把三张卡压窄 */
+  width: 100%;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .theme-option {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 18px 12px;
-  background: var(--bg-subtle);
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-surface);
   border: 2px solid var(--border-light);
   border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s;
-  position: relative;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 
   &:hover {
-    background: var(--bg-card-hover);
     border-color: var(--border-strong);
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
   &.selected {
     border-color: var(--accent);
-    background: var(--accent-bg);
+    box-shadow: 0 0 0 3px var(--accent-light);
+
+    &:hover {
+      border-color: var(--accent);
+      transform: none;
+    }
   }
 }
 
-.theme-icon {
-  font-size: 26px;
+.theme-preview {
+  display: block;
+  height: 92px;
+  border-bottom: 1px solid var(--border-light);
+  pointer-events: none;
+}
+
+/* 迷你窗口标题栏 + 红绿灯 */
+.theme-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 10px;
+
+  i {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+
+    &:nth-child(1) { background: #ff5f57; }
+    &:nth-child(2) { background: #febc2e; }
+    &:nth-child(3) { background: #28c840; }
+  }
+}
+
+.theme-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  height: calc(100% - 22px);
+  padding: 12px;
+}
+
+.theme-preview-hero {
+  width: 46%;
+  height: 18px;
+  border-radius: 5px;
+  background: linear-gradient(120deg, #818cf8, #a78bfa);
+}
+
+.theme-preview-line {
+  width: 88%;
+  height: 6px;
+  border-radius: 3px;
+
+  &.short {
+    width: 58%;
+  }
+}
+
+/* 浅色预览 */
+.theme-preview--light {
+  background: #f3f4f8;
+
+  .theme-preview-bar { background: #ffffff; box-shadow: inset 0 -1px 0 #e8eaf2; }
+  .theme-preview-line { background: #dfe3ee; }
+}
+
+/* 深色预览 */
+.theme-preview--dark {
+  background: #0b0d16;
+
+  .theme-preview-bar { background: #181c30; box-shadow: inset 0 -1px 0 #232842; }
+  .theme-preview-line { background: #2b3050; }
+  .theme-preview-hero { background: linear-gradient(120deg, #8a93e8, #b09af0); }
+}
+
+/* 跟随系统：左半浅色 / 右半深色拼接 */
+.theme-preview--system {
+  .theme-preview-bar {
+    background: linear-gradient(90deg, #ffffff 50%, #181c30 50%);
+    box-shadow: inset 0 -1px 0 rgba(128, 134, 168, 0.35);
+  }
+
+  .theme-preview-body {
+    background: linear-gradient(90deg, #f3f4f8 50%, #0b0d16 50%);
+  }
+
+  .theme-preview-hero {
+    background: linear-gradient(90deg, #818cf8 50%, #8a93e8 50%);
+  }
+
+  .theme-preview-line {
+    background: linear-gradient(90deg, #dfe3ee 50%, #2b3050 50%);
+  }
+}
+
+.theme-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
 }
 
 .theme-name {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.theme-check {
+  color: var(--accent);
 }
 
 /* 开关（Agent 行为 / 记忆 / 图片生成共用） */
@@ -437,6 +544,64 @@
 
 .agent-perm-switch.is-on .agent-perm-knob {
   transform: translateX(18px);
+}
+
+/* 多级放权：纵向容器 —— .row-control 是 flex 行布局，
+   分段与提示需包一层列布局才能让提示独占一行自然换行 */
+.agent-perm-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.agent-perm-segments {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.agent-perm-segment {
+  padding: 7px 18px;
+  background: var(--bg-surface);
+  border: none;
+  border-right: 1px solid var(--border);
+  font-size: 13px;
+  /* 全段统一字重：激活态不再加粗，避免切换时分段宽度跳动 */
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+
+  &:last-child {
+    border-right: none;
+  }
+
+  /* 键盘焦点：容器 overflow hidden 会裁外阴影，用内嵌 ring */
+  &:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent-ring);
+  }
+
+  &:hover:not(.is-active) {
+    background: var(--bg-surface-soft);
+    color: var(--text-primary);
+  }
+
+  &.is-active {
+    background: var(--accent);
+    color: var(--text-inverse);
+  }
+}
+
+.agent-perm-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .agent-perm-input {

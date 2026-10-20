@@ -1,6 +1,9 @@
 /**
- * 编辑器图标映射（原 renderEditorIcon 移出页面组件）
+ * 编辑器图标映射（原 renderEditorIcon 移出页面组件）。
+ * lucide-react 不收录品牌 logo：VS Code 用内联 SVG，JetBrains 系用品牌色
+ * 字母色块，其余用 lucide 通用图标替代 emoji。
  */
+import { Atom, MousePointer2, PenLine, Wind, Wrench } from 'lucide-react';
 import type { EditorSetting } from '../settings.types';
 
 export default function EditorIcon({ editor }: { editor: EditorSetting }) {
@@ -32,7 +35,7 @@ export default function EditorIcon({ editor }: { editor: EditorSetting }) {
       </svg>
     );
   }
-  if (editor.name === 'Cursor') return <span className="emoji-icon">🖱️</span>;
+  if (editor.name === 'Cursor') return <MousePointer2 size={22} strokeWidth={1.8} />;
   if (editor.name === 'WebStorm') {
     return (
       <svg width="24" height="24" viewBox="0 0 24 24">
@@ -69,8 +72,8 @@ export default function EditorIcon({ editor }: { editor: EditorSetting }) {
       </svg>
     );
   }
-  if (editor.name === 'Sublime Text') return <span className="emoji-icon">📝</span>;
-  if (editor.name === 'Atom') return <span className="emoji-icon">⚛️</span>;
-  if (editor.name === 'Windsurf') return <span className="emoji-icon">🏄</span>;
-  return <span className="emoji-icon">🔧</span>;
+  if (editor.name === 'Sublime Text') return <PenLine size={22} strokeWidth={1.8} />;
+  if (editor.name === 'Atom') return <Atom size={22} strokeWidth={1.8} />;
+  if (editor.name === 'Windsurf') return <Wind size={22} strokeWidth={1.8} />;
+  return <Wrench size={22} strokeWidth={1.8} />;
 }

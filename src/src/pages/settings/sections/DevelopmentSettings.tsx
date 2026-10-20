@@ -3,7 +3,7 @@
  */
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Play } from 'lucide-react';
+import { CheckCircle2, Play, Terminal, XCircle } from 'lucide-react';
 import SettingsSection from '../components/SettingsSection';
 import SettingsRow from '../components/SettingsRow';
 import EditorIcon from '../components/EditorIcon';
@@ -89,19 +89,7 @@ export default function DevelopmentSettings() {
           onClick={enableCustom}
         >
           <span className="editor-icon">
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-            </svg>
+            <Terminal size={22} strokeWidth={1.8} />
           </span>
           <span className="editor-name">自定义</span>
           <span className="editor-command">(输入命令)</span>
@@ -142,8 +130,12 @@ export default function DevelopmentSettings() {
                 testResult === 'error' ? ' test-error' : ''
               }`}
             >
-              {testResult === 'success' ? '✅' : '❌'}
-              {testMessage}
+            {testResult === 'success' ? (
+              <CheckCircle2 size={14} strokeWidth={2} />
+            ) : (
+              <XCircle size={14} strokeWidth={2} />
+            )}
+            {testMessage}
             </span>
           )}
         </div>

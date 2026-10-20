@@ -342,10 +342,18 @@ body .content:has(.agent-root) {
 .agent-entries {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   // 右侧 16px 与 dock 外边距对齐；滚动条仍贴容器右缘（在 padding 外侧）
   padding: 16px 16px;
+
+  // react-virtuoso 的内部 viewport 自带 overflow-x: auto 且未暴露覆盖组件，
+  // 宽内容（长代码行 / mermaid 图）会在内层顶出横向滚动条；
+  // 条目内的 pre、图表各有自己的横向滚动，外层一律裁掉
+  & > [data-viewport-type='element'] {
+    overflow-x: hidden !important;
+  }
 }
 
 .agent-entries__content {
@@ -355,10 +363,11 @@ body .content:has(.agent-root) {
   gap: 12px;
 }
 
-// 虚拟化条目包装（react-virtuoso）：条目绝对定位，flex gap 失效，
+// 虚拟化条目包装（react-virtuoso）：条目默认块级布局，flex gap 失效，
 // 间距改由条目自身承担（纳入测量高度，滚动定位不累积误差）
 .agent-entries__item {
   padding-bottom: 12px;
+  min-width: 0;
 }
 
 /* ===== 空状态 ===== */

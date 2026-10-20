@@ -241,19 +241,70 @@ pub fn agent_recent_events(app: AppHandle, limit: Option<u32>) -> Result<Vec<Val
 
 // ===== 权限 hub：前端决定 → 运行循环 =====
 
+/// 多级放权级别。Off = 全部弹确认卡；All = 全部自动批准（原「放权模式」）；
+/// Project / Workspace 为路径级放权：仅当请求参数全部落在对应边界内才自动批准，
+/// 否则回退到正常确认流程（shell 等无路径参数的 Confirm 类永远弹卡）。
+/// Deny 类硬规则（未注册工具、提权命令、路径逃逸）不受任何级别影响。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum AutoMode {
+    #[default]
+    Off = 0,
+    Project = 1,
+    Workspace = 2,
+    All = 3,
+}
+
+impl AutoMode {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Project,
+            2 => Self::Workspace,
+            3 => Self::All,
+            _ => Self::Off,
+        }
+    }
+
+    #[cfg(test)]
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Project => "project",
+            Self::Workspace => "workspace",
+            Self::All => "all",
+        }
+    }
+
+    fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "off" => Ok(Self::Off),
+            "project" => Ok(Self::Project),
+            "workspace" => Ok(Self::Workspace),
+            "all" => Ok(Self::All),
+            other => Err(format!(
+                "未知的放权级别: {other}（可选 off | project | workspace | all）"
+            )),
+        }
+    }
+}
+
 /// 等待用户决定的权限请求集合（tool_call_id → oneshot 发送端）
 #[derive(Default)]
 pub struct PermissionHub {
     pending: Mutex<HashMap<String, oneshot::Sender<Decision>>>,
-    /// 「放权模式」：开启后所有 Confirm 类工具直接 Allow，不再弹确认卡。
-    /// Deny 类硬规则（未注册工具、提权命令、路径逃逸）不受影响，仍在执行层拦截
-    auto_all: std::sync::atomic::AtomicBool,
+    /// 多级放权级别（AutoMode as u8），见 AutoMode 文档
+    auto_mode: std::sync::atomic::AtomicU8,
 }
 
 impl PermissionHub {
-    pub fn set_auto_all(&self, enabled: bool) {
+    pub fn set_auto_mode(&self, mode: AutoMode) {
         use std::sync::atomic::Ordering;
-        self.auto_all.store(enabled, Ordering::Relaxed);
+        self.auto_mode.store(mode as u8, Ordering::Relaxed);
+    }
+
+    pub fn auto_mode(&self) -> AutoMode {
+        use std::sync::atomic::Ordering;
+        AutoMode::from_u8(self.auto_mode.load(Ordering::Relaxed))
     }
 
     fn register(&self, tool_call_id: String) -> oneshot::Receiver<Decision> {
@@ -281,7 +332,9 @@ impl PermissionHub {
 
 /// PermissionBridge 宿主实现：注册 oneshot 并等待前端决定。
 /// 发送端被清理（重置会话）时返回 Deny，保证不会挂死运行循环。
-/// 开启「放权模式」时所有 Confirm 直接 Allow 跳过弹窗（Deny 不经此桥，不受影响）。
+/// 多级放权（AutoMode）：All 级别所有 Confirm 直接 Allow；Project / Workspace
+/// 级别仅当参数路径全部落在对应边界内才 Allow，否则回退正常确认流程
+/// （Deny 不经此桥，不受影响）。
 ///
 /// 工具内部权限（ToolContext::request_permission，如 generate_image 的付费
 /// 确认，MULTIMODAL_SPEC §10）不经 run_loop 发事件：本层补发一条可见的
@@ -291,6 +344,109 @@ struct HubBridge {
     hub: Arc<PermissionHub>,
     app: AppHandle,
     session_id: String,
+    /// 本会话绑定的项目根（None = 纯聊天）；路径级放权的判定基准
+    project_root: Option<std::path::PathBuf>,
+}
+
+/// 已知携带路径参数的工具参数键（覆盖宿主注册的全部路径类工具：
+/// fs_tools 的 path/from/to、doc_tools 的 path/output）。MCP 等外部
+/// 工具的任意参数不在内：含未知键时回退确认，保守不放行。
+const PATH_ARG_KEYS: &[&str] = &["path", "from", "to", "output", "file_path", "directory"];
+
+/// 提取工具参数中的候选路径（只取已知键下的字符串值；无路径参数返回空）
+fn candidate_paths(args: &serde_json::Value) -> Vec<String> {
+    let Some(obj) = args.as_object() else {
+        return Vec::new();
+    };
+    PATH_ARG_KEYS
+        .iter()
+        .filter_map(|k| obj.get(*k))
+        .filter_map(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// 解析工具参数中的路径：支持 `~` 展开、相对路径相对项目根、
+/// 词法归一化（消除 `.` / `..`）。无法解析（无项目根的相对路径等）返回 None。
+fn resolve_arg_path(
+    raw: &str,
+    project_root: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let expanded = if raw == "~" || raw.starts_with("~/") {
+        let home = std::env::var_os("HOME")?;
+        let rest = raw.strip_prefix("~").unwrap_or("");
+        let rest = rest.strip_prefix('/').unwrap_or("");
+        std::path::PathBuf::from(home).join(rest)
+    } else {
+        std::path::PathBuf::from(raw)
+    };
+    let p = if expanded.is_absolute() {
+        expanded
+    } else {
+        project_root?.join(expanded)
+    };
+    let mut out = std::path::PathBuf::new();
+    for comp in p.components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c.as_os_str()),
+        }
+    }
+    Some(out)
+}
+
+/// 解析后的路径是否落在任一边界内（组件级前缀匹配，非字符串前缀）
+fn within_any(resolved: &std::path::Path, boundaries: &[std::path::PathBuf]) -> bool {
+    boundaries.iter().any(|b| resolved.starts_with(b))
+}
+
+/// 多级放权的纯判定：该请求是否可自动 Allow。
+/// 规则：Off 永不；All 恒真；Project / Workspace 要求至少提取到一个路径参数，
+/// 且全部解析成功并落在对应边界内。无路径参数（shell 等）或含未知参数形状
+/// 的请求一律回退确认（false）。
+fn auto_allow(
+    mode: AutoMode,
+    args: &serde_json::Value,
+    project_root: Option<&std::path::Path>,
+    workspace_roots: &[std::path::PathBuf],
+) -> bool {
+    match mode {
+        AutoMode::Off => false,
+        AutoMode::All => true,
+        AutoMode::Project => {
+            let Some(root) = project_root else {
+                return false;
+            };
+            paths_in(args, project_root, &[root.to_path_buf()])
+        }
+        AutoMode::Workspace => paths_in(args, project_root, workspace_roots),
+    }
+}
+
+/// Project / Workspace 级别的公共判定：提取参数路径并逐个检查边界。
+/// workspace_roots 为空（未配置工作空间）时回退确认。
+fn paths_in(
+    args: &serde_json::Value,
+    project_root: Option<&std::path::Path>,
+    boundaries: &[std::path::PathBuf],
+) -> bool {
+    if boundaries.is_empty() {
+        return false;
+    }
+    let paths = candidate_paths(args);
+    if paths.is_empty() {
+        return false;
+    }
+    paths
+        .iter()
+        .all(|raw| match resolve_arg_path(raw, project_root) {
+            Some(resolved) => within_any(&resolved, boundaries),
+            None => false,
+        })
 }
 
 /// 工具内部权限请求的可见 id / 序号（与 run_loop 的 tc-* call id 区分）
@@ -365,9 +521,24 @@ fn in_tool_permission_decided_event(
 #[async_trait::async_trait]
 impl PermissionBridge for HubBridge {
     async fn request(&self, req: PermissionRequest) -> Decision {
-        use std::sync::atomic::Ordering;
-        if self.hub.auto_all.load(Ordering::Relaxed) {
-            return Decision::Allow;
+        // 多级放权：All 直接 Allow；Project / Workspace 仅当参数路径全部
+        // 落在对应边界内才 Allow，否则回退正常确认流程。硬规则 Deny 在
+        // 到达本桥之前已被 core 拦截，放权不影响安全边界。
+        let mode = self.hub.auto_mode();
+        if mode != AutoMode::Off {
+            let workspace_roots = if mode == AutoMode::Workspace {
+                crate::workspace_roots(&self.app)
+            } else {
+                Vec::new()
+            };
+            if auto_allow(
+                mode,
+                &req.arguments,
+                self.project_root.as_deref(),
+                &workspace_roots,
+            ) {
+                return Decision::Allow;
+            }
         }
         // 循环级请求自带 call.id（PermissionRequested 事件已由 run_loop 发出）；
         // 工具内部请求（tool_call_id 为空）需要本层补发可见事件。
@@ -600,8 +771,8 @@ fn host_tool_policy() -> ToolPolicy {
     policy.allowed_readonly.push("extract_document".into());
     policy.allowed_readonly.push("ask_user".into());
     policy.allowed_readonly.push("search_web".into());
-    // MCP 配置自助管理：读无副作用 Allow；写入配置 Confirm（自动全放行
-    // 时随 auto_all 放行，装扩展是用户主动要求的行为）
+    // MCP 配置自助管理：读无副作用 Allow；写入配置 Confirm（放权级别
+    // 为 all 时随全放行放行，装扩展是用户主动要求的行为）
     policy.allowed_readonly.push("mcp_config_read".into());
     policy.confirm_tools.push("mcp_config_write".into());
     policy.confirm_tools.push("edit_file".into());
@@ -1142,6 +1313,7 @@ pub async fn agent_start_run(
                 hub: Arc::clone(&state.hub),
                 app: app.clone(),
                 session_id: session_id.clone(),
+                project_root: project_root.clone(),
             });
             let question_bridge: Arc<dyn agent_core::UserQuestionBridge> =
                 Arc::new(QuestionBridge {
@@ -1348,11 +1520,18 @@ pub fn agent_question_answer(
     state.questions.answer(&question_id, answer)
 }
 
-/// 放权模式：开启后所有 Confirm 类工具（写文件 / 编辑 / shell / fetch / build_docx 等）
-/// 直接 Allow，不再弹确认卡；Deny 类硬规则不受影响，仍在执行层拦截。
+/// 多级放权：设置自动批准级别。
+/// - off：全部弹确认卡
+/// - project：当前项目目录内的路径类操作自动批准
+/// - workspace：全部已配置工作空间内的路径类操作自动批准
+/// - all：所有确认类操作自动批准（含 shell 命令）
+/// Deny 类硬规则（未注册工具、提权命令、路径逃逸）不受任何级别影响；
+/// shell 等无路径参数的操作仅在 all 级别自动批准。
 #[tauri::command]
-pub fn agent_set_auto_all(state: State<'_, AgentState>, enabled: bool) {
-    state.hub.set_auto_all(enabled);
+pub fn agent_set_auto_mode(state: State<'_, AgentState>, mode: String) -> Result<(), String> {
+    let parsed = AutoMode::parse(&mode)?;
+    state.hub.set_auto_mode(parsed);
+    Ok(())
 }
 
 /// Unload memory only. Cancel and wait for agent-run-settled before resetting.
@@ -1831,6 +2010,172 @@ pub async fn agent_rewind_to_user_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 多级放权：级别解析
+    #[test]
+    fn auto_mode_parse_roundtrip() {
+        assert_eq!(AutoMode::parse("off"), Ok(AutoMode::Off));
+        assert_eq!(AutoMode::parse("project"), Ok(AutoMode::Project));
+        assert_eq!(AutoMode::parse("workspace"), Ok(AutoMode::Workspace));
+        assert_eq!(AutoMode::parse("all"), Ok(AutoMode::All));
+        assert!(AutoMode::parse("true").is_err());
+        assert!(AutoMode::parse("").is_err());
+        for m in [
+            AutoMode::Off,
+            AutoMode::Project,
+            AutoMode::Workspace,
+            AutoMode::All,
+        ] {
+            assert_eq!(AutoMode::parse(m.as_str()), Ok(m));
+            assert_eq!(AutoMode::from_u8(m as u8), m);
+        }
+    }
+
+    /// 多级放权：路径参数提取（已知键、非字符串与未知键忽略）
+    #[test]
+    fn candidate_paths_extracts_known_string_keys() {
+        let args = serde_json::json!({
+            "path": "src/main.rs",
+            "output": "out.docx",
+            "content": "text",
+            "n": 3,
+            "command": "rm -rf /",
+            "from": "a.md",
+            "to": 123
+        });
+        let mut got = candidate_paths(&args);
+        got.sort();
+        assert_eq!(got, vec!["a.md", "out.docx", "src/main.rs"]);
+        assert!(candidate_paths(&serde_json::json!({"command": "ls"})).is_empty());
+        assert!(candidate_paths(&serde_json::json!("not-an-object")).is_empty());
+    }
+
+    /// 多级放权：路径解析（相对路径相对项目根、~ 展开、词法归一化）
+    #[test]
+    fn resolve_arg_path_joins_and_normalizes() {
+        let root = std::path::Path::new("/home/u/proj");
+        assert_eq!(
+            resolve_arg_path("src/main.rs", Some(root)).unwrap(),
+            std::path::PathBuf::from("/home/u/proj/src/main.rs")
+        );
+        assert_eq!(
+            resolve_arg_path("./a/../b.txt", Some(root)).unwrap(),
+            std::path::PathBuf::from("/home/u/proj/b.txt")
+        );
+        assert_eq!(
+            resolve_arg_path("/abs/x.txt", Some(root)).unwrap(),
+            std::path::PathBuf::from("/abs/x.txt")
+        );
+        // 无项目根时相对路径不可解析
+        assert!(resolve_arg_path("rel.txt", None).is_none());
+        // ~ 展开（读真实 HOME 动态断言，避免进程全局环境变量竞争）
+        if let Some(home) = std::env::var_os("HOME") {
+            assert_eq!(
+                resolve_arg_path("~/notes/a.md", Some(root)).unwrap(),
+                std::path::PathBuf::from(home).join("notes/a.md")
+            );
+        }
+    }
+
+    /// 多级放权：纯判定 —— Off 永不，All 恒真，Project/Workspace 按边界，
+    /// 无路径参数（shell）或边界为空时回退确认
+    #[test]
+    fn auto_allow_respects_level_boundaries() {
+        let root = std::path::PathBuf::from("/home/u/proj");
+        let other_ws = std::path::PathBuf::from("/home/u/other-ws");
+        let inside = serde_json::json!({"path": "src/main.rs"});
+        let escape = serde_json::json!({"path": "../outside.txt"});
+        let absolute_outside = serde_json::json!({"path": "/etc/passwd"});
+        let shell = serde_json::json!({"command": "cargo build"});
+        let ws_roots = vec![root.clone(), other_ws];
+
+        // Off：永不放行
+        assert!(!auto_allow(AutoMode::Off, &inside, Some(&root), &ws_roots));
+        // All：无路径参数也放行（shell 等）
+        assert!(auto_allow(AutoMode::All, &shell, Some(&root), &ws_roots));
+        // Project：项目内相对路径放行
+        assert!(auto_allow(
+            AutoMode::Project,
+            &inside,
+            Some(&root),
+            &ws_roots
+        ));
+        // Project：逃逸（..）与项目外绝对路径不放行
+        assert!(!auto_allow(
+            AutoMode::Project,
+            &escape,
+            Some(&root),
+            &ws_roots
+        ));
+        assert!(!auto_allow(
+            AutoMode::Project,
+            &absolute_outside,
+            Some(&root),
+            &ws_roots
+        ));
+        // Project：另一工作空间内的绝对路径不放行（越出项目边界）
+        assert!(!auto_allow(
+            AutoMode::Project,
+            &serde_json::json!({"path": "/home/u/other-ws/a.txt"}),
+            Some(&root),
+            &ws_roots
+        ));
+        // Project：无项目根（纯聊天）不放行
+        assert!(!auto_allow(AutoMode::Project, &inside, None, &ws_roots));
+        // Workspace：任一工作空间内的绝对路径放行
+        assert!(auto_allow(
+            AutoMode::Workspace,
+            &serde_json::json!({"path": "/home/u/other-ws/a.txt"}),
+            Some(&root),
+            &ws_roots
+        ));
+        // Workspace：项目内相对路径放行（项目根在工作空间内）
+        assert!(auto_allow(
+            AutoMode::Workspace,
+            &inside,
+            Some(&root),
+            &ws_roots
+        ));
+        // Workspace：边界外不放行
+        assert!(!auto_allow(
+            AutoMode::Workspace,
+            &escape,
+            Some(&root),
+            &ws_roots
+        ));
+        assert!(!auto_allow(
+            AutoMode::Workspace,
+            &absolute_outside,
+            Some(&root),
+            &ws_roots
+        ));
+        // shell 等无路径参数在任何路径级别都不放行
+        assert!(!auto_allow(
+            AutoMode::Project,
+            &shell,
+            Some(&root),
+            &ws_roots
+        ));
+        assert!(!auto_allow(
+            AutoMode::Workspace,
+            &shell,
+            Some(&root),
+            &ws_roots
+        ));
+        // 未配置工作空间时 Workspace 级别回退确认
+        assert!(!auto_allow(AutoMode::Workspace, &inside, Some(&root), &[]));
+    }
+
+    /// 多级放权：Hub 级别存取
+    #[test]
+    fn hub_stores_auto_mode() {
+        let hub = PermissionHub::default();
+        assert_eq!(hub.auto_mode(), AutoMode::Off);
+        hub.set_auto_mode(AutoMode::Workspace);
+        assert_eq!(hub.auto_mode(), AutoMode::Workspace);
+        hub.set_auto_mode(AutoMode::All);
+        assert_eq!(hub.auto_mode(), AutoMode::All);
+    }
 
     /// 多模态 M1：内容块组装（文本在前图片随后，纯图片合法，空输入拒绝）
     #[test]
@@ -2536,7 +2881,7 @@ mod tests {
 
     /// 一次真实 Run：与 observe spawn 同形状组装 Thread（真实 backend /
     /// registry / policy / ProjectBoundProvider 记忆），跑一轮并采集事件。
-    /// 返回（助手最终回答，采集器）。权限桥全放行（等价 auto_all）。
+    /// 返回（助手最终回答，采集器）。权限桥全放行（等价 all 级放权）。
     #[allow(clippy::too_many_arguments)]
     async fn real_turn(
         threads: &mut crate::agent_threads::AgentThreads,

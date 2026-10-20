@@ -55,6 +55,33 @@ test('thinking preference defaults off/medium, persists to localStorage with inv
   assert.equal(load(undefined, undefined, storage).useAgentStore.getState().thinkingEffort, 'medium');
 });
 
+test('auto mode defaults off, persists, and migrates legacy boolean switch', () => {
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const store = load(undefined, undefined, storage).useAgentStore;
+  assert.equal(store.getState().autoMode, 'off');
+  // 旧版布尔开关：开 = 全部放行（all），关 = off
+  values.set('astra-agent-autoapprove', '1');
+  assert.equal(load(undefined, undefined, storage).useAgentStore.getState().autoMode, 'all');
+  values.set('astra-agent-autoapprove', '0');
+  assert.equal(load(undefined, undefined, storage).useAgentStore.getState().autoMode, 'off');
+  // 新键持久化 + 级别切换（含 invoke 同步）
+  const modes = [];
+  values.delete('astra-agent-autoapprove');
+  const withInvoke = load(undefined, (cmd, args) => {
+    if (cmd === 'agent_set_auto_mode') modes.push(args.mode);
+    return Promise.resolve();
+  }, storage).useAgentStore;
+  withInvoke.getState().setAutoMode('workspace');
+  assert.equal(withInvoke.getState().autoMode, 'workspace');
+  assert.equal(values.get('astra-agent-automode'), 'workspace');
+  assert.deepEqual(modes, ['workspace']);
+  assert.equal(load(undefined, undefined, storage).useAgentStore.getState().autoMode, 'workspace');
+  // 非法值回退 off
+  values.set('astra-agent-automode', 'bogus');
+  assert.equal(load(undefined, undefined, storage).useAgentStore.getState().autoMode, 'off');
+});
+
 const api = load();
 const env = (type, sequence = 1, run_id = 'opaque-uuid', extra = {}) => ({
   schema_version: 2, event_id: `event-${sequence}`, timestamp: 123,

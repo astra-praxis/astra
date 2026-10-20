@@ -645,6 +645,15 @@ fn get_settings(app: tauri::AppHandle) -> AppSettings {
     }
 }
 
+/// 已配置的工作空间根目录（多级放权 Workspace 级别的判定边界）
+pub(crate) fn workspace_roots(app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
+    get_settings(app.clone())
+        .workspaces
+        .into_iter()
+        .map(|w| std::path::PathBuf::from(w.path))
+        .collect()
+}
+
 // ===== 命令：保存设置 =====
 
 #[tauri::command]
@@ -1620,7 +1629,7 @@ pub fn run() {
             agent::agent_cancel,
             agent::agent_permission_decide,
             agent::agent_question_answer,
-            agent::agent_set_auto_all,
+            agent::agent_set_auto_mode,
             agent::agent_reset_session,
             agent::agent_status,
             agent::agent_recent_events,

@@ -292,11 +292,9 @@ export default function AgentPage() {
     void ensureAgentListeners().then(() => refreshAgentStatus()).catch((error) => setError(`事件监听失败：${String(error)}`));
   }, [setError]);
 
-  // 应用重启后同步「放权模式」开关到后端（开关切换时 setAutoApprove 已实时同步）
+  // 应用重启后同步放权级别到后端（切换时 setAutoMode 已实时同步）
   useEffect(() => {
-    if (useAgentStore.getState().autoApprove) {
-      invoke('agent_set_auto_all', { enabled: true }).catch(() => {});
-    }
+    invoke('agent_set_auto_mode', { mode: useAgentStore.getState().autoMode }).catch(() => {});
   }, []);
 
   // ===== 项目选择（绑定在 store；顶部工具栏选择文件夹，@ 只负责引用文件） =====

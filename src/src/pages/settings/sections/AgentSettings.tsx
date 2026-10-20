@@ -1,11 +1,34 @@
 /**
- * Agent 行为：放权模式 / 最大轮数 / 自动压缩 / 图片识别。
- * 全部经 agent store 即时生效（localStorage 持久化，放权模式同步后端），
+ * Agent 行为：多级放权 / 最大轮数 / 自动压缩 / 图片识别。
+ * 全部经 agent store 即时生效（localStorage 持久化，放权级别同步后端），
  * 不走底部保存栏 —— 与主题同属「即时生效」类。
  */
 import SettingsSection from '../components/SettingsSection';
 import SettingsRow from '../components/SettingsRow';
-import { useAgentStore } from '@/stores/agent';
+import { useAgentStore, type AutoMode } from '@/stores/agent';
+
+const AUTO_MODE_OPTIONS: { value: AutoMode; label: string; desc: string }[] = [
+  {
+    value: 'off',
+    label: '关闭',
+    desc: '所有确认类操作都会弹确认卡，等待你逐个批准。',
+  },
+  {
+    value: 'project',
+    label: '当前目录',
+    desc: '当前项目目录内的文件读写、编辑等路径操作自动批准；其他操作仍弹卡。',
+  },
+  {
+    value: 'workspace',
+    label: '工作空间',
+    desc: '已添加工作空间内的路径操作自动批准；其他操作仍弹卡。',
+  },
+  {
+    value: 'all',
+    label: '全部放行',
+    desc: '所有确认类操作（含 Shell 命令）自动批准，不再弹窗。',
+  },
+];
 
 function Switch({ on, onToggle, title }: { on: boolean; onToggle: () => void; title: string }) {
   return (
@@ -23,8 +46,8 @@ function Switch({ on, onToggle, title }: { on: boolean; onToggle: () => void; ti
 }
 
 export default function AgentSettings() {
-  const autoApprove = useAgentStore((s) => s.autoApprove);
-  const setAutoApprove = useAgentStore((s) => s.setAutoApprove);
+  const autoMode = useAgentStore((s) => s.autoMode);
+  const setAutoMode = useAgentStore((s) => s.setAutoMode);
   const maxTurns = useAgentStore((s) => s.maxTurns);
   const setMaxTurns = useAgentStore((s) => s.setMaxTurns);
   const autoCompactTokens = useAgentStore((s) => s.autoCompactTokens);
@@ -35,14 +58,29 @@ export default function AgentSettings() {
   return (
     <SettingsSection iconId="agent" title="Agent 行为" desc="控制 Agent 执行任务时的确认策略与能力边界，修改立即生效">
       <SettingsRow
-        title="放权模式（自动批准所有操作）"
-        desc="开启后，Agent 的所有确认类操作（写文件、编辑、Shell 命令、网络请求、构建文档等）自动批准，不再弹窗等待点击。未注册工具、提权命令、项目外路径逃逸仍会被硬规则拦截。"
+        title="放权模式"
+        desc="控制哪些确认类操作自动批准。路径级放权只覆盖文件读写、编辑等明确落在边界内的操作；Shell 命令仅在「全部放行」时自动批准。未注册工具、提权命令、项目外路径逃逸始终被硬规则拦截。"
+        stacked
       >
-        <Switch
-          on={autoApprove}
-          onToggle={() => setAutoApprove(!autoApprove)}
-          title={autoApprove ? '已开启：所有操作自动批准，点击关闭' : '已关闭：点击开启'}
-        />
+        <div className="agent-perm-stack">
+          <div className="agent-perm-segments" role="radiogroup" aria-label="放权模式">
+            {AUTO_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={autoMode === opt.value}
+                className={`agent-perm-segment${autoMode === opt.value ? ' is-active' : ''}`}
+                onClick={() => setAutoMode(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="agent-perm-hint">
+            {AUTO_MODE_OPTIONS.find((o) => o.value === autoMode)?.desc}
+          </p>
+        </div>
       </SettingsRow>
 
       <SettingsRow

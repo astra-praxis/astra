@@ -438,6 +438,18 @@ export function parseThinkingEffort(raw: string | null | undefined): ThinkingEff
   return (THINKING_EFFORTS as readonly string[]).includes(raw ?? '') ? (raw as ThinkingEffort) : 'medium';
 }
 
+/** 多级放权级别：off 全部弹卡 / project 项目内 / workspace 工作空间内 / all 全部 */
+export const AUTO_MODES = ['off', 'project', 'workspace', 'all'] as const;
+export type AutoMode = (typeof AUTO_MODES)[number];
+
+/** 解析持久化的放权级别：非法回退 'off'，并迁移旧布尔开关（'1' → 'all'） */
+export function parseAutoMode(raw: string | null | undefined, legacy: string | null | undefined): AutoMode {
+  if ((AUTO_MODES as readonly string[]).includes(raw ?? '')) return raw as AutoMode;
+  // 旧版仅开/关布尔：开 = 全部放行
+  if (raw === null && legacy === '1') return 'all';
+  return 'off';
+}
+
 // ===== Store =====
 
 interface AgentState extends RunWindow {
@@ -454,8 +466,8 @@ interface AgentState extends RunWindow {
   projectPath: string;
   /** 历史会话列表（save/list/delete 后经 refreshSessions 刷新） */
   sessions: AgentSessionMeta[];
-  /** 放权模式：开启后所有确认类操作自动批准，不再弹确认卡 */
-  autoApprove: boolean;
+  /** 多级放权：off 全部弹卡 / project 项目内自动批准 / workspace 工作空间内自动批准 / all 全部自动批准 */
+  autoMode: AutoMode;
   /** Agent 最大续轮数（防无限工具循环预算，默认 50） */
   maxTurns: number;
   /** 上下文自动压缩阈值（估算 token 数，默认 60000，0 = 关闭） */
@@ -480,8 +492,8 @@ interface AgentState extends RunWindow {
   enqueueMessage: (raw: string, text: string, skill: string | null, opts?: { front?: boolean }, images?: UserImage[]) => void;
   removeQueued: (id: string) => void;
   setProjectPath: (v: string) => void;
-  /** 切换放权模式（同步到后端 + localStorage 持久化） */
-  setAutoApprove: (v: boolean) => void;
+  /** 切换多级放权级别（同步到后端 + localStorage 持久化） */
+  setAutoMode: (v: AutoMode) => void;
   /** 设置最大续轮数（localStorage 持久化，新会话生效） */
   setMaxTurns: (v: number) => void;
   /** 设置自动压缩阈值（localStorage 持久化，0 = 关闭） */
@@ -547,7 +559,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   error: '',
   projectPath: '',
   sessions: [],
-  autoApprove: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-autoapprove') === '1',
+  autoMode: parseAutoMode(
+    typeof localStorage === 'undefined' ? null : localStorage.getItem('astra-agent-automode'),
+    typeof localStorage === 'undefined' ? null : localStorage.getItem('astra-agent-autoapprove'),
+  ),
   maxTurns: Number(localStorage?.getItem('astra-agent-maxturns')) || 50,
   autoCompactTokens: parseAutoCompact(localStorage?.getItem('astra-agent-autocompact')),
   imageRecognition: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-image-recognition') === '1',
@@ -605,10 +620,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     recordRecentProject(v);
     set({ projectPath: v });
   },
-  setAutoApprove: (v) => {
-    set({ autoApprove: v });
-    localStorage.setItem('astra-agent-autoapprove', v ? '1' : '0');
-    invoke('agent_set_auto_all', { enabled: v }).catch(() => {
+  setAutoMode: (v) => {
+    set({ autoMode: v });
+    localStorage.setItem('astra-agent-automode', v);
+    invoke('agent_set_auto_mode', { mode: v }).catch(() => {
       // Tauri 不可用（纯 web 调试）时仅保留前端状态
     });
   },

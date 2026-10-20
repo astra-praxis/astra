@@ -213,15 +213,29 @@ pub async fn fetch_provider_models(
 
 // ===== 内部辅助 =====
 
+/// 判断 base 的最后一段是否为 `v<数字>` 版本段（与 astra-model 的
+/// anthropic::has_version_segment 语义一致）。
+fn anthropic_has_version_segment(base: &str) -> bool {
+    base.rsplit('/')
+        .next()
+        .map(|seg| {
+            seg.len() > 1 && seg.starts_with('v') && seg[1..].bytes().all(|b| b.is_ascii_digit())
+        })
+        .unwrap_or(false)
+}
+
 async fn try_get_models_list(
     base_url: &str,
     api_key: &str,
     kind: ProviderKind,
 ) -> Result<Vec<ModelInfo>, String> {
-    let url = if base_url.ends_with('/') {
-        format!("{}models", base_url)
+    let base = base_url.trim_end_matches('/');
+    // Anthropic 按 Claude Code 惯例补全版本段（同 astra-model 的 messages_url）。
+    // OpenAI 保持原有约定：base 由用户写全（现有 provider 均已含 /v1 或 /v3）。
+    let url = if kind == ProviderKind::Anthropic && !anthropic_has_version_segment(base) {
+        format!("{base}/v1/models")
     } else {
-        format!("{}/models", base_url)
+        format!("{base}/models")
     };
 
     let client = reqwest::Client::new();
@@ -412,6 +426,30 @@ pub fn get_provider_inner(app: &AppHandle, id: &str) -> Result<ProviderConfig, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_anthropic_version_segment_detection() {
+        // Claude Code 惯例：裸 base 无版本段 → 需要补 /v1
+        assert!(!anthropic_has_version_segment(
+            "https://ark.cn-beijing.volces.com/api/coding"
+        ));
+        assert!(!anthropic_has_version_segment("https://api.anthropic.com"));
+        // 显式版本段 → 不再补
+        assert!(anthropic_has_version_segment(
+            "https://api.anthropic.com/v1"
+        ));
+        assert!(anthropic_has_version_segment(
+            "https://ark.cn-beijing.volces.com/api/coding/v1"
+        ));
+        assert!(anthropic_has_version_segment("https://gateway.internal/v3"));
+        // 非 v<数字> 的尾段不算版本段
+        assert!(!anthropic_has_version_segment(
+            "https://gateway.internal/api"
+        ));
+        assert!(!anthropic_has_version_segment(
+            "https://gateway.internal/anthropic"
+        ));
+    }
 
     #[test]
     fn test_parse_gateway_error_message() {

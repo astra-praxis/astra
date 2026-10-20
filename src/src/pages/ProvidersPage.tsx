@@ -401,11 +401,17 @@ export default function ProvidersPage() {
               type="text"
               value={newBaseUrl}
               onChange={(e) => setNewBaseUrl(e.target.value)}
-              placeholder={newKind === 'anthropic' ? 'https://api.anthropic.com/v1' : 'http://gateway.internal:8002/v1'}
+              placeholder={newKind === 'anthropic' ? 'https://api.anthropic.com' : 'http://gateway.internal:8002/v1'}
             />
+{newKind === 'anthropic' ? (
             <p className="input-hint">
-              API 地址，通常以 <code>/v1</code> 结尾
+              与 Claude Code 的 <code>ANTHROPIC_BASE_URL</code> 一致，可不带 /v1
             </p>
+            ) : (
+            <p className="input-hint">
+              OpenAI 兼容 API 地址，通常以 <code>/v1</code> 结尾
+            </p>
+            )}
           </div>
           <div className="form-group">
             <label>
@@ -475,11 +481,17 @@ export default function ProvidersPage() {
               type="text"
               value={editBaseUrl}
               onChange={(e) => setEditBaseUrl(e.target.value)}
-              placeholder={editKind === 'anthropic' ? 'https://api.anthropic.com/v1' : 'http://gateway.internal:8002/v1'}
+              placeholder={editKind === 'anthropic' ? 'https://api.anthropic.com' : 'http://gateway.internal:8002/v1'}
             />
+{editKind === 'anthropic' ? (
             <p className="input-hint">
-              API 地址，通常以 <code>/v1</code> 结尾
+              与 Claude Code 的 <code>ANTHROPIC_BASE_URL</code> 一致，可不带 /v1
             </p>
+            ) : (
+            <p className="input-hint">
+              OpenAI 兼容 API 地址，通常以 <code>/v1</code> 结尾
+            </p>
+            )}
           </div>
           <div className="form-group">
             <label>

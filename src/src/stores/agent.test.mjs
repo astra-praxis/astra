@@ -347,13 +347,13 @@ test('partial listener registration cannot consume SDK or host events', async ()
 });
 
 test('status recovers missed settlement, retained errors and successful retry', async () => {
-  let result = { running: false, session_id: null, persistence_errors: { s: 'write failed' } };
+  let result = { running: false, session_id: null, running_sessions: [], persistence_errors: { s: 'write failed' } };
   const { store, refreshAgentStatus } = await harness(async (command) => command === 'agent_status' ? result : []);
   store.getState().setRunState(true, 'analyzing');
   await refreshAgentStatus();
   assert.equal(store.getState().running, false);
   assert.match(store.getState().error, /write failed/);
-  result = { running: false, session_id: null, persistence_errors: {} };
+  result = { running: false, session_id: null, running_sessions: [], persistence_errors: {} };
   await refreshAgentStatus();
   assert.equal(store.getState().error, '');
 });
@@ -363,13 +363,13 @@ test('stale status cannot release a new run or overwrite settlement errors', asy
   const { store, emit, refreshAgentStatus } = await harness(async (command) => command === 'agent_status' ? response.promise : []);
   const old = refreshAgentStatus();
   store.getState().setRunState(true, 'analyzing');
-  response.resolve({ running: false, session_id: null, persistence_errors: {} });
+  response.resolve({ running: false, session_id: null, running_sessions: [], persistence_errors: {} });
   await old;
   assert.equal(store.getState().running, true);
   response = deferred();
   const beforeSettlement = refreshAgentStatus();
   emit('agent-run-settled', { session_id: 's', persistence_error: 'new failure' });
-  response.resolve({ running: true, session_id: 's', persistence_errors: {} });
+  response.resolve({ running: true, session_id: 's', running_sessions: ['s'], persistence_errors: {} });
   await beforeSettlement;
   assert.equal(store.getState().running, false);
   assert.match(store.getState().error, /new failure/);
@@ -381,14 +381,14 @@ test('latest status request wins; recovered host parks into a tab and waits for 
   const { store, emit, refreshAgentStatus } = await harness(async () => (++count === 1 ? first.promise : second.promise));
   store.setState({ sessionId: 's' });
   const one = refreshAgentStatus(), two = refreshAgentStatus();
-  second.resolve({ running: true, session_id: 'recovered', persistence_errors: {} });
+  second.resolve({ running: true, session_id: 'recovered', running_sessions: ['recovered'], persistence_errors: {} });
   await two;
   // 最新请求生效：未知运行中会话进驻留并开 tab，flat 不被劫持
   assert.equal(store.getState().sessionId, 's');
   assert.equal(store.getState().parked.recovered.running, true);
   assert.equal(store.getState().parked.recovered.settling, true);
   assert.ok(store.getState().openTabs.includes('recovered'));
-  first.resolve({ running: false, session_id: null, persistence_errors: {} });
+  first.resolve({ running: false, session_id: null, running_sessions: [], persistence_errors: {} });
   await one;
   // 过期请求被丢弃：不劫持 flat 也不误结算驻留会话
   assert.equal(store.getState().sessionId, 's');

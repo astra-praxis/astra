@@ -292,9 +292,16 @@ impl AutoMode {
 /// 等待用户决定的权限请求集合（tool_call_id → oneshot 发送端）
 #[derive(Default)]
 pub struct PermissionHub {
-    pending: Mutex<HashMap<String, oneshot::Sender<Decision>>>,
+    pending: Mutex<HashMap<String, PendingDecision>>,
     /// 多级放权级别（AutoMode as u8），见 AutoMode 文档
     auto_mode: std::sync::atomic::AtomicU8,
+}
+
+/// Pending map entry with its owning session: per-session cancel must deny
+/// only this session's requests, never another concurrently running one.
+struct PendingDecision {
+    session_id: String,
+    tx: oneshot::Sender<Decision>,
 }
 
 impl PermissionHub {
@@ -308,26 +315,41 @@ impl PermissionHub {
         AutoMode::from_u8(self.auto_mode.load(Ordering::Relaxed))
     }
 
-    fn register(&self, tool_call_id: String) -> oneshot::Receiver<Decision> {
+    fn register(&self, session_id: &str, tool_call_id: String) -> oneshot::Receiver<Decision> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(tool_call_id, tx);
+        self.pending.lock().unwrap().insert(
+            tool_call_id,
+            PendingDecision {
+                session_id: session_id.to_string(),
+                tx,
+            },
+        );
         rx
     }
 
     fn decide(&self, tool_call_id: &str, d: Decision) -> Result<(), String> {
-        let tx = self
+        let pending = self
             .pending
             .lock()
             .unwrap()
             .remove(tool_call_id)
             .ok_or_else(|| format!("没有等待中的权限请求: {tool_call_id}"))?;
-        let _ = tx.send(d);
+        let _ = pending.tx.send(d);
         Ok(())
     }
 
     /// 取消 / 重置时丢弃全部挂起请求（对应 receiver 会收到 Err → Deny）
     fn drop_all(&self) {
         self.pending.lock().unwrap().clear();
+    }
+
+    /// 取消单个会话时只丢弃该会话的挂起请求（P3 并发：其他会话的
+    /// 确认卡不受影响，继续等待用户决策）
+    fn drop_session(&self, session_id: &str) {
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|_, p| p.session_id != session_id);
     }
 }
 
@@ -554,7 +576,7 @@ impl PermissionBridge for HubBridge {
         } else {
             req.tool_call_id
         };
-        let rx = self.hub.register(id.clone());
+        let rx = self.hub.register(&self.session_id, id.clone());
         let decision = match rx.await {
             Ok(d) => d,
             Err(_) => Decision::Deny,
@@ -572,10 +594,22 @@ impl PermissionBridge for HubBridge {
 
 // ===== 全局状态 =====
 
+/// One live Run per session (SESSION_RUNTIME_SPEC P3). `generation` fences
+/// cleanup: an interrupt-send starts a newer Run for the same session while
+/// the old Run's forwarder is still draining, and only the forwarder whose
+/// generation matches the stored entry may release the slot.
+#[derive(Clone)]
+struct ActiveRun {
+    generation: u64,
+    handle: RunHandle,
+}
+
+static RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct AgentState {
     hub: Arc<PermissionHub>,
     questions: Arc<QuestionHub>,
-    active: Arc<Mutex<Option<(String, RunHandle)>>>,
+    active: Arc<Mutex<HashMap<String, ActiveRun>>>,
     pub(crate) threads: Arc<tokio::sync::Mutex<crate::agent_threads::AgentThreads>>,
     pub(crate) persistence_errors: crate::agent_threads::PersistenceErrors,
     // Serialize UI JSON updates and reject delayed saves after deletion.
@@ -618,7 +652,7 @@ impl Default for AgentState {
         Self {
             hub: Arc::new(PermissionHub::default()),
             questions: Arc::new(QuestionHub::default()),
-            active: Arc::new(Mutex::new(None)),
+            active: Arc::new(Mutex::new(HashMap::new())),
             threads: Arc::new(tokio::sync::Mutex::new(
                 crate::agent_threads::AgentThreads::default(),
             )),
@@ -652,13 +686,20 @@ impl Default for AgentState {
 /// 等待用户回答的问题集合（question_id → oneshot 发送端）
 #[derive(Default)]
 pub struct QuestionHub {
-    pending: Mutex<HashMap<String, oneshot::Sender<Option<String>>>>,
+    pending: Mutex<HashMap<String, PendingQuestion>>,
+}
+
+/// Pending map entry with its owning session (同 PendingDecision：按会话取消
+/// 不得波及其他并行运行会话的挂起问题卡)
+struct PendingQuestion {
+    session_id: String,
+    tx: oneshot::Sender<Option<String>>,
 }
 
 static QUESTION_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl QuestionHub {
-    fn register(&self) -> (String, oneshot::Receiver<Option<String>>) {
+    fn register(&self, session_id: &str) -> (String, oneshot::Receiver<Option<String>>) {
         let seq = QUESTION_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let id = format!(
             "q-{}-{seq}",
@@ -668,25 +709,39 @@ impl QuestionHub {
                 .unwrap_or(0)
         );
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id.clone(), tx);
+        self.pending.lock().unwrap().insert(
+            id.clone(),
+            PendingQuestion {
+                session_id: session_id.to_string(),
+                tx,
+            },
+        );
         (id, rx)
     }
 
     /// 用户回答（None = 取消/拒绝）
     fn answer(&self, question_id: &str, answer: Option<String>) -> Result<(), String> {
-        let tx = self
+        let pending = self
             .pending
             .lock()
             .unwrap()
             .remove(question_id)
             .ok_or_else(|| format!("没有等待中的问题: {question_id}"))?;
-        let _ = tx.send(answer);
+        let _ = pending.tx.send(answer);
         Ok(())
     }
 
     /// 取消 / 重置时丢弃全部挂起问题（对应 receiver 收到 Err → 问题作废）
     fn drop_all(&self) {
         self.pending.lock().unwrap().clear();
+    }
+
+    /// 取消单个会话时只丢弃该会话的挂起问题（P3 并发）
+    fn drop_session(&self, session_id: &str) {
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|_, p| p.session_id != session_id);
     }
 }
 
@@ -742,7 +797,7 @@ impl agent_core::UserQuestionBridge for QuestionBridge {
         options: Vec<String>,
         allow_free_text: bool,
     ) -> std::result::Result<String, String> {
-        let (qid, rx) = self.hub.register();
+        let (qid, rx) = self.hub.register(&self.session_id);
         self.app
             .emit(
                 "agent-question",
@@ -1182,10 +1237,11 @@ pub async fn agent_start_run(
     state: State<'_, AgentState>,
     req: AgentStartReq,
 ) -> Result<String, String> {
-    // Keep admission exclusive through stream closure, including write-through.
-    let mut threads = Arc::clone(&state.threads)
-        .try_lock_owned()
-        .map_err(|_| "Agent is running, draining or changing sessions".to_string())?;
+    // P3 concurrent runs (SESSION_RUNTIME_SPEC §5): the host lock now only
+    // covers admission (store open, config bind, Thread build). Each Thread
+    // serializes its own Runs via its execution lock, so different sessions
+    // stream in parallel and only two simultaneous admissions queue here.
+    let mut threads = Arc::clone(&state.threads).lock_owned().await;
     let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
     threads
         .open(&directory, Arc::clone(&state.persistence_errors))
@@ -1271,6 +1327,17 @@ pub async fn agent_start_run(
     // 3. 取或建 Thread（绑定 root/backend/policy；历史保留在消息序列里）
     {
         if dest_changed && threads.threads.contains_key(&session_id) {
+            // P3: never unload a Thread whose Run is still streaming — a
+            // reload would build a second in-memory instance diverging from
+            // the live run. Stop it first, then switch model source.
+            if state
+                .active
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&session_id)
+            {
+                return Err("会话正在运行，请先停止再切换模型来源".into());
+            }
             // 模型来源切换：卸载缓存 Thread 后按新 backend 重建。历史消息
             // 已持久化在 SQLite，Thread::load 会恢复；存在持久化错误（未
             // 落盘尾部）时卸载会失败，此处明确报错而不是静默丢消息。
@@ -1443,7 +1510,15 @@ pub async fn agent_start_run(
             return Err(error.to_string());
         }
     };
-    *state.active.lock().unwrap_or_else(|e| e.into_inner()) = Some((session_id.clone(), handle));
+    // Register the run with a generation so the forwarder below only
+    // releases its own slot (an interrupt-send may already have started a
+    // newer run for the same session before this one finished draining).
+    let generation = RUN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    state
+        .active
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(session_id.clone(), ActiveRun { generation, handle });
 
     // 4. 事件转发任务：Envelope → agent-event + JSONL 日志；Run 结束（tx 全部 drop）后自然退出
     let forward_app = app.clone();
@@ -1477,9 +1552,15 @@ pub async fn agent_start_run(
             .unwrap_or_else(|e| e.into_inner())
             .get(&settled_session)
             .cloned();
-        *active.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        // Release admission before notifying the UI that another send is safe.
-        drop(threads);
+        // Release this run's slot before notifying the UI that another send
+        // is safe. Generation fence: a newer run for the same session owns
+        // the slot when this forwarder lost the interrupt-send race.
+        {
+            let mut active = active.lock().unwrap_or_else(|e| e.into_inner());
+            if active.get(&settled_session).map(|r| r.generation) == Some(generation) {
+                active.remove(&settled_session);
+            }
+        }
         let _ = forward_app.emit(
             "agent-run-settled",
             json!({
@@ -1512,19 +1593,35 @@ pub async fn agent_start_run(
 }
 
 /// 取消当前 Run（停止不再启动新工具调用；进行中的模型流被中断）。
-/// 返回是否确实取消了活跃 Run：发送后的启动准备阶段（checkpoint/存储写入）
-/// 尚未登记 active 时取消是空操作，前端据此给出可见反馈而不是静默失败。
+/// `session_id` 指定会话（tab 的停止按钮，只取消该会话，不影响其他
+/// 并行运行）；None 取消全部活跃 Run（旧的全局入口语义）。返回是否
+/// 确实取消了运行：发送后的启动准备阶段尚未登记 active 时取消是空
+/// 操作，前端据此给出可见反馈而不是静默失败。
 #[tauri::command]
-pub fn agent_cancel(state: State<'_, AgentState>) -> bool {
+pub fn agent_cancel(state: State<'_, AgentState>, session_id: Option<String>) -> bool {
     // Do not clear active until the receiver has drained the persistence tail.
     let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, handle)) = active.as_ref() {
-        handle.cancel();
-        state.hub.drop_all();
-        state.questions.drop_all();
-        true
-    } else {
-        false
+    match session_id {
+        Some(sid) => {
+            let Some(run) = active.get(&sid) else {
+                return false;
+            };
+            run.handle.cancel();
+            state.hub.drop_session(&sid);
+            state.questions.drop_session(&sid);
+            true
+        }
+        None => {
+            if active.is_empty() {
+                return false;
+            }
+            for run in active.values() {
+                run.handle.cancel();
+            }
+            state.hub.drop_all();
+            state.questions.drop_all();
+            true
+        }
     }
 }
 
@@ -1568,16 +1665,24 @@ pub async fn agent_reset_session(
     state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    let mut threads = state.threads.try_lock().map_err(|_| {
-        "Agent is running or draining; cancel and wait before unloading".to_string()
-    })?;
+    // P3: an unload while the session's Run is streaming would orphan the
+    // live run and let the next send build a diverging second Thread.
+    if state
+        .active
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&session_id)
+    {
+        return Err("会话正在运行，请先停止再重置".into());
+    }
+    let mut threads = state.threads.lock().await;
     threads.unload(&session_id, &state.persistence_errors)
 }
 
 /// 扩展开关变更后批量卸载内存 Thread：所有空闲会话在下次对话时按新配置
-/// 重新装配 MCP/ACP。正在运行的会话持有 threads 锁 → 整体失败，由前端
-/// 提示「将在下次对话时生效」；带未落盘错误的会话跳过（unload 返回 Err），
-/// 不影响其余会话。
+/// 重新装配 MCP/ACP。正在运行的会话跳过（P3：不得卸载有活跃 Run 的
+/// Thread，否则孤儿 Run + 双实例），由前端提示「将在下次对话时生效」；
+/// 带未落盘错误的会话跳过（unload 返回 Err），不影响其余会话。
 #[derive(serde::Serialize)]
 pub struct UnloadAllReport {
     pub unloaded: usize,
@@ -1588,16 +1693,26 @@ pub struct UnloadAllReport {
 pub async fn agent_unload_all_sessions(
     state: State<'_, AgentState>,
 ) -> Result<UnloadAllReport, String> {
-    let mut threads = state.threads.try_lock().map_err(|_| {
-        "Agent is running or draining; the change applies when that conversation continues"
-            .to_string()
-    })?;
+    let mut threads = state.threads.lock().await;
+    let running: std::collections::HashSet<String> = state
+        .active
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .cloned()
+        .collect();
     let ids: Vec<String> = threads.threads.keys().cloned().collect();
     let mut report = UnloadAllReport {
         unloaded: 0,
         skipped: Vec::new(),
     };
     for id in ids {
+        if running.contains(&id) {
+            report
+                .skipped
+                .push(format!("{id}: 会话正在运行，将在结束后生效"));
+            continue;
+        }
         match threads.unload(&id, &state.persistence_errors) {
             Ok(()) => report.unloaded += 1,
             Err(e) => report.skipped.push(format!("{id}: {e}")),
@@ -1707,17 +1822,29 @@ pub async fn agent_open_preview(
 /// 当前 Agent 是否有进行中的 Run（页面刷新后恢复状态用）
 #[derive(Debug, Serialize)]
 pub struct AgentStatus {
+    /// P3 兼容字段：任一会话在跑即 true（完整列表见 running_sessions）
     pub running: bool,
+    /// 恰好一个会话在跑时返回它；多个/零个时为 None（完整列表见
+    /// running_sessions，旧调用方不应再依赖本字段）
     pub session_id: Option<String>,
+    /// 所有活跃 Run 的会话 id（P3 并发运行）
+    pub running_sessions: Vec<String>,
     pub persistence_errors: HashMap<String, String>,
 }
 
 #[tauri::command]
 pub fn agent_status(state: State<'_, AgentState>) -> AgentStatus {
     let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
+    let mut running_sessions: Vec<String> = active.keys().cloned().collect();
+    running_sessions.sort();
     AgentStatus {
-        running: active.is_some(),
-        session_id: active.as_ref().map(|(id, _)| id.clone()),
+        running: !active.is_empty(),
+        session_id: if active.len() == 1 {
+            active.keys().next().cloned()
+        } else {
+            None
+        },
+        running_sessions,
         persistence_errors: state
             .persistence_errors
             .lock()
@@ -1905,8 +2032,8 @@ pub async fn agent_checkpoint_restore(
     // 进行中的 Run 会持有 threads 生命周期锁；先给出明确提示而不是静默排队。
     {
         let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
-        if active.is_some() {
-            return Err("Agent 正在运行，请先取消当前任务再恢复 checkpoint".into());
+        if active.contains_key(&session_id) {
+            return Err("会话正在运行，请先取消当前任务再恢复 checkpoint".into());
         }
     }
     let mut threads = state.threads.lock().await;
@@ -1972,8 +2099,8 @@ pub async fn agent_rewind_to_user_message(
     // 进行中的 Run 会持有 threads 生命周期锁；先给出明确提示而不是静默排队。
     {
         let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
-        if active.is_some() {
-            return Err("Agent 正在运行，请先取消当前任务再回退".into());
+        if active.contains_key(&session_id) {
+            return Err("会话正在运行，请先取消当前任务再回退".into());
         }
     }
     let mut threads = state.threads.lock().await;

@@ -1223,33 +1223,38 @@ export async function refreshAgentStatus(): Promise<void> {
   if (useAgentStore.getState().sessionBusy) return;
   try {
     const status = await invoke<{
-      running: boolean; session_id: string | null; persistence_errors: Record<string, string>;
+      running: boolean; session_id: string | null; running_sessions: string[];
+      persistence_errors: Record<string, string>;
     }>('agent_status');
     if (request !== statusRequest || revision !== lifecycleRevision) return;
     const st = useAgentStore.getState();
-    if (!status.running) {
+    // 后端快照是唯一事实：凡前端认为在跑、而后端活跃表里没有的会话一律结算
+    // （covered missed settled 事件）；活跃表里的会话逐一标记/恢复 running。
+    const running = new Set(status.running_sessions);
+    // 后端快照是唯一事实：当前会话不在活跃表里就结算（承担 missed settled
+    // 恢复与「重试成功后清除保留错误」两个职责，与单活动 Run 时代一致）
+    if (!running.has(st.sessionId)) {
       settleRun({ session_id: st.sessionId, persistence_error: status.persistence_errors[st.sessionId] ?? null });
-      // 驻留中的运行会话一并结算（切走期间后端已把 Run 跑完）
-      for (const p of Object.values(st.parked)) {
-        if (p.running) {
-          settleRun({ session_id: p.sessionId, persistence_error: status.persistence_errors[p.sessionId] ?? null });
-        }
+    }
+    for (const p of Object.values(st.parked)) {
+      if (p.running && !running.has(p.sessionId)) {
+        settleRun({ session_id: p.sessionId, persistence_error: status.persistence_errors[p.sessionId] ?? null });
       }
-      useAgentStore.setState({ persistenceErrors: status.persistence_errors });
-    } else if (status.session_id) {
-      const sid = status.session_id;
-      if (sid === st.sessionId) {
+    }
+    for (const sid of running) {
+      const cur = useAgentStore.getState();
+      if (sid === cur.sessionId) {
         useAgentStore.setState({
           persistenceErrors: status.persistence_errors,
           running: true,
           // A recovered stream may have missed its terminal event; wait for the host barrier.
-          settling: st.settling,
-          status: st.status ?? 'analyzing',
-          error: persistenceMessage(status.persistence_errors[sid]) || st.error,
+          settling: cur.settling,
+          status: cur.status ?? 'analyzing',
+          error: persistenceMessage(status.persistence_errors[sid]) || cur.error,
         });
-      } else if (st.parked[sid]) {
+      } else if (cur.parked[sid]) {
         // 运行中的会话当前处于驻留态：保持事件路由生效
-        const p = st.parked[sid]!;
+        const p = cur.parked[sid]!;
         armSettleWatchdog(sid);
         useAgentStore.setState((s) => ({
           parked: {

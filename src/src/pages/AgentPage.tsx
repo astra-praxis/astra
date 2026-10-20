@@ -45,7 +45,6 @@ import {
   useAgentStore,
   ensureAgentListeners,
   refreshAgentStatus,
-  runningSessionId,
   nextQueuedFor,
   THINKING_EFFORTS,
   type AgentUsage,
@@ -379,12 +378,9 @@ export default function AgentPage() {
       ? (selectedModel?.name ?? 'local')
       : (overrideModelName ?? selectedProvider?.active_model ?? null);
 
-  // 占用后端单活动 Run 准入的会话（可能是别的 tab 的会话在跑）：多 tab 发送互斥
-  const busySessionId = useAgentStore((s) => runningSessionId(s));
-
+  // P3 并发运行：每个会话独立跑 Run，其他 tab 的运行不再阻塞本会话发送
   const canSend =
     !running &&
-    (busySessionId === null || busySessionId === sessionId) &&
     input.trim().length > 0 &&
     (sourceType === 'model' ? !!selectedModelPort : !!selectedProviderId && !!modelName);
 
@@ -533,7 +529,7 @@ export default function AgentPage() {
         setError(`事件监听失败：${String(error)}`);
         return;
       }
-      if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId || runningSessionId(useAgentStore.getState()) !== null) return;
+      if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId) return;
       // 编辑重发：真正发送前才执行回退（取消编辑则什么都不丢）。失败时不发送、
       // 保留编辑意图，用户可直接重试
       if (editing) {
@@ -595,7 +591,7 @@ export default function AgentPage() {
    *  找不到快照时降级为仅回退对话（非 git 项目 / 本功能上线前的会话） */
   const handleFailureRewind = useCallback(
     async (mode: 'retry' | 'edit') => {
-      if (running || settling || (busySessionId !== null && busySessionId !== sessionId)) return;
+      if (running || settling) return;
       const lastUser = [...entries].reverse().find(
         (e): e is Extract<Entry, { kind: 'user' }> => e.kind === 'user',
       );
@@ -617,14 +613,14 @@ export default function AgentPage() {
         setError(`回退失败：${String(e)}`);
       }
     },
-    [running, settling, busySessionId, sessionId, entries, rewindToUserTurn, setError, setInput, parseSendInput, doSend],
+    [running, settling, sessionId, entries, rewindToUserTurn, setError, setInput, parseSendInput, doSend],
   );
 
   /** 历史用户消息「编辑重发」：只记回退意图并回填输入框（真正回退发生在发送时，
    *  取消零损失）。其后有值得保留的内容（成功回复 / 完成终态）时弹确认 */
   const handleEditUserMessage = useCallback(
     (idx: number) => {
-      if (running || settling || (busySessionId !== null && busySessionId !== sessionId)) return;
+      if (running || settling) return;
       const pos = userMsgIdx.indexOf(idx);
       const entry = entries[idx];
       if (pos < 0 || entry.kind !== 'user') return;
@@ -649,7 +645,7 @@ export default function AgentPage() {
       setInput(entry.text);
       requestAnimationFrame(() => composerRef.current?.focusEnd());
     },
-    [running, settling, busySessionId, sessionId, userMsgIdx, entries, setInput],
+    [running, settling, sessionId, userMsgIdx, entries, setInput],
   );
 
   /** 取消编辑：只清意图与输入框，对话不做任何回退 */
@@ -678,17 +674,17 @@ export default function AgentPage() {
     if (!parsed) return;
     setEditing(null); // 插队新消息 = 放弃挂起的编辑意图（不回退）
     const st = useAgentStore.getState();
-    const interruptible = st.running && !st.settling && (busySessionId === null || busySessionId === sessionId);
+    const interruptible = st.running && !st.settling;
     enqueueMessage(raw, parsed.text, parsed.skill, { front: interruptible });
     setInput('');
     if (interruptible) {
       try {
-        await invoke('agent_cancel');
+        await invoke('agent_cancel', { sessionId });
       } catch (error) {
         setError(`停止失败：${String(error)}`);
       }
     }
-  }, [input, parseSendInput, enqueueMessage, setInput, setError, busySessionId, sessionId]);
+  }, [input, parseSendInput, enqueueMessage, setInput, setError, sessionId]);
 
   /** 编辑排队消息（Zed move_queued_message_to_main_editor 语义）：
    *  从队列移除，原文回填主输入框并聚焦到末尾，改完再自行发送 */
@@ -701,17 +697,17 @@ export default function AgentPage() {
   }, [removeQueued, setInput]);
 
   /** 立即发送指定排队消息（Zed send_queued_message_now 语义）：
-   *  空闲时直接发；本会话运行中则取消当前 Run 后立即发（消息插队首，
-   *  settled 后由续发 effect 发出）；别的会话占用后端时仅插队不打断 */
+   *  本会话空闲时直接发；本会话运行中则取消当前 Run 后立即发（消息插队首，
+   *  settled 后由续发 effect 发出）。其他会话的运行与本会话无关（P3 并发） */
   const sendQueuedNow = useCallback(async (q: QueuedMessage) => {
     const st = useAgentStore.getState();
-    const interruptible = st.running && !st.settling && (busySessionId === null || busySessionId === q.sessionId);
+    const interruptible = st.running && !st.settling;
     setEditing(null); // 手动发队首 = 放弃挂起的编辑意图（不回退）
     removeQueued(q.id);
     if (interruptible) {
       enqueueMessage(q.raw, q.text, q.skill, { front: true });
       try {
-        await invoke('agent_cancel');
+        await invoke('agent_cancel', { sessionId: q.sessionId });
       } catch (error) {
         setError(`停止失败：${String(error)}`);
       }
@@ -720,41 +716,43 @@ export default function AgentPage() {
     } else {
       enqueueMessage(q.raw, q.text, q.skill, { front: true });
     }
-  }, [busySessionId, removeQueued, enqueueMessage, doSend, setError]);
+  }, [removeQueued, enqueueMessage, doSend, setError]);
 
   // ===== 队列续发：Run 结束后自动发出当前会话的队首消息。
   //  上一条以 failed 终态收尾时暂停自动续发（防模型配置错误时连环烧完队列），
-  //  用户手动发送成功一次后恢复。后端在 settled 事件前已释放准入锁，无需重试。
+  //  用户手动发送成功一次后恢复。其他会话的运行与本会话无关（P3 并发），
+  //  不再阻塞续发。
   const lastEntry = entries[entries.length - 1];
   const lastFailed = lastEntry?.kind === 'terminal' && lastEntry.outcome === 'failed';
   const doSendRef = useRef(doSend);
   doSendRef.current = doSend;
   useEffect(() => {
-    if (running || settling || busySessionId !== null || lastFailed || editing) return;
+    if (running || settling || lastFailed || editing) return;
     const head = nextQueuedFor(useAgentStore.getState().queue, sessionId);
     if (!head) return;
     const timer = setTimeout(() => {
       const st = useAgentStore.getState();
-      if (st.running || st.settling || st.sessionBusy || runningSessionId(st) !== null) return;
+      if (st.running || st.settling || st.sessionBusy) return;
       if (st.queue.find((q) => q.id === head.id) == null) return; // 排队期间被删除
       st.removeQueued(head.id);
       void doSendRef.current(head.raw, head.skill, head.text);
     }, 120);
     return () => clearTimeout(timer);
-  }, [running, settling, busySessionId, queue, sessionId, lastFailed, editing]);
+  }, [running, settling, queue, sessionId, lastFailed, editing]);
 
   const handleStop = useCallback(async () => {
     if (useAgentStore.getState().settling || useAgentStore.getState().sessionBusy) return;
     try {
+      // 只取消本会话的 Run（P3 并发：其他 tab 的运行不受影响）。
       // 启动准备阶段（checkpoint / 存储写入）尚未登记 active 时取消是空操作：
       // 明确告知而不是静默失败，让用户知道为什么没有反应。
-      const cancelled = await invoke<boolean>('agent_cancel');
+      const cancelled = await invoke<boolean>('agent_cancel', { sessionId });
       if (!cancelled) setError('没有可停止的运行中任务（若刚发送，仍在准备阶段，请稍候）');
     } catch (error) {
       setError(`停止失败：${String(error)}`);
     }
     // Keep admission occupied until agent-run-settled, including cancellation drain.
-  }, [setError]);
+  }, [setError, sessionId]);
 
   const handleDecide = useCallback(
     async (callId: string, allow: boolean) => {
@@ -1191,7 +1189,7 @@ export default function AgentPage() {
                           onClick={() => void sendQueuedNow(q)}
                           aria-label="立即发送"
                           title={
-                            running && (busySessionId === null || busySessionId === q.sessionId)
+                            running
                               ? '打断当前回答并立即发送'
                               : '立即发送'
                           }
@@ -1281,14 +1279,10 @@ export default function AgentPage() {
                         <button
                           type="button"
                           className="agent-dock__send"
-                          disabled={settling || (busySessionId !== null && busySessionId !== sessionId)}
+                          disabled={settling}
                           onClick={handleQueueSend}
                           aria-label="排队发送"
-                          title={
-                            busySessionId !== null && busySessionId !== sessionId
-                              ? `会话 ${busySessionId.slice(-4)} 正在运行，结束后自动续发`
-                              : '排队发送，回答结束后自动发出 · Ctrl/⌘+Enter 打断并优先发送'
-                          }
+                          title="排队发送，回答结束后自动发出 · Ctrl/⌘+Enter 打断并优先发送"
                         >
                           <ArrowRight size={16} strokeWidth={2.5} />
                         </button>
@@ -1305,11 +1299,7 @@ export default function AgentPage() {
                       disabled={!canSend}
                       onClick={() => void handleSend()}
                       aria-label="发送"
-                      title={
-                        busySessionId !== null && busySessionId !== sessionId
-                          ? `会话 ${busySessionId.slice(-4)} 正在运行，结束后才能在其他会话发送`
-                          : 'Enter 发送 · Shift+Enter 换行 · @ 引用文件'
-                      }
+                      title="Enter 发送 · Shift+Enter 换行 · @ 引用文件"
                     >
                       <ArrowRight size={16} strokeWidth={2.5} />
                     </button>

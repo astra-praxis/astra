@@ -83,6 +83,4 @@ export const RESOURCE_LINKS: { icon: string; label: string; to: string }[] = [
   { icon: '🧩', label: 'Skills 管理', to: '/skills' },
   { icon: '⚡', label: '我的 Skills', to: '/my-skills' },
   { icon: '🧰', label: '工具箱', to: '/tools' },
-  { icon: '📦', label: '产物库', to: '/artifacts' },
-  { icon: '📜', label: '日志', to: '/logs' },
 ];

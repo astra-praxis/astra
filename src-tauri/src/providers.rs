@@ -227,14 +227,16 @@ async fn try_get_models_list(
     let client = reqwest::Client::new();
     let mut request = client.get(&url);
     match kind {
-        ProviderKind::OpenAi => {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
-        }
-        ProviderKind::Anthropic => {
+        // 同时发两种认证头：官方 Anthropic 认 x-api-key（忽略 Authorization），
+        // Ark 等网关认 Authorization: Bearer（忽略 x-api-key）。实测互不干扰。
+        ProviderKind::OpenAi | ProviderKind::Anthropic => {
             request = request
-                .header("x-api-key", api_key)
-                .header("anthropic-version", "2023-06-01");
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("x-api-key", api_key);
         }
+    }
+    if kind == ProviderKind::Anthropic {
+        request = request.header("anthropic-version", "2023-06-01");
     }
     let response = request
         .send()

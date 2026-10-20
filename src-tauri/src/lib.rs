@@ -132,8 +132,9 @@ struct AppSettings {
     /// 引擎的旧设置仍走 SearXNG）
     #[serde(default)]
     search_endpoint: Option<String>,
-    /// 记忆摘要路径开关：true = 宿主 agent LLM 做会话总结（失败自动
-    /// 降级回规则合并）；false = 纯规则（默认）。重启后生效。
+    /// 记忆 agent 路径总开关：true = 宿主 agent LLM 负责会话总结、记忆
+    /// 提炼（W1）与 supersedes 语义确认（W2），各自失败自动降级（规则
+    /// 合并 / 规则提炼 / 不建链）；false = 全部纯规则（默认）。重启后生效。
     #[serde(default)]
     memory_agent_summary: bool,
     /// agent 摘要使用的 provider id；None = 自动选第一个配置齐全的
@@ -1444,19 +1445,38 @@ pub fn run() {
             // 摘要路径开关（memory_agent_summary）重启后生效；开启时用
             // settings 里指定的 provider（或自动选第一个可用的）做总结。
             let settings = get_settings(app.handle().clone());
+            let provider_id = settings.memory_summary_provider_id.clone();
             let agent_summary_client = if settings.memory_agent_summary {
                 eprintln!(
                     "[memory] agent summary enabled (provider: {})",
-                    settings
-                        .memory_summary_provider_id
-                        .as_deref()
-                        .unwrap_or("auto")
+                    provider_id.as_deref().unwrap_or("auto")
                 );
                 Some(Box::new(crate::memory::HostAgentSummaryClient::new(
                     app.handle().clone(),
-                    settings.memory_summary_provider_id,
+                    provider_id.clone(),
                 ))
                     as Box<dyn astra_memory::cme::compactor::AgentSummaryClient>)
+            } else {
+                None
+            };
+            // 同一开关（memory_agent_summary）同时控制提炼路径（W1）与
+            // supersedes 语义确认（W2）：都复用宿主 agent LLM 通道，失败
+            // 各自降级（提炼回规则、确认不建链）。
+            let agent_extraction_client = if settings.memory_agent_summary {
+                Some(Box::new(crate::memory::HostAgentExtractionClient::new(
+                    app.handle().clone(),
+                    provider_id.clone(),
+                ))
+                    as Box<dyn astra_memory::cme::extract::AgentExtractionClient>)
+            } else {
+                None
+            };
+            let supersede_reviewer = if settings.memory_agent_summary {
+                Some(Box::new(crate::memory::HostSupersedeReviewer::new(
+                    app.handle().clone(),
+                    provider_id,
+                ))
+                    as Box<dyn astra_memory::cme::consolidate::SupersedeReviewer>)
             } else {
                 None
             };
@@ -1466,6 +1486,8 @@ pub fn run() {
                         &dir,
                         crate::memory::MemoryInitOptions {
                             agent_summary_client,
+                            agent_extraction_client,
+                            supersede_reviewer,
                         },
                     ) {
                         Ok(host) => {

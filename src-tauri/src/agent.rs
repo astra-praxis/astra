@@ -145,9 +145,10 @@ impl MemoryRunCollector {
 }
 
 /// Run 结束后的记忆提交（observe spawn 与真实 Run 测试共用）：登记采集
-/// 消息进 CME 待处理队列，含优先级线索时立即压缩提炼。任何失败只记
-/// 日志：记忆故障永不阻断 agent（D21）。返回是否走了立即处理路径
-/// （priority gate 触发），测试用于断言。
+/// 消息进 CME 待处理队列，含优先级线索时立即压缩提炼；有待确认的
+/// supersedes 意图且语义确认通道可用时，逐条裁决建链（docs/13 W2）。
+/// 任何失败只记日志：记忆故障永不阻断 agent（D21）。返回是否走了立即
+/// 处理路径（priority gate 触发），测试用于断言。
 async fn commit_collected_memory(
     engine: &std::sync::Arc<
         astra_memory::cme::engine::MemoryEngine<astra_memory::cme::store_sqlite::CmeSqliteStore>,
@@ -157,6 +158,7 @@ async fn commit_collected_memory(
     project: Option<&str>,
     user_text: &str,
     now_ms: u64,
+    reviewer: Option<&dyn astra_memory::cme::consolidate::SupersedeReviewer>,
 ) -> bool {
     if let Err(error) = engine.set_thread_scope(session_id, project).await {
         eprintln!("[memory] cme set_thread_scope failed (session {session_id}): {error}");
@@ -171,6 +173,27 @@ async fn commit_collected_memory(
     let force = engine.has_priority_pending();
     if let Err(error) = engine.process_pending(force).await {
         eprintln!("[memory] cme process_pending failed (session {session_id}): {error}");
+    }
+    // 语义确认（docs/13 W2）：规则发现的非 Decision supersedes 意图只有
+    // 宿主 agent 裁决后才建链；拒绝/失败都保守并存，意图不重复入队。
+    if engine.pending_supersede_count() > 0 {
+        match reviewer {
+            Some(reviewer) => match engine.resolve_pending_supersedes(reviewer).await {
+                Ok(r) => eprintln!(
+                    "[memory] supersede resolved (session {session_id}): chained={} rejected={} unresolved={} vanished={}",
+                    r.chained, r.rejected, r.unresolved, r.vanished
+                ),
+                Err(error) => {
+                    eprintln!(
+                        "[memory] cme resolve_supersedes failed (session {session_id}): {error}"
+                    )
+                }
+            },
+            None => eprintln!(
+                "[memory] {} supersede intent(s) pending (semantic reviewer disabled)",
+                engine.pending_supersede_count()
+            ),
+        }
     }
     force
 }
@@ -1237,6 +1260,7 @@ pub async fn agent_start_run(
     // 压缩会话并提炼长期记忆。提炼是确定性规则，无模型调用；异步 spawn，
     // 不阻塞 Run 结束路径。任何失败只记日志：记忆故障永不阻断 agent（D21）。
     let observe_engine = state.memory.get().map(|m| m.engine().clone());
+    let observe_reviewer = state.memory.get().and_then(|m| m.supersede_reviewer());
     let observe_text = user_text.clone();
     let observe_project = bound_project.clone();
     tokio::spawn(async move {
@@ -1264,6 +1288,7 @@ pub async fn agent_start_run(
                 observe_project.as_deref(),
                 &observe_text,
                 now_ms,
+                observe_reviewer.as_deref(),
             )
             .await;
         }
@@ -2656,6 +2681,7 @@ mod tests {
             bound_project.as_deref(),
             prompt1,
             1_800_000_000_000,
+            None,
         )
         .await;
         assert!(force, "verified shell result must trip the priority gate");
@@ -2814,6 +2840,7 @@ mod tests {
             bound_project.as_deref(),
             prompt2,
             1_800_000_100_000,
+            None,
         )
         .await;
     }

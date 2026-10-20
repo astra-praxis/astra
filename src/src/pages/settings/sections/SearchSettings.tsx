@@ -12,7 +12,7 @@ export default function SearchSettings() {
   if (!draft) return null;
 
   return (
-    <SettingsSection icon="🔍" title="搜索" desc="Agent 联网搜索（search_web）使用的后端">
+    <SettingsSection iconId="search" title="搜索" desc="Agent 联网搜索（search_web）使用的后端">
       <SettingsRow
         title="搜索引擎"
         desc="默认 Bing（一般可直连）。DuckDuckGo 部分网络不可达；SearXNG 需自建或指定实例地址（需开启 format=json）。保存后新会话生效。"

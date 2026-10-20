@@ -55,7 +55,7 @@ export default function DevelopmentSettings() {
 
   return (
     <SettingsSection
-      icon="⚡"
+      iconId="editor"
       title="默认编辑器"
       desc="点击工作空间的项目卡片时，使用此编辑器打开项目目录"
     >

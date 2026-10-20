@@ -33,7 +33,7 @@ export default function AgentSettings() {
   const setImageRecognition = useAgentStore((s) => s.setImageRecognition);
 
   return (
-    <SettingsSection icon="🤖" title="Agent 行为" desc="控制 Agent 执行任务时的确认策略与能力边界，修改立即生效">
+    <SettingsSection iconId="agent" title="Agent 行为" desc="控制 Agent 执行任务时的确认策略与能力边界，修改立即生效">
       <SettingsRow
         title="放权模式（自动批准所有操作）"
         desc="开启后，Agent 的所有确认类操作（写文件、编辑、Shell 命令、网络请求、构建文档等）自动批准，不再弹窗等待点击。未注册工具、提权命令、项目外路径逃逸仍会被硬规则拦截。"

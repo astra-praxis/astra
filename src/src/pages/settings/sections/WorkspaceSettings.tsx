@@ -10,7 +10,7 @@ export default function WorkspaceSettings() {
     useWorkspaceSettings();
 
   return (
-    <SettingsSection icon="📁" title="工作空间" desc="添加多个工作空间目录，在主页可一键切换；操作立即生效">
+    <SettingsSection iconId="workspace" title="工作空间" desc="添加多个工作空间目录，在主页可一键切换；操作立即生效">
       {workspaces.length > 0 ? (
         <div className="ws-list">
           {workspaces.map((ws) => (

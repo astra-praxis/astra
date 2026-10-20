@@ -87,10 +87,11 @@
 }
 
 .nav-item-icon {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   width: 18px;
-  text-align: center;
 }
 
 .nav-item-label {
@@ -144,15 +145,15 @@
   margin-bottom: 16px;
 
   .section-glyph {
-    font-size: 20px;
-    width: 36px;
-    height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 36px;
+    height: 36px;
     background: var(--bg-subtle);
     border-radius: 10px;
     flex-shrink: 0;
+    color: var(--text-secondary);
   }
 
   .section-heading {

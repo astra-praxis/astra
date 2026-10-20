@@ -22,7 +22,7 @@ export default function ImageGenerationSettings() {
 
   return (
     <SettingsSection
-      icon="🖼️"
+      iconId="image-gen"
       title="图片生成"
       desc="generate_image 工具的网关与模型配置；填写后通过底部保存栏统一保存，新会话生效"
     >

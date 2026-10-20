@@ -20,7 +20,7 @@ export default function GeneralSettings() {
   const update = useSettingsStore((s) => s.update);
 
   return (
-    <SettingsSection icon="⚙️" title="常规" desc="调整外观和项目扫描的默认行为">
+    <SettingsSection iconId="general" title="常规" desc="调整外观和项目扫描的默认行为">
       <SettingsRow stacked title="外观主题" desc="选择应用的显示模式，切换立即生效">
         <div className="theme-grid">
           {themeOptions.map((opt) => (

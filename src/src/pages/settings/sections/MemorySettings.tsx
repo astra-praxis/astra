@@ -13,7 +13,7 @@ export default function MemorySettings() {
   if (!draft) return null;
 
   return (
-    <SettingsSection icon="🧠" title="记忆" desc="会话记忆的总结方式与模型来源">
+    <SettingsSection iconId="memory" title="记忆" desc="会话记忆的总结方式与模型来源">
       <SettingsRow
         title="记忆 Agent 总结"
         desc="开启后由模型做会话总结与决策提炼（更连贯，但每次压缩有一次额外调用）；关闭时走本地规则合并（零模型依赖）。总结失败自动降级回规则，不影响记忆可用性。重启应用后生效。"

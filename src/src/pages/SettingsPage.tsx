@@ -404,6 +404,30 @@ export default function SettingsPage() {
             </span>
             <span className="nav-entry-arrow">›</span>
           </Link>
+          <Link to="/tools" className="nav-entry">
+            <span className="nav-entry-icon">🧰</span>
+            <span className="nav-entry-body">
+              <span className="nav-entry-title">工具箱</span>
+              <span className="nav-entry-desc">下载管理与 node_modules 清理</span>
+            </span>
+            <span className="nav-entry-arrow">›</span>
+          </Link>
+          <Link to="/artifacts" className="nav-entry">
+            <span className="nav-entry-icon">📦</span>
+            <span className="nav-entry-body">
+              <span className="nav-entry-title">产物库</span>
+              <span className="nav-entry-desc">浏览 Agent 会话产出的文件产物</span>
+            </span>
+            <span className="nav-entry-arrow">›</span>
+          </Link>
+          <Link to="/logs" className="nav-entry">
+            <span className="nav-entry-icon">📜</span>
+            <span className="nav-entry-body">
+              <span className="nav-entry-title">日志</span>
+              <span className="nav-entry-desc">查看应用运行日志，用于诊断问题</span>
+            </span>
+            <span className="nav-entry-arrow">›</span>
+          </Link>
         </div>
       </div>
 

@@ -348,11 +348,19 @@ body .content:has(.agent-root) {
   // 右侧 16px 与 dock 外边距对齐；滚动条仍贴容器右缘（在 padding 外侧）
   padding: 16px 16px;
 
-  // react-virtuoso 的内部 viewport 自带 overflow-x: auto 且未暴露覆盖组件，
-  // 宽内容（长代码行 / mermaid 图）会在内层顶出横向滚动条；
-  // 条目内的 pre、图表各有自己的横向滚动，外层一律裁掉
+  // react-virtuoso 的内部 viewport 层（scroller 的直接子元素）：
+  // - 恒为 position: absolute + width: 100%（Virtuoso 内部契约，不可改 relative），
+  //   而 width:100% 按 scroller 的 padding-box 解析、起点却在左 padding 处，
+  //   恰好向右溢出一个 padding（右侧留白被裁掉）。
+  //   用左右 inset 夹出正确宽度（width 需 !important 才能压过内联 width:100%），
+  //   值须与上方 padding 保持一致。
+  // - 不可给该层设置任何 overflow：Virtuoso 靠列表内容从 viewport 可见溢出，
+  //   撑高 scroller 产生滚动；一旦 overflow 非 visible，viewport 自成滚动容器，
+  //   scroller 的 scrollHeight 不再增长，滚动就失效了。横向溢出由外层裁掉。
   & > [data-viewport-type='element'] {
-    overflow-x: hidden !important;
+    left: 16px;
+    right: 16px;
+    width: auto !important;
   }
 }
 

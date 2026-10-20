@@ -1407,8 +1407,8 @@ function AssistantCopyFooter({ text }: { text: string }) {
  * 运行中状态指示：三点脉冲 loading（状态文案与停止操作已按需求移除；
  * 悬停 title 保留当前状态，取消走输入框右侧的停止按钮）
  */
-// Virtuoso 条目包装：虚拟化条目是绝对定位的，原 __content 的 flex gap 改为条目自身 padding
-// （padding-bottom 纳入条目测量高度，滚动定位才不会累积误差）
+// Virtuoso 条目包装：条目是普通块级元素（非 flex 子项），原 __content 的 flex gap 失效，
+// 间距改由条目自身 padding（padding-bottom 纳入条目测量高度，滚动定位不累积误差）
 const EntryItem = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   function EntryItem(props, ref) {
     return <div ref={ref} {...props} className="agent-entries__item" />;

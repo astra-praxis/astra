@@ -14,6 +14,7 @@ mod indexer;
 mod market;
 mod mcp_config_tool;
 mod memory;
+pub mod memory_tool;
 mod prompts;
 mod providers;
 mod session_store;
@@ -1478,6 +1479,12 @@ pub fn run() {
                 Err(error) => {
                     eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
                 }
+            }
+
+            // 内置记忆技能：让 agent 知道自己拥有记忆能力及两个记忆工具的
+            // 用法（技能库中已有同名技能时不覆盖，用户修改优先）。best-effort。
+            if let Err(error) = user_skills::ensure_builtin_skills(app.handle()) {
+                eprintln!("[skills] builtin memory skill install failed: {error}");
             }
 
             let show_item = MenuItem::with_id(app, "show", "显示窗口", true, Some("Alt+Space"))?;

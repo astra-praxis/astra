@@ -576,6 +576,13 @@ fn build_registry(
         Arc<agent_core::task::GenerationTaskBackend>,
         Arc<dyn agent_core::astra_generation::GenerationProvider>,
     )>,
+    memory: Option<
+        std::sync::Arc<
+            astra_memory::cme::engine::MemoryEngine<
+                astra_memory::cme::store_sqlite::CmeSqliteStore,
+            >,
+        >,
+    >,
 ) -> ToolRegistry {
     // 网络工具 + ask_user 不依赖项目根，纯聊天也可用；任务查询工具同全局
     let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search)
@@ -599,6 +606,12 @@ fn build_registry(
     };
     let reg = match skills_dir {
         Some(dir) => agent_core::skill_tools::register(reg, dir),
+        None => reg,
+    };
+    // Agent 记忆工具（memory_remember / memory_search）：memory-off 时不注册，
+    // agent 不会看到无法调用的工具。
+    let reg = match memory {
+        Some(engine) => crate::memory_tool::register(reg, engine),
         None => reg,
     };
     match project_root {
@@ -1105,6 +1118,7 @@ pub async fn agent_start_run(
                 Arc::clone(&state.processes),
                 Arc::clone(&state.tasks),
                 generation,
+                state.memory.get().map(|m| m.engine().clone()),
             );
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
             // ~/.astra/config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
@@ -1968,6 +1982,7 @@ mod tests {
                 Arc::new(agent_core::shell_background::ProcessManager::new()),
                 Arc::new(agent_core::TaskManager::new(8, None)),
                 generation,
+                None,
             )
         };
 
@@ -2032,6 +2047,7 @@ mod tests {
             agent_core::net_tools::SearchEngine::default(),
             Arc::clone(&state.processes),
             Arc::clone(&state.tasks),
+            None,
             None,
         );
         let names = registry.names();
@@ -2476,6 +2492,7 @@ mod tests {
             agent_core::net_tools::SearchEngine::default(),
             Arc::new(agent_core::shell_background::ProcessManager::new()),
             Arc::new(agent_core::TaskManager::new(8, None)),
+            None,
             None,
         );
         threads

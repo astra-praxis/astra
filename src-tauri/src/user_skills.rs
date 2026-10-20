@@ -373,6 +373,93 @@ pub fn list_user_skills(app: AppHandle) -> Result<Vec<UserSkillMeta>, String> {
     Ok(list_in(&app_skills_dir(&app)?))
 }
 
+// ===== 内置技能（随应用分发） =====
+
+/// 内置记忆技能：让 agent 知道自己拥有跨会话记忆能力，并提供两个工具
+/// （memory_remember / memory_search）的使用时机与约束。目录名避开常用
+/// 名，降低被 sync_global_skills 同名覆盖的概率。
+const BUILTIN_MEMORY_SKILL_NAME: &str = "astra-memory";
+const BUILTIN_MEMORY_SKILL_MD: &str = r#"---
+name: astra-memory
+description: Astra 跨会话记忆系统的使用指南。说明自动记忆如何工作，以及 memory_remember（主动记住）与 memory_search（主动查记忆）两个工具何时用、怎么用。当用户要求记住信息、询问之前的决定/偏好/排查经验，或需要判断哪些信息值得长期保存时使用本 skill。
+---
+
+# Astra 跨会话记忆
+
+你拥有跨会话记忆能力，分两部分：
+
+## 自动记忆（无需操作）
+
+每次对话结束后，系统会自动把当前会话压缩为摘要并提炼长期记忆
+（用户偏好、确认过的决策、经工具验证的事实、排查经验）。下一次对话开始
+前，相关记忆会自动注入你的上下文（REMEMBERED CONTEXT 区块）。
+
+- 不要在对话里主动复述这个机制，除非用户问起。
+- REMEMBERED CONTEXT 里可能有「历史版本/已被取代」标记的记忆：带 superseded
+  标记的不是当前事实，不要当作现行结论使用。
+
+## 主动记忆工具
+
+### memory_remember：立即写入一条长期记忆
+
+**该用**：
+- 用户明确要求记住：「记住：以后都用 pnpm」「这个标书以后都按这个格式」
+- 对话中确认的决策：「那就决定用 SQLite 了」——用户表现出就此定论的语气时
+- 经工具验证的环境事实：实际执行确认过的路径、版本、配置
+- 排查后确认的问题原因与修复方案（记「原因 + 修复方法 + 验证时间」，
+  不只记结论）
+
+**不该用**：
+- 闲聊、寒暄、情绪表达
+- 一次性任务（「帮我改下这行代码」）
+- 普通知识问答（答案本身没有用户/项目特殊性）
+- 尚未验证的猜测——工具还没跑过、用户还没确认的事，不要写成 fact
+
+**content 写法**：一条完整、自包含的话。写清主体与范围（哪个项目、什么
+环境），不要用代词指代。对比：
+- 差：「路径在 /opt/homebrew/bin」（哪个工具的路径？）
+- 好：「星野项目的 pandoc 路径是 /opt/homebrew/bin/pandoc（2026-10 验证）」
+
+**kind 选择**：preference=用户偏好（默认）｜decision=已确认决策｜
+fact=环境/项目事实｜experience=经验/解决方案｜task=待续任务。
+
+注意：写入即生效并永久保存；同一内容重复提交只会强化，不会产生重复。
+当前版本不支持通过工具删除单条记忆，用户要求删除时如实说明此限制。
+
+### memory_search：主动查记忆
+
+**该用**：用户提到「上次/之前/我们之前决定的/我记得好像」且对话上下文里
+没有答案时，先查再答，不要凭空猜测。
+
+**query 写法**：必须包含具体实体词（项目名、工具名、路径片段等）。记忆
+检索是词法匹配，纯中文问句（如「上次那个问题怎么办」）会检索不到；多给
+几个关键词（工具名 + 项目名）。
+
+**结果为空**：如实告知没有找到相关记忆，可以换实体词重试一次；不要编造。
+
+## 作用域
+
+- 项目记忆只在本项目的会话中可见（以项目根目录名隔离）。
+- 没有打开项目时（纯聊天），只能读写全局记忆（用户偏好等）。
+- 在无项目会话里搜不到某个项目的事实是正常隔离行为，不是记忆丢失。
+- 用户偏好类（如语言、格式习惯）写全局即可；项目相关事实/决策会自动
+  绑定当前项目。
+"#;
+
+/// 启动时确保内置技能存在：技能库中没有同名技能时写入；已存在则不动
+/// （用户可能已自行修改，不覆盖）。best-effort：失败只影响技能提示，
+/// 由调用方记日志。
+pub fn ensure_builtin_skills(app: &AppHandle) -> Result<(), String> {
+    let dir = app_skills_dir(app)?;
+    let skill_dir = dir.join(BUILTIN_MEMORY_SKILL_NAME);
+    if skill_dir.join("SKILL.md").is_file() {
+        return Ok(());
+    }
+    fs::create_dir_all(&skill_dir).map_err(|e| format!("创建内置技能目录失败: {e}"))?;
+    fs::write(skill_dir.join("SKILL.md"), BUILTIN_MEMORY_SKILL_MD)
+        .map_err(|e| format!("写入内置技能失败: {e}"))
+}
+
 #[tauri::command]
 pub fn create_user_skill(
     app: AppHandle,

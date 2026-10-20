@@ -1198,7 +1198,7 @@ body .content:has(.agent-root) {
   }
 }
 
-/* ===== 状态行（三点脉冲 loading，无底壳） ===== */
+/* ===== 状态行（三点脉冲 loading，无底壳；作为列表末尾哨兵条目渲染） ===== */
 
 .agent-statusline {
   align-self: flex-start;

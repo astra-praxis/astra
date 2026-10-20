@@ -1,6 +1,6 @@
 /**
  * 扩展市场页面样式（MCP / Skill 共用）
- * BEM + 主题变量，参照 SkillsPage.scss 体系
+ * BEM + 主题变量
  */
 .market-page {
   max-width: 1100px;
@@ -207,6 +207,20 @@
   // 停用的扩展卡片整体降透明度
   .market-card.is-disabled {
     opacity: 0.62;
+  }
+
+  // 技能卡片可点击进详情
+  .market-card.is-clickable {
+    cursor: pointer;
+
+    &:hover {
+      border-color: var(--brand-200, var(--border));
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--brand-500, var(--brand-700));
+      outline-offset: 2px;
+    }
   }
 
   .card-head {

@@ -72,7 +72,5 @@ export const ALL_SECTIONS: SettingsSectionDef[] = [...PREFERENCE_SECTIONS, ...DE
 export const RESOURCE_LINKS: { label: string; to: string }[] = [
   { label: '模型管理', to: '/models' },
   { label: 'AI 服务商', to: '/providers' },
-  { label: 'Skills 管理', to: '/skills' },
-  { label: '我的 Skills', to: '/my-skills' },
   { label: '工具箱', to: '/tools' },
 ];

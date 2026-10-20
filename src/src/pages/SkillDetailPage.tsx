@@ -20,6 +20,15 @@ interface SkillCard {
   version: string;
 }
 
+interface UserSkillMeta {
+  name: string;
+  display_name: string;
+  description: string;
+  path: string;
+  file_count: number;
+  available: boolean;
+}
+
 function skillIcon(name: string): string {
   const icons: Record<string, string> = {
     'alter-cli': '🔧',
@@ -68,9 +77,17 @@ export default function SkillDetailPage() {
       }
 
       try {
-        // 查找匹配的技能
-        const allSkills = await invoke<SkillCard[]>('list_skills');
-        const found = allSkills.find((s) => s.name === skillName);
+        // 先查应用自有技能库，再回退全局 Git 技能（read_skill_doc 接收目录路径，两库通用）
+        let found: SkillCard | undefined;
+        const userSkills = await invoke<UserSkillMeta[]>('list_user_skills');
+        const u = userSkills.find((s) => s.name === skillName);
+        if (u) {
+          found = { name: u.name, description: u.description, path: u.path, version: '' };
+        }
+        if (!found) {
+          const allSkills = await invoke<SkillCard[]>('list_skills');
+          found = allSkills.find((s) => s.name === skillName);
+        }
         if (!found) {
           if (!disposed) {
             setError(`未找到技能「${skillName}」`);
@@ -103,7 +120,7 @@ export default function SkillDetailPage() {
     <div className="detail-page">
       <div className="page-header">
         <div className="header-left">
-          <Link to="/skills" className="btn-back" title="返回列表">
+          <Link to="/market/skills" className="btn-back" title="返回列表">
             <ChevronLeft size={14} strokeWidth={2.5} />
             返回列表
           </Link>

@@ -58,6 +58,10 @@ import {
 } from '@/stores/agent';
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter } from '@/hooks/useMention';
+
+/** 运行中状态行的哨兵条目：占据列表最后一项（见 AgentPage 内 items 处注释） */
+const STATUS_ITEM = Symbol('statusline');
+type ListItem = Entry | typeof STATUS_ITEM;
 import ModelPicker from '@/components/agent/ModelPicker';
 import MarkdownMessage from './chat/MarkdownMessage';
 import MentionInput, { type MentionInputHandle } from './chat/MentionInput';
@@ -390,6 +394,13 @@ export default function AgentPage() {
   // 上滚离开底部自动暂停、滚回底部自动恢复（Zed 列表 Tail 语义），取代手写 outputScroll =====
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [follow, setFollow] = useState(true);
+
+  // 状态行哨兵：运行中追加在列表末尾，作为普通数据条目参与虚拟化。
+  // 不用 components.Footer —— followOutput 的粘底对齐只针对最后一条数据条目
+  // （内部 scrollToIndex({ index: 'LAST', align: 'end' })），Footer 会留在
+  // 可视区外被裁掉，滚动条也到不了真正的底部
+  const items = useMemo<ListItem[]>
+    (() => (running ? [...entries, STATUS_ITEM] : entries), [entries, running]);
 
   // ===== 右侧圆点导轨：用户消息快速定位 =====
   const userMsgIdx = useMemo(
@@ -1068,27 +1079,31 @@ export default function AgentPage() {
               ref={virtuosoRef}
               className="agent-entries"
               tabIndex={0}
-              data={entries}
-              initialTopMostItemIndex={entries.length - 1}
+              data={items}
+              initialTopMostItemIndex={items.length - 1}
               followOutput={follow ? 'auto' : false}
               atBottomStateChange={setFollow}
               rangeChanged={handleRangeChanged}
               increaseViewportBy={{ top: 480, bottom: 480 }}
               components={VIRTUOSO_COMPONENTS}
-              itemContent={(i, e) => (
-                <EntryView
-                  entry={e}
-                  index={i}
-                  isLast={i === entries.length - 1}
-                  fullText={fullRunTexts.get(i)}
-                  onDecide={handleDecide}
-                  onAnswer={handleAnswer}
-                  onEdit={handleEditUserMessage}
-                  onFailureRewind={handleFailureRewind}
-                  skills={skills}
-                  fileSet={fileSet}
-                />
-              )}
+              itemContent={(i, e) =>
+                e === STATUS_ITEM ? (
+                  <EntriesFooter />
+                ) : (
+                  <EntryView
+                    entry={e}
+                    index={i}
+                    isLast={i === entries.length - 1}
+                    fullText={fullRunTexts.get(i)}
+                    onDecide={handleDecide}
+                    onAnswer={handleAnswer}
+                    onEdit={handleEditUserMessage}
+                    onFailureRewind={handleFailureRewind}
+                    skills={skills}
+                    fileSet={fileSet}
+                  />
+                )
+              }
             />
           )}
 
@@ -1415,16 +1430,18 @@ const EntryItem = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   },
 );
 
-// 虚拟化列表的 Footer：运行中的状态条。必须用模块级稳定组件订阅 store，
+// 运行中的状态条：作为列表末尾哨兵条目渲染（不用 components.Footer ——
+// followOutput 的粘底对齐只针对最后一条数据条目，Footer 会留在可视区外）。
+// 必须用模块级稳定组件订阅 store，
 // 不能在 AgentPage 渲染时内联定义（会因组件引用变化反复重挂导致闪烁）
 function EntriesFooter() {
-  const running = useAgentStore((s) => s.running);
+  const running = useAgentStore((s) => s.running || s.sessionBusy);
   const status = useAgentStore((s) => s.status);
   if (!running) return null;
   return <StatusLine status={status} />;
 }
 
-const VIRTUOSO_COMPONENTS = { Item: EntryItem, Footer: EntriesFooter };
+const VIRTUOSO_COMPONENTS = { Item: EntryItem };
 
 function StatusLine({ status }: { status: string | null }) {
   return (

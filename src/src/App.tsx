@@ -11,9 +11,7 @@ import ModelsPage from './pages/ModelsPage';
 import ModelDetailPage from './pages/ModelDetailPage';
 import ProvidersPage from './pages/ProvidersPage';
 import ProviderDetailPage from './pages/ProviderDetailPage';
-import SkillsPage from './pages/SkillsPage';
 import SkillDetailPage from './pages/SkillDetailPage';
-import UserSkillsPage from './pages/UserSkillsPage';
 import MarketMcpPage from './pages/MarketMcpPage';
 import MarketSkillPage from './pages/MarketSkillPage';
 import SettingsPage from './pages/settings/SettingsPage';
@@ -36,9 +34,7 @@ export default function App() {
           <Route path="/models/:id" element={<ModelDetailPage />} />
           <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/providers/:id" element={<ProviderDetailPage />} />
-          <Route path="/skills" element={<SkillsPage />} />
           <Route path="/skills/:name" element={<SkillDetailPage />} />
-          <Route path="/my-skills" element={<UserSkillsPage />} />
           <Route path="/market/mcp" element={<MarketMcpPage />} />
           <Route path="/market/skills" element={<MarketSkillPage />} />
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />

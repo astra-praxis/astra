@@ -7,12 +7,10 @@ import {
   Brain,
   Cpu,
   FolderOpen,
-  GraduationCap,
   ImagePlus,
   Plug,
   Search,
   Settings,
-  Sparkles,
   SquarePen,
   Wrench,
   type LucideIcon,
@@ -33,7 +31,5 @@ export const SECTION_ICONS: Record<string, LucideIcon> = {
 export const RESOURCE_ICONS: Record<string, LucideIcon> = {
   '/models': Cpu,
   '/providers': Plug,
-  '/skills': GraduationCap,
-  '/my-skills': Sparkles,
   '/tools': Wrench,
 };

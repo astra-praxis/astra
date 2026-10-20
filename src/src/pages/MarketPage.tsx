@@ -50,12 +50,13 @@ interface ExtensionsList {
   parseError: string | null;
 }
 
+// 后端 UserSkillMeta 序列化为 snake_case
 interface UserSkillMeta {
   name: string;
-  displayName: string;
+  display_name: string;
   description: string;
   path: string;
-  fileCount: number;
+  file_count: number;
   /** 目录内存在 SKILL.md（/调用 与 read_skill 都依赖它） */
   available: boolean;
 }
@@ -481,8 +482,22 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
 
               {skills.map((s) => {
                 const busy = busyId === `skill/${s.name}`;
+                const displayName = s.display_name;
+                // 缺 SKILL.md 的技能不可用，也不进详情
+                const clickable = s.available;
                 return (
-                  <div key={s.name} className="market-card">
+                  <div
+                    key={s.name}
+                    className={`market-card${clickable ? ' is-clickable' : ''}`}
+                    onClick={clickable ? () => navigate(`/skills/${s.name}`) : undefined}
+                    role={clickable ? 'button' : undefined}
+                    tabIndex={clickable ? 0 : undefined}
+                    onKeyDown={
+                      clickable
+                        ? (e) => e.key === 'Enter' && navigate(`/skills/${s.name}`)
+                        : undefined
+                    }
+                  >
                     <div className="card-head">
                       <h3 className="card-name" title={s.name}>
                         /{s.name}
@@ -492,9 +507,9 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                       ) : (
                         <span className="badge-kind kind-off">不可用</span>
                       )}
-                      {s.displayName !== s.name && (
-                        <span className="badge-kind kind-off" title={s.displayName}>
-                          {s.displayName}
+                      {displayName !== s.name && (
+                        <span className="badge-kind kind-off" title={displayName}>
+                          {displayName}
                         </span>
                       )}
                       <span className="spacer" />
@@ -502,22 +517,20 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                         className="icon-btn danger"
                         title="删除"
                         disabled={busy}
-                        onClick={() => setDeleting({ kind: 'skill', id: s.name })}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleting({ kind: 'skill', id: s.name });
+                        }}
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
                     {s.description && <p className="card-desc">{s.description}</p>}
-                    <div className="card-meta">
-                      <code className="cmd" title={s.path}>
-                        {s.path}
-                      </code>
-                    </div>
                     <div className="card-tags">
-                      <span className="tag">{s.fileCount} 个文件</span>
                       {!s.available && (
                         <span className="tag tag-warn">缺少 SKILL.md，/调用不可用</span>
                       )}
+                      {clickable && <span className="tag">点击查看文档</span>}
                     </div>
                   </div>
                 );

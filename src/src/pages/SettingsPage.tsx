@@ -31,6 +31,16 @@ interface AppSettings {
   scan_depth: number;
   search_engine?: string | null;
   search_endpoint?: string | null;
+  memory_agent_summary?: boolean;
+  memory_summary_provider_id?: string | null;
+}
+
+/** 供应商配置（list_providers 返回，与后端 ProviderConfig 对齐） */
+interface ProviderInfo {
+  id: string;
+  name: string;
+  base_url: string;
+  active_model: string | null;
 }
 
 interface WorkspaceConfig {
@@ -79,6 +89,10 @@ export default function SettingsPage() {
   // Agent search_web 的搜索引擎（bing 默认 / duckduckgo / searxng）与 SearXNG 实例地址
   const [searchEngine, setSearchEngine] = useState('bing');
   const [searchEndpoint, setSearchEndpoint] = useState('');
+  // 记忆摘要路径开关（重启后生效）与总结用的模型来源
+  const [memoryAgentSummary, setMemoryAgentSummary] = useState(false);
+  const [memorySummaryProviderId, setMemorySummaryProviderId] = useState<string | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   // 图片生成（generate_image 工具）：OpenAI Images 兼容网关配置
   //（保存后新会话生效；api_key 仅存本机 generation.json）
   const [genConfig, setGenConfig] = useState<GenerationConfigState>({
@@ -95,10 +109,11 @@ export default function SettingsPage() {
 
     (async () => {
       try {
-        const [settings, presetEditors, gen] = await Promise.all([
+        const [settings, presetEditors, gen, providerList] = await Promise.all([
           invoke<AppSettings>('get_settings'),
           invoke<EditorSetting[]>('get_preset_editors'),
           invoke<GenerationConfigState>('generation_get_config'),
+          invoke<ProviderInfo[]>('list_providers').catch(() => []),
         ]);
         if (disposed) return;
 
@@ -106,6 +121,9 @@ export default function SettingsPage() {
         setWorkspaces(settings.workspaces);
         setActiveWorkspace(settings.active_workspace);
         setScanDepth(settings.scan_depth || 3);
+        setProviders(providerList);
+        setMemoryAgentSummary(settings.memory_agent_summary ?? false);
+        setMemorySummaryProviderId(settings.memory_summary_provider_id ?? null);
         // 旧设置只配了 search_endpoint 而未选引擎 → 实际走 SearXNG，如实回显
         setSearchEngine(
           settings.search_engine ?? (settings.search_endpoint ? 'searxng' : 'bing')
@@ -173,6 +191,8 @@ export default function SettingsPage() {
           scan_depth: scanDepth,
           search_engine: searchEngine,
           search_endpoint: searchEndpoint.trim() || null,
+          memory_agent_summary: memoryAgentSummary,
+          memory_summary_provider_id: memorySummaryProviderId,
         },
       });
 
@@ -529,6 +549,49 @@ export default function SettingsPage() {
             <span className="agent-perm-knob" />
           </button>
         </div>
+        <div className="agent-perm-row">
+          <div className="agent-perm-text">
+            <span className="agent-perm-title">记忆 agent 总结</span>
+            <span className="agent-perm-desc">
+              开启后由模型做会话总结与决策提炼（更连贯，但每次压缩有一次额外调用）；
+              关闭时走本地规则合并（零模型依赖）。总结失败自动降级回规则，不影响记忆可用性。
+              重启应用后生效。
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={memoryAgentSummary}
+            className={`agent-perm-switch${memoryAgentSummary ? ' is-on' : ''}`}
+            title={memoryAgentSummary ? '已开启：模型做会话总结' : '已关闭：规则合并'}
+            onClick={() => setMemoryAgentSummary(!memoryAgentSummary)}
+          >
+            <span className="agent-perm-knob" />
+          </button>
+        </div>
+        {memoryAgentSummary && (
+          <div className="agent-perm-row">
+            <div className="agent-perm-text">
+              <span className="agent-perm-title">总结用模型来源</span>
+              <span className="agent-perm-desc">
+                做会话总结的供应商与活动模型（在供应商页配置）。默认自动选第一个配置齐全的。
+              </span>
+            </div>
+            <select
+              value={memorySummaryProviderId ?? ''}
+              className="agent-perm-input agent-perm-input--select"
+              onChange={(e) => setMemorySummaryProviderId(e.target.value || null)}
+            >
+              <option value="">自动（第一个可用的）</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.active_model ? `（${p.active_model}）` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="agent-perm-row">
           <div className="agent-perm-text">
             <span className="agent-perm-title">搜索引擎</span>

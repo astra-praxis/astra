@@ -131,6 +131,13 @@ struct AppSettings {
     /// 引擎的旧设置仍走 SearXNG）
     #[serde(default)]
     search_endpoint: Option<String>,
+    /// 记忆摘要路径开关：true = 宿主 agent LLM 做会话总结（失败自动
+    /// 降级回规则合并）；false = 纯规则（默认）。重启后生效。
+    #[serde(default)]
+    memory_agent_summary: bool,
+    /// agent 摘要使用的 provider id；None = 自动选第一个配置齐全的
+    #[serde(default)]
+    memory_summary_provider_id: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -147,6 +154,8 @@ impl Default for AppSettings {
             favorite_dev_mode: None,
             search_engine: None,
             search_endpoint: None,
+            memory_agent_summary: false,
+            memory_summary_provider_id: None,
         }
     }
 }
@@ -1430,17 +1439,42 @@ pub fn run() {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
             // 记忆宿主初始化（astra-memory CME）：加密 SQLite + 主密钥文件。
-            // 失败降级为 memory-off：agent 照常运行（无 recall 注入），
-            // memory_* 命令报「memory is unavailable」。
+            // 失败降级为 memory-off：agent 照常运行（无 recall 注入）。
+            // 摘要路径开关（memory_agent_summary）重启后生效；开启时用
+            // settings 里指定的 provider（或自动选第一个可用的）做总结。
+            let settings = get_settings(app.handle().clone());
+            let agent_summary_client = if settings.memory_agent_summary {
+                eprintln!(
+                    "[memory] agent summary enabled (provider: {})",
+                    settings
+                        .memory_summary_provider_id
+                        .as_deref()
+                        .unwrap_or("auto")
+                );
+                Some(Box::new(crate::memory::HostAgentSummaryClient::new(
+                    app.handle().clone(),
+                    settings.memory_summary_provider_id,
+                ))
+                    as Box<dyn astra_memory::cme::compactor::AgentSummaryClient>)
+            } else {
+                None
+            };
             match app.path().app_data_dir() {
-                Ok(dir) => match crate::memory::MemoryHost::init(&dir) {
-                    Ok(host) => {
-                        let _ = app.state::<agent::AgentState>().memory.set(host);
+                Ok(dir) => {
+                    match crate::memory::MemoryHost::init(
+                        &dir,
+                        crate::memory::MemoryInitOptions {
+                            agent_summary_client,
+                        },
+                    ) {
+                        Ok(host) => {
+                            let _ = app.state::<agent::AgentState>().memory.set(host);
+                        }
+                        Err(error) => {
+                            eprintln!("[memory] init failed, memory disabled: {error}");
+                        }
                     }
-                    Err(error) => {
-                        eprintln!("[memory] init failed, memory disabled: {error}");
-                    }
-                },
+                }
                 Err(error) => {
                     eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
                 }

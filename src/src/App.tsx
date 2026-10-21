@@ -1,21 +1,21 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router';
 import AppLayout from './components/layout/AppLayout';
-import WorkspacePage from './pages/WorkspacePage';
-import AgentPage from './pages/AgentPage';
-import ToolsPage from './pages/ToolsPage';
-import DownloaderPage from './pages/DownloaderPage';
-import NmPage from './pages/NmPage';
-import LogsPage from './pages/LogsPage';
-import ArtifactsPage from './pages/ArtifactsPage';
-import ModelsPage from './pages/ModelsPage';
-import ModelDetailPage from './pages/ModelDetailPage';
-import ProvidersPage from './pages/ProvidersPage';
-import ProviderDetailPage from './pages/ProviderDetailPage';
-import SkillDetailPage from './pages/SkillDetailPage';
-import MarketMcpPage from './pages/MarketMcpPage';
-import MarketSkillPage from './pages/MarketSkillPage';
+import WorkspacePage from './pages/workspace/WorkspacePage';
+import AgentPage from './pages/agent/AgentPage';
+import ToolsPage from './pages/tools/ToolsPage';
+import DownloaderPage from './pages/tools/DownloaderPage';
+import NmPage from './pages/tools/NmPage';
+import LogsPage from './pages/logs/LogsPage';
+import ArtifactsPage from './pages/artifacts/ArtifactsPage';
+import ModelsPage from './pages/models/ModelsPage';
+import ModelDetailPage from './pages/models/ModelDetailPage';
+import ProvidersPage from './pages/providers/ProvidersPage';
+import ProviderDetailPage from './pages/providers/ProviderDetailPage';
+import SkillDetailPage from './pages/skills/SkillDetailPage';
+import MarketMcpPage from './pages/market/MarketMcpPage';
+import MarketSkillPage from './pages/market/MarketSkillPage';
 import SettingsPage from './pages/settings/SettingsPage';
-import DevModePage from './pages/DevModePage';
+import DevModePage from './pages/dev-mode/DevModePage';
 
 export default function App() {
   return (

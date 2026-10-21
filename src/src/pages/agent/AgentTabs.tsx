@@ -6,7 +6,7 @@
  * 所以本组件直接订阅整个 store——tab 数量 ≤ MAX_RETAINED_TABS(8)，整订渲染开销可忽略。
  */
 import { Loader2, MessageSquare, Plus, X } from 'lucide-react';
-import { hasPendingDecision, runningSessionId, useAgentStore } from '../stores/agent';
+import { hasPendingDecision, runningSessionId, useAgentStore } from '../../stores/agent';
 import type { AgentSessionMeta } from './AgentHistoryPanel';
 import './AgentTabs.scss';
 

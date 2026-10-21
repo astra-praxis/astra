@@ -15,7 +15,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from '@/stores/workspace';
-import type { AgentSessionMeta } from '@/pages/AgentHistoryPanel';
+import type { AgentSessionMeta } from '@/pages/agent/AgentHistoryPanel';
 import type { Artifact } from '@/components/agent/ArtifactList';
 
 // ===== 事件模型（与 agent-core Envelope 对齐，type 标签 snake_case） =====

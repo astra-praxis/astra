@@ -686,3 +686,22 @@ test('multimodal: pushUser and enqueueMessage carry attached images', () => {
   store.getState().enqueueMessage('排队2', '排队2', null);
   assert.ok(!('images' in store.getState().queue.at(-1)));
 });
+
+test('archiveSession calls agent_archive_session and refreshes; failure surfaces in error', async () => {
+  const commands = [];
+  let failArchive = false;
+  const { store } = await harness(async (command) => {
+    commands.push(command);
+    if (command === 'agent_archive_session' && failArchive) throw new Error('disk full');
+    return [];
+  });
+  await store.getState().archiveSession('s', true);
+  assert.deepEqual(commands, ['agent_archive_session', 'list_agent_sessions']);
+  assert.equal(store.getState().error, '');
+  // 失败（归档与取消归档同提示前缀）不阻断，错误进全局 error
+  failArchive = true;
+  await store.getState().archiveSession('s', true);
+  assert.match(store.getState().error, /归档失败.*disk full/);
+  await store.getState().archiveSession('s', false);
+  assert.match(store.getState().error, /取消归档失败.*disk full/);
+});

@@ -23,8 +23,10 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { Copy, Play } from 'lucide-react';
+import { Copy, Play, Link2 } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { parseActionHref, executeAction } from './action-links';
+import { useLinkPreviewStore } from '@/stores/linkPreview';
 import MermaidBlock from './MermaidBlock';
 import { useStreamingText } from '@/hooks/useStreamingText';
 import './MarkdownMessage.scss';
@@ -38,9 +40,16 @@ interface MdContextValue {
   workspacePath: string;
   isFresh: boolean;
   streaming: boolean;
+  /** 开启后拦截 http(s) 链接，改到 Agent 页右侧链接预览面板打开 */
+  linkPreview: boolean;
 }
 
-const MdContext = createContext<MdContextValue>({ workspacePath: '', isFresh: false, streaming: false });
+const MdContext = createContext<MdContextValue>({
+  workspacePath: '',
+  isFresh: false,
+  streaming: false,
+  linkPreview: false,
+});
 
 interface MarkdownMessageProps {
   content?: string;
@@ -48,6 +57,8 @@ interface MarkdownMessageProps {
   isFresh?: boolean;
   /** Agent opts in; existing Chat rendering remains immediate. */
   streaming?: boolean;
+  /** 开启链接拦截：http(s) 链接点击后在右侧 iframe 预览面板打开 */
+  linkPreview?: boolean;
 }
 
 const MarkdownMessage = memo(function MarkdownMessage({
@@ -55,9 +66,13 @@ const MarkdownMessage = memo(function MarkdownMessage({
   workspacePath = '',
   isFresh = false,
   streaming = false,
+  linkPreview = false,
 }: MarkdownMessageProps) {
   const renderedContent = useStreamingText(content, streaming);
-  const context = useMemo(() => ({ workspacePath, isFresh, streaming }), [workspacePath, isFresh, streaming]);
+  const context = useMemo(
+    () => ({ workspacePath, isFresh, streaming, linkPreview }),
+    [workspacePath, isFresh, streaming, linkPreview],
+  );
   const markdown = useMemo(() => renderedContent ? (
     <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={mdComponents}>
       {renderedContent}
@@ -132,7 +147,7 @@ function PreRenderer({ children }: { children?: ReactNode }) {
 }
 
 function ActionAnchor({ href, children }: { href?: string; children?: ReactNode }) {
-  const { isFresh } = useContext(MdContext);
+  const { isFresh, linkPreview } = useContext(MdContext);
   if (href && href.startsWith('action://')) {
     return (
       <ActionLink href={href} isFresh={isFresh}>
@@ -140,7 +155,64 @@ function ActionAnchor({ href, children }: { href?: string; children?: ReactNode 
       </ActionLink>
     );
   }
-  return <a href={href}>{children}</a>;
+  // 链接拦截模式：http(s) 链接改到右侧 iframe 预览面板打开；
+  // 其他协议（mailto: 等）交给系统默认处理（openUrl），避免 webview 整页跳转
+  if (href && linkPreview) {
+    const isHttp = /^https?:\/\//i.test(href);
+    return (
+      <DecoratedLink
+        href={href}
+        preview
+        onClick={(e) => {
+          e.preventDefault();
+          if (isHttp) {
+            useLinkPreviewStore.getState().openLink(href);
+          } else {
+            void openUrl(href).catch(() => {});
+          }
+        }}
+      >
+        {children}
+      </DecoratedLink>
+    );
+  }
+  return <DecoratedLink href={href}>{children}</DecoratedLink>;
+}
+
+/** 带装饰的链接：图标 + 主体文本 + 站点徽章（链接文本未含域名时） */
+function DecoratedLink({
+  href,
+  preview,
+  onClick,
+  children,
+}: {
+  href?: string;
+  /** 内嵌预览模式：胶囊卡片样式，点击在右侧面板打开 */
+  preview?: boolean;
+  onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void;
+  children?: ReactNode;
+}) {
+  let host = '';
+  if (href) {
+    try {
+      const u = new URL(href);
+      if (u.protocol === 'http:' || u.protocol === 'https:') {
+        host = u.hostname.replace(/^www\./, '');
+      }
+    } catch {
+      // 非法链接不显示徽章
+    }
+  }
+  // 裸链接（文本就是 URL 本身）或文本已含域名时不再重复徽章
+  const text = nodeText(children).trim();
+  const showHost = host.length > 0 && text !== href && !text.includes(host);
+  return (
+    <a className="md-link" href={href} onClick={onClick} data-preview={preview || undefined}>
+      <Link2 className="md-link__icon" size={11} strokeWidth={2.2} aria-hidden />
+      <span className="md-link__text">{children}</span>
+      {showHost && <span className="md-link__host">{host}</span>}
+    </a>
+  );
 }
 
 /** 从高亮后的 React 子树中提取纯文本 */

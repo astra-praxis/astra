@@ -474,18 +474,105 @@ fact=环境/项目事实｜experience=经验/解决方案｜task=待续任务。
   绑定当前项目。
 "#;
 
+/// 内置找装技能：改写自 Zed 的 find-skills（skills.sh 生态），让 agent 在
+/// 对话里帮用户搜技能/装技能时走 GitHub API + tarball 快速通道，
+/// 避免 fetch 抓网页 / git clone 整仓导致的长时间等待。
+const BUILTIN_FIND_SKILLS_NAME: &str = "astra-find-skills";
+const BUILTIN_FIND_SKILLS_MD: &str = r#"---
+name: astra-find-skills
+description: 技能搜索与安装指南。当用户想找技能或装技能（「帮我装个 xx 技能」「有没有处理 xx 的技能」）时使用本 skill：如何搜索开源技能生态、如何用 tarball 快速安装进本机技能库、装完如何验证与生效。禁止用 git clone 整仓或逐文件抓取的方式安装。
+---
+
+# 查找与安装技能
+
+用户说「帮我装个 xx 技能」「有没有 xx 的技能」时，按本说明操作。核心原则：
+**走 GitHub API + tarball 快速通道。不要 git clone 整仓，不要用 fetch 抓
+github.com 网页（会拿到海量 HTML 且常被 Cloudflare 403 拦截），更不要逐个
+文件下载再写入。**
+
+前提：安装需要 shell 工具（curl / tar）。未打开项目时 shell 工具不可用——
+引导用户先打开一个项目再说一句「继续装」，或让用户在「我的技能」页手动导入。
+
+## 第一步：搜索候选
+
+用 fetch 调 GitHub API（返回 JSON，快且稳定）：
+
+```
+https://api.github.com/search/repositories?q=<关键词>+topic:agent-skills&sort=stars&per_page=5
+```
+
+- 关键词用英文实体词（react、docx、pdf、deploy…），多词用 + 连接
+- 该 topic 搜不到合适结果时，去掉 topic 限定再试，或先用 search_web
+  搜「skills.sh <关键词>」定位到对应 GitHub 仓库
+- 已知可信来源优先：anthropics/skills、vercel-labs/agent-skills、
+  ComposioHQ/awesome-claude-skills；目录站：https://skills.sh/
+
+## 第二步：向用户展示候选
+
+安装前先给用户过目：技能名 + 一句话作用 + 来源（owner/repo）+ 星数
+（GitHub API 结果里自带 stargazers_count）。只推荐可信来源；星数低或来源
+不明的要注明风险。用户确认后再装。
+
+## 第三步：安装（tarball 快速通道）
+
+1. 拿默认分支（fetch）：`https://api.github.com/repos/<owner>/<repo>` →
+   读 `default_branch` 字段
+2. 下载并解包（shell 一条命令）：
+
+   ```
+   curl -sL https://codeload.github.com/<owner>/<repo>/tar.gz/refs/heads/<branch> -o /tmp/astra-skill.tgz && mkdir -p /tmp/astra-skill-src && tar -xzf /tmp/astra-skill.tgz -C /tmp/astra-skill-src
+   ```
+
+3. 在解包目录里找到含 SKILL.md 的技能子目录（有的仓库根目录就是一个
+   技能，有的集中在 skills/ 之类子目录下），用 shell cat 看它的 SKILL.md
+   frontmatter，拿到 name 与 description
+4. 拷进技能库（目标目录名 = frontmatter 里的 name）：
+
+   ```
+   cp -R /tmp/astra-skill-src/<repo>-<branch>/<技能子目录> ~/.config/astra/skills/<name>
+   ```
+
+   目标已存在同名技能时，先问用户是否覆盖，不要直接覆盖。技能目录必须
+   直接位于 ~/.config/astra/skills 下且根层有 SKILL.md，不要多套一层目录。
+5. 验证：调 list_skills 确认新技能已出现
+6. 清理：`rm -rf /tmp/astra-skill.tgz /tmp/astra-skill-src`
+
+备选：机器上有 node 时可用 `npx skills add <owner>/<repo>@<技能名> -g -y`
+（装到 ~/.agents/skills），装完同样要复制进 ~/.config/astra/skills 才生效。
+
+## 注意
+
+- 涉及项目外路径（/tmp、~/.config）的命令会弹用户确认，属正常安全流程，
+  向用户说明即可，不要试图绕过。
+- 技能摘要是在会话创建时注入的：当前会话里用 read_skill 读出新装技能的
+  说明并直接照做即可；**/技能名 直接调用要新开会话才能看到**，装完告知
+  用户这一点。
+- 提醒用户可在「我的技能」页查看与编辑刚装的技能。
+"#;
+
 /// 启动时确保内置技能存在：技能库中没有同名技能时写入；已存在则不动
 /// （用户可能已自行修改，不覆盖）。best-effort：失败只影响技能提示，
 /// 由调用方记日志。
 pub fn ensure_builtin_skills(app: &AppHandle) -> Result<(), String> {
     let dir = app_skills_dir(app)?;
-    let skill_dir = dir.join(BUILTIN_MEMORY_SKILL_NAME);
-    if skill_dir.join("SKILL.md").is_file() {
-        return Ok(());
+    ensure_builtin_skills_into(&dir)
+}
+
+/// ensure_builtin_skills 的可测内核：逐个写入缺失的内置技能，
+/// 已有同名技能一律不动（用户可能已自行修改）。
+fn ensure_builtin_skills_into(dir: &Path) -> Result<(), String> {
+    for (name, md) in [
+        (BUILTIN_MEMORY_SKILL_NAME, BUILTIN_MEMORY_SKILL_MD),
+        (BUILTIN_FIND_SKILLS_NAME, BUILTIN_FIND_SKILLS_MD),
+    ] {
+        let skill_dir = dir.join(name);
+        if skill_dir.join("SKILL.md").is_file() {
+            continue;
+        }
+        fs::create_dir_all(&skill_dir).map_err(|e| format!("创建内置技能目录失败: {e}"))?;
+        fs::write(skill_dir.join("SKILL.md"), md).map_err(|e| format!("写入内置技能失败: {e}"))?;
     }
-    fs::create_dir_all(&skill_dir).map_err(|e| format!("创建内置技能目录失败: {e}"))?;
-    fs::write(skill_dir.join("SKILL.md"), BUILTIN_MEMORY_SKILL_MD)
-        .map_err(|e| format!("写入内置技能失败: {e}"))
+    Ok(())
 }
 
 #[tauri::command]
@@ -596,6 +683,20 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn ensure_builtin_skills_writes_all_and_never_overwrites() {
+        let root = temp_root("ensure-builtin");
+        ensure_builtin_skills_into(&root).unwrap();
+        for name in [BUILTIN_MEMORY_SKILL_NAME, BUILTIN_FIND_SKILLS_NAME] {
+            assert!(root.join(name).join("SKILL.md").is_file(), "{name} missing");
+        }
+        // 已存在的内置技能不覆盖（用户可能已自行修改）
+        let p = root.join(BUILTIN_MEMORY_SKILL_NAME).join("SKILL.md");
+        fs::write(&p, "user-edited").unwrap();
+        ensure_builtin_skills_into(&root).unwrap();
+        assert_eq!(fs::read_to_string(&p).unwrap(), "user-edited");
     }
 
     #[test]

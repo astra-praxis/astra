@@ -536,6 +536,8 @@ interface AgentState extends RunWindow {
   startNewChat: () => void;
   newChat: () => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
+  /** 归档 / 取消归档会话（打标记不删数据；前端历史面板默认隐藏归档项） */
+  archiveSession: (id: string, archived: boolean) => Promise<void>;
   /** 恢复 UI 历史；续聊时后端从 SQLite 加载模型上下文。 */
   loadSession: (s: AgentSessionMeta) => void;
   /** 保存会话到后端并刷新列表（默认保存当前会话；空条目跳过；snapshot 用于保存驻留会话） */
@@ -806,6 +808,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       get().setError(`删除会话失败：${String(error)}`);
     } finally {
       set({ sessionBusy: false });
+    }
+  },
+  /** 归档 / 取消归档：只打标记不删数据；归档的会话在历史面板默认隐藏 */
+  archiveSession: async (id, archived) => {
+    try {
+      await invoke('agent_archive_session', { id, archived });
+      await get().refreshSessions();
+    } catch (error) {
+      get().setError(archived ? `归档失败：${String(error)}` : `取消归档失败：${String(error)}`);
     }
   },
   loadSession: (s) =>

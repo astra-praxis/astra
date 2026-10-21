@@ -1,0 +1,282 @@
+// 链接预览面板：位于 agent-root 右列（.agent-col）之后的独立栏
+// 实际宽度由 store 的 width 内联样式控制（拖拽分隔条调整）
+.link-preview {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 480px;
+  overflow: hidden;
+  background: var(--bg-body);
+  border-left: 1px solid var(--border-color);
+
+  // 左缘拖拽分隔条：跨越面板全高，向外探出一半以便命中
+  &__resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    z-index: 10;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 2px;
+      width: 2px;
+      background: transparent;
+      transition: background 0.12s ease;
+    }
+
+    &:hover::after,
+    body.is-link-preview-resizing &::after {
+      background: var(--brand-200, var(--border-strong, var(--border-color)));
+    }
+  }
+
+  &__grip {
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 20px;
+    height: 22px;
+    margin-right: -2px;
+    color: var(--text-muted);
+    cursor: grab;
+    touch-action: none;
+    border-radius: 5px;
+    transition: background 0.12s ease, color 0.12s ease;
+
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-surface-soft, var(--bg-surface));
+    }
+
+    &.is-dragging {
+      color: var(--text-primary);
+      cursor: grabbing;
+    }
+  }
+
+  &__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  &__addr {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-body);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+  }
+
+  &__host {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  &__btns {
+    display: flex;
+    flex-shrink: 0;
+    gap: 2px;
+
+    button {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      place-items: center;
+      transition: background 0.12s ease, color 0.12s ease;
+
+      &:hover:not(:disabled) {
+        color: var(--text-primary);
+        background: var(--bg-surface-soft, var(--bg-surface));
+      }
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+    }
+  }
+
+  &__frame {
+    flex: 1;
+    width: 100%;
+    border: none;
+    background: #fff;
+  }
+
+  &__hint {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-color);
+
+    button {
+      display: flex;
+      flex-shrink: 0;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease;
+
+      &:hover {
+        color: var(--text-primary);
+        background: var(--bg-surface-soft, var(--bg-surface));
+      }
+    }
+  }
+
+  // 站点拒绝内嵌时的引导卡片（覆盖在 iframe 上层）
+  &__blocked {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-secondary);
+    background: var(--bg-body);
+
+    b {
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+
+    span {
+      max-width: 420px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+  }
+
+  &__blocked-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+
+    button {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 12.5px;
+      color: var(--text-primary);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease;
+
+      &:hover {
+        background: var(--bg-surface-soft, var(--bg-surface));
+        border-color: var(--border-strong, var(--border-color));
+      }
+    }
+  }
+}
+
+// 拖拽期间禁用全局文本选中（portal 到 body 的元素无法被面板样式覆盖）
+body.is-link-preview-dragging,
+body.is-link-preview-resizing {
+  user-select: none;
+}
+
+// 调宽拖拽中：禁用 iframe 指针事件，防止拖拽被内嵌页面打断
+body.is-link-preview-resizing .link-preview__frame {
+  pointer-events: none;
+}
+
+body.is-link-preview-resizing {
+  cursor: col-resize;
+}
+
+// 拖拽 ghost：跟随指针的小卡片
+.link-preview-ghost {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow-md);
+
+  span,
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+// 拖出面板后的全屏投放提示层
+.link-preview-dropzone {
+  position: fixed;
+  z-index: 9998;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-body) 55%, transparent);
+  inset: 0;
+
+  &__card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 80vw;
+    padding: 14px 22px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: var(--bg-surface);
+    border: 1.5px dashed var(--border-strong, var(--border-color));
+    border-radius: 12px;
+    box-shadow: 0 8px 24px var(--shadow-md);
+  }
+}

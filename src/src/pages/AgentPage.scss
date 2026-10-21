@@ -1312,6 +1312,51 @@ body .content:has(.agent-root) {
     }
   }
 
+  // 粘贴落盘 chip：超长粘贴已写入项目内文件，可移除（不发送）
+  &__spill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    margin-bottom: 6px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    background: var(--bg-body);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+
+    svg {
+      flex-shrink: 0;
+      color: var(--brand-500);
+    }
+
+    span {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      color: var(--text-secondary);
+      background: transparent;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+
+      &:hover {
+        background: color-mix(in srgb, var(--border-color) 60%, transparent);
+      }
+    }
+  }
+
   // 排队消息（Zed 式队列）：Run 进行中发送的消息先入列，回答结束后自动续发
   &__queue {
     display: flex;

@@ -3,8 +3,6 @@ mod agent_generation;
 mod agent_images;
 mod agent_sessions;
 mod agent_threads;
-mod chat;
-mod chat_sessions;
 mod command_runner;
 mod dev_mode;
 mod downloader;
@@ -1415,9 +1413,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(Mutex::new(Vec::<RunningServer>::new()))
-        .manage(chat::ChatStopFlag(std::sync::atomic::AtomicBool::new(
-            false,
-        )))
         .manage(indexer::IndexCancelFlag(
             std::sync::atomic::AtomicBool::new(false),
         ))
@@ -1512,8 +1507,8 @@ pub fn run() {
                 }
             }
 
-            // 内置记忆技能：让 agent 知道自己拥有记忆能力及两个记忆工具的
-            // 用法（技能库中已有同名技能时不覆盖，用户修改优先）。best-effort。
+            // 内置技能（astra-memory 记忆指南 + astra-find-skills 找装技能）：
+            // 技能库中已有同名技能时不覆盖，用户修改优先。best-effort。
             if let Err(error) = user_skills::ensure_builtin_skills(app.handle()) {
                 eprintln!("[skills] builtin memory skill install failed: {error}");
             }
@@ -1620,9 +1615,6 @@ pub fn run() {
             providers::fetch_provider_models,
             providers::set_active_model,
             providers::get_provider,
-            // Chat
-            chat::send_chat,
-            chat::stop_chat,
             // Agent
             agent::agent_start_run,
             agent_images::agent_normalize_image,
@@ -1633,6 +1625,7 @@ pub fn run() {
             agent::agent_reset_session,
             agent::agent_status,
             agent::agent_recent_events,
+            agent::agent_spill_paste,
             // Agent Generation（多模态 M5：生成供应商配置）
             agent_generation::generation_get_config,
             agent_generation::generation_set_config,
@@ -1654,15 +1647,10 @@ pub fn run() {
             agent_sessions::list_agent_sessions,
             agent_sessions::save_agent_session,
             agent_sessions::delete_agent_session,
+            agent_sessions::agent_archive_session,
             // Agent Preview（后台任务预览窗口）
             agent::agent_preview_tasks,
             agent::agent_open_preview,
-            // Chat Sessions
-            chat_sessions::list_chat_sessions,
-            chat_sessions::save_chat_session,
-            chat_sessions::update_chat_session_title,
-            chat_sessions::delete_chat_session,
-            chat_sessions::get_chat_session,
             // User Skills
             user_skills::list_user_skills,
             user_skills::create_user_skill,

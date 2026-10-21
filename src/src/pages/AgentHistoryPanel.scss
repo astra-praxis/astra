@@ -132,7 +132,7 @@
     &.is-cursor {
       background: var(--bg-surface-soft, var(--bg-surface));
 
-      .ahist__item-del {
+      .ahist__item-act {
         opacity: 1;
       }
     }
@@ -236,7 +236,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-  &__item-del {
+  &__item-act {
     position: absolute;
     right: 6px;
     bottom: 6px;
@@ -251,7 +251,33 @@
     transition: opacity 0.12s ease, color 0.12s ease;
 
     &:hover {
-      color: var(--danger-600);
+      color: var(--brand-600);
+    }
+  }
+
+  // 归档视图开关（搜索框右侧的眼睛按钮）
+  &__arch-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--text-secondary);
+      background: var(--bg-surface-soft, var(--bg-surface));
+    }
+
+    &.is-active {
+      color: var(--brand-600);
+      background: var(--brand-50);
     }
   }
 

@@ -42,9 +42,15 @@ interface Props {
   /** / 可调用的技能 */
   skills: UserSkillLite[];
   placeholder: string;
-  /** 组件内部的弹层导航 / 换行 / 删 chip 处理完后调用；页面在此处理发送与队列 */
+  /** 页面处理发送与队列 */
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+  /** 超长粘贴拦截（SpillPaste）：返回 true 表示内容已落盘、不必插入编辑器；
+   * false / 未传时照常内联插入。阈值 SPILL_PASTE_CHARS */
+  onSpillPaste?: (text: string) => Promise<boolean>;
 }
+
+/** 粘贴落盘阈值：超过该字符数的粘贴内容改写为文件，避免撑爆输入框与上下文 */
+export const SPILL_PASTE_CHARS = 2_000;
 
 // ===== token 解析（与气泡侧 parseUserRefs 同规则） =====
 
@@ -302,7 +308,7 @@ function buildChip(kind: 'skill' | 'file', token: string): HTMLElement {
 // ===== 组件 =====
 
 const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput(
-  { value, onChange, files, skills, placeholder, onKeyDown },
+  { value, onChange, files, skills, placeholder, onKeyDown, onSpillPaste },
   ref,
 ) {
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -613,20 +619,36 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
     onChangeRef.current(serializeEl(el));
   }, []);
 
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const text = e.clipboardData.getData('text/plain');
-    if (!text) return;
-    if (!document.execCommand('insertText', false, text)) {
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0) {
-        const range = sel.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(document.createTextNode(text));
-        range.collapse(false);
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const text = e.clipboardData.getData('text/plain');
+      if (!text) return;
+      const insert = () => {
+        if (!document.execCommand('insertText', false, text)) {
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(text));
+            range.collapse(false);
+          }
+        }
+      };
+      if (onSpillPaste && text.length >= SPILL_PASTE_CHARS) {
+        // 落盘失败（无项目 / 写入报错）时降级回内联插入
+        void onSpillPaste(text).then((spilled) => {
+          if (!spilled) {
+            editorRef.current?.focus();
+            insert();
+          }
+        });
+        return;
       }
-    }
-  }, []);
+      insert();
+    },
+    [onSpillPaste],
+  );
 
   useImperativeHandle(ref, () => ({
     focusEnd: () => {

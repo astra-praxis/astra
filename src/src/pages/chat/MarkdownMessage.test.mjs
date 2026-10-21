@@ -17,7 +17,7 @@ async function load(path, overrides = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   });
   const exports = {};
-  vm.runInNewContext(outputText, { exports, setTimeout, clearTimeout, require: (id) => {
+  vm.runInNewContext(outputText, { exports, URL, setTimeout, clearTimeout, require: (id) => {
     if (id in overrides) return overrides[id];
     if (id.endsWith('.scss') || id.endsWith('.css')) return {};
     return require(id);
@@ -36,6 +36,8 @@ const { default: MarkdownMessage } = await load('./MarkdownMessage.tsx', {
   './MermaidBlock': { default: (props) => { mermaidProps = props; return null; } },
   '@tauri-apps/api/core': { invoke: () => { throw Error('unexpected IPC'); } },
   '@tauri-apps/api/event': { listen: () => { throw Error('unexpected subscription in SSR'); } },
+  '@tauri-apps/plugin-opener': { openUrl: () => { throw Error('unexpected openUrl'); } },
+  '@/stores/linkPreview': { useLinkPreviewStore: { getState: () => { throw Error('unexpected link preview'); } } },
 });
 const render = (content, props = {}) => renderToStaticMarkup(React.createElement(MarkdownMessage, { content, ...props }));
 test('default Chat rendering remains immediate, with GFM and highlighted shell controls', () => {
@@ -64,4 +66,15 @@ test('mermaid code blocks route to MermaidBlock with raw source and streaming fl
   assert.ok(mermaidProps, 'mermaid block should render via MermaidBlock');
   assert.equal(mermaidProps.code, 'graph TD; A-->B;\n');
   assert.equal(mermaidProps.streaming, true);
+});
+test('linkPreview mode renders decorated anchor with host badge (interception at click time)', () => {
+  const html = render('[docs](https://example.com/guide)', { linkPreview: true });
+  assert.match(html, /<a class="md-link" href="https:\/\/example.com\/guide" data-preview="true"/);
+  assert.match(html, /md-link__icon/);
+  assert.match(html, /md-link__host">example.com</);
+});
+test('bare URL links do not duplicate the host badge', () => {
+  const html = render('https://example.com/guide');
+  assert.match(html, /<a class="md-link" href="https:\/\/example.com\/guide"/);
+  assert.doesNotMatch(html, /md-link__host/);
 });

@@ -124,6 +124,64 @@
     }
   }
 
+  // 带装饰的链接（DecoratedLink）：图标 + 文本 + 站点徽章
+  a.md-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px 1px 4px;
+    color: var(--link);
+    text-decoration: none;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--link) 7%, transparent);
+    transition: background 0.12s ease, color 0.12s ease;
+
+    .md-link__icon {
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+
+    .md-link__text {
+      text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--link) 30%, transparent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      transition: text-decoration-color 0.12s ease;
+    }
+
+    .md-link__host {
+      flex-shrink: 0;
+      padding: 0 5px;
+      font-size: 0.8em;
+      line-height: 1.6;
+      color: var(--link);
+      background: color-mix(in srgb, var(--link) 12%, transparent);
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    &:hover {
+      color: var(--link-hover);
+      background: color-mix(in srgb, var(--link) 13%, transparent);
+
+      .md-link__text {
+        text-decoration-color: color-mix(in srgb, var(--link-hover) 60%, transparent);
+      }
+    }
+
+    // 内嵌预览模式（点击在右侧面板打开）：稍强的卡片感
+    &[data-preview] {
+      padding: 2px 8px 2px 6px;
+      background: color-mix(in srgb, var(--link) 10%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 14%, transparent);
+
+      &:hover {
+        background: color-mix(in srgb, var(--link) 17%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 24%, transparent);
+      }
+    }
+  }
+
   img {
     max-width: 100%;
     border-radius: 8px;

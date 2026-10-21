@@ -9,7 +9,7 @@
  * - 宽度可拖拽调节（持久化 localStorage）
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Bot, Eye, EyeOff, Loader2, Plus, Search, X } from 'lucide-react';
 import { hasPendingDecision, useAgentStore } from '@/stores/agent';
 import './AgentHistoryPanel.scss';
 
@@ -21,6 +21,8 @@ export interface AgentSessionMeta {
   entries: unknown;
   created_at: number;
   updated_at: number;
+  /** 归档标记：历史不物理删除，归档项默认隐藏 */
+  archived: boolean;
 }
 
 interface Props {
@@ -29,7 +31,8 @@ interface Props {
   /** 当前绑定的项目路径；非空时只显示该项目的会话（Zed 式按项目隔离），空 = 纯聊天模式显示全部 */
   projectPath: string;
   onSelect: (s: AgentSessionMeta) => void;
-  onDelete: (id: string) => void;
+  /** 归档 / 取消归档（替代旧删除：历史只打标记，不丢数据） */
+  onArchive: (id: string, archived: boolean) => void;
   onNewChat: () => void;
 }
 
@@ -65,12 +68,14 @@ function loadWidth(): number {
   return Number.isFinite(v) && v >= WIDTH_MIN && v <= WIDTH_MAX ? v : WIDTH_DEFAULT;
 }
 
-export default function AgentHistoryPanel({ sessions, currentSessionId, projectPath, onSelect, onDelete, onNewChat }: Props) {
+export default function AgentHistoryPanel({ sessions, currentSessionId, projectPath, onSelect, onArchive, onNewChat }: Props) {
   const st = useAgentStore();
   // 搜索框常驻（Zed 式）；↑/↓ 导航游标基于过滤后的平铺顺序
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const [width, setWidth] = useState(loadWidth);
+  // 归档视图：默认隐藏归档会话，切到「已归档」里可查看与取消归档
+  const [showArchived, setShowArchived] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -83,15 +88,17 @@ export default function AgentHistoryPanel({ sessions, currentSessionId, projectP
   }, []);
 
   const filtered = useMemo(() => {
+    // 归档开关：默认只看未归档；开启后只看已归档（历史永不物理删除）
+    const byArchived = sessions.filter((s) => (showArchived ? s.archived : !s.archived));
     // 选中项目 → 只看该项目的会话（Zed 式项目隔离）；未选项目（纯聊天）→ 全部
-    const byProject = projectPath ? sessions.filter((s) => s.project_path === projectPath) : sessions;
+    const byProject = projectPath ? byArchived.filter((s) => s.project_path === projectPath) : byArchived;
     const q = query.trim().toLowerCase();
     if (!q) return byProject;
     return byProject.filter(
       (s) =>
         s.title.toLowerCase().includes(q) || s.project_name.toLowerCase().includes(q),
     );
-  }, [sessions, projectPath, query]);
+  }, [sessions, projectPath, query, showArchived]);
 
   // 搜索词变化后游标回到第一项
   useEffect(() => {
@@ -179,6 +186,15 @@ export default function AgentHistoryPanel({ sessions, currentSessionId, projectP
         <span className="ahist__count">{filtered.length}</span>
         <button
           type="button"
+          className={`ahist__arch-toggle${showArchived ? ' is-active' : ''}`}
+          onClick={() => setShowArchived((v) => !v)}
+          title={showArchived ? '返回会话列表' : '查看已归档会话'}
+          aria-label={showArchived ? '返回会话列表' : '查看已归档会话'}
+        >
+          {showArchived ? <EyeOff size={13} strokeWidth={1.8} /> : <Eye size={13} strokeWidth={1.8} />}
+        </button>
+        <button
+          type="button"
           className="ahist__new"
           onClick={onNewChat}
           title="新建会话（当前会话驻留内存，可随时切回）"
@@ -195,9 +211,11 @@ export default function AgentHistoryPanel({ sessions, currentSessionId, projectP
             <p>
               {query
                 ? '没有匹配的会话'
-                : projectPath
-                  ? '当前项目还没有会话记录'
-                  : '还没有会话记录'}
+                : showArchived
+                  ? '没有已归档的会话'
+                  : projectPath
+                    ? '当前项目还没有会话记录'
+                    : '还没有会话记录'}
             </p>
           </div>
         )}
@@ -252,14 +270,18 @@ export default function AgentHistoryPanel({ sessions, currentSessionId, projectP
                   </div>
                   <button
                     type="button"
-                    className="ahist__item-del"
+                    className="ahist__item-act"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDelete(s.id);
+                      onArchive(s.id, !s.archived);
                     }}
-                    title="删除会话"
+                    title={s.archived ? '取消归档（回到会话列表）' : '归档会话（不删除，可在「已归档」中找回）'}
                   >
-                    <Trash2 size={12} strokeWidth={1.8} />
+                    {s.archived ? (
+                      <ArchiveRestore size={12} strokeWidth={1.8} />
+                    ) : (
+                      <Archive size={12} strokeWidth={1.8} />
+                    )}
                   </button>
                 </div>
               );

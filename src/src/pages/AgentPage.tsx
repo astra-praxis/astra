@@ -68,6 +68,8 @@ import SettingsSheet from './chat/SettingsSheet';
 import { parseSlashCommand, type UserSkillLite } from '@/hooks/useSlash';
 import AgentHistoryPanel, { type AgentSessionMeta } from './AgentHistoryPanel';
 import AgentTabs from './AgentTabs';
+import LinkPreviewPanel from './LinkPreviewPanel';
+import { useLinkPreviewStore } from '@/stores/linkPreview';
 import { StreamBlock } from '@/components/agent/StreamBlock';
 import { ArtifactList } from '@/components/agent/ArtifactList';
 import './AgentPage.scss';
@@ -346,8 +348,54 @@ export default function AgentPage() {
   // 输入框（contenteditable chip 编辑器，@/ 弹层与 tag 渲染均内聚在组件内）
   const composerRef = useRef<MentionInputHandle | null>(null);
 
+  // ===== 粘贴落盘（SpillPaste）：超长粘贴改写为文件，发送时让 Agent 先读全文 =====
+  // 仅页面级状态（切 tab 换会话时重置），不进全局 store；有项目时写在
+  // <project>/.astra/pastes/，纯聊天时写在 ~/.astra/pastes/（后者的文件工具
+  // 以主目录为 root，read_file 可直接读），均 Allow 级可读
+  const [spill, setSpill] = useState<{ path: string; size: number } | null>(null);
+  useEffect(() => {
+    setSpill(null);
+  }, [sessionId]);
+
+  const handleSpillPaste = useCallback(
+    async (content: string): Promise<boolean> => {
+      try {
+        const res = await invoke<{ spilled: boolean; path: string | null; size: number }>(
+          'agent_spill_paste',
+          { projectRoot: projectPath || null, content },
+        );
+        if (!res.spilled || !res.path) return false;
+        setSpill({ path: res.path, size: res.size });
+        return true;
+      } catch (e) {
+        setError(`粘贴内容落盘失败：${String(e)}`);
+        return false;
+      }
+    },
+    [projectPath, setError],
+  );
+
+  /** 发送前组装：有暂存粘贴时把正文换成「先读文件再处理指令」，并取走暂存。
+   *  displaySuffix 追加到会话气泡展示文本，保留粘贴的可见痕迹 */
+  const takeSpill = useCallback(
+    (text: string): { text: string; displaySuffix: string } => {
+      if (!spill) return { text, displaySuffix: '' };
+      const kb = Math.max(1, Math.round(spill.size / 1024));
+      const name = spill.path.split(/[\\/]/).pop() ?? spill.path;
+      setSpill(null);
+      return {
+        text: `【用户粘贴的超长内容（${kb} KB）已保存为文件：${spill.path}\n请先用 read_file 工具读取该文件全文，再处理下方指令】\n\n${text}`,
+        displaySuffix: `\n📎 超长粘贴已存为 ${name}（${kb} KB），已让 Agent 先读取全文再处理`,
+      };
+    },
+    [spill],
+  );
+
   // ===== 历史面板开关（持久化，重启后保持上次的开合状态） =====
   const [historyOpen, setHistoryOpen] = useState(() => localStorage.getItem('astra.history.open') === '1');
+
+  // 链接预览面板（agent 回复中的链接拦截后在此用 iframe 打开）
+  const linkPreviewOpen = useLinkPreviewStore((s) => s.open);
   const toggleHistory = useCallback(() => {
     setHistoryOpen((o) => {
       localStorage.setItem('astra.history.open', o ? '0' : '1');
@@ -584,8 +632,9 @@ export default function AgentPage() {
     // 有文本时照常走 /技能名 解析
     const parsed = parseSendInput(raw);
     if (!parsed) return;
-    await doSend(raw, parsed.skill, parsed.text);
-  }, [input, running, parseSendInput, doSend]);
+    const spilled = takeSpill(parsed.text);
+    await doSend(raw + spilled.displaySuffix, parsed.skill, spilled.text);
+  }, [input, running, parseSendInput, doSend, takeSpill]);
 
   /** 失败卡片「重试 / 编辑后重发」：回退到出错前（含工作区还原）后重发或回填。
    *  找不到快照时降级为仅回退对话（非 git 项目 / 本功能上线前的会话） */
@@ -661,9 +710,10 @@ export default function AgentPage() {
     const parsed = parseSendInput(raw);
     if (!parsed) return;
     setEditing(null); // 排队新消息 = 放弃挂起的编辑意图（不回退）
-    enqueueMessage(raw, parsed.text, parsed.skill);
+    const spilled = takeSpill(parsed.text);
+    enqueueMessage(raw + spilled.displaySuffix, spilled.text, parsed.skill);
     setInput('');
-  }, [input, parseSendInput, enqueueMessage, setInput]);
+  }, [input, parseSendInput, enqueueMessage, setInput, takeSpill]);
 
   /** 打断并优先发送：当前 Run 取消 + 本条插到会话队首，settle 后立即续发。
    *  别的会话占用后端时不能打断（cancel 是全局单活动 Run），退化为普通排队 */
@@ -675,7 +725,8 @@ export default function AgentPage() {
     setEditing(null); // 插队新消息 = 放弃挂起的编辑意图（不回退）
     const st = useAgentStore.getState();
     const interruptible = st.running && !st.settling;
-    enqueueMessage(raw, parsed.text, parsed.skill, { front: interruptible });
+    const spilled = takeSpill(parsed.text);
+    enqueueMessage(raw + spilled.displaySuffix, spilled.text, parsed.skill, { front: interruptible });
     setInput('');
     if (interruptible) {
       try {
@@ -684,7 +735,7 @@ export default function AgentPage() {
         setError(`停止失败：${String(error)}`);
       }
     }
-  }, [input, parseSendInput, enqueueMessage, setInput, setError, sessionId]);
+  }, [input, parseSendInput, enqueueMessage, setInput, setError, sessionId, takeSpill]);
 
   /** 编辑排队消息（Zed move_queued_message_to_main_editor 语义）：
    *  从队列移除，原文回填主输入框并聚焦到末尾，改完再自行发送 */
@@ -870,12 +921,9 @@ export default function AgentPage() {
     [setError],
   );
 
-  const deleteSession = useCallback(
-    (id: string) => {
-      void useAgentStore.getState().deleteSession(id);
-    },
-    [refreshSessions, setError],
-  );
+  const archiveSession = useCallback((id: string, archived: boolean) => {
+    void useAgentStore.getState().archiveSession(id, archived);
+  }, []);
 
   // ===== 渲染 =====
   return (
@@ -1036,7 +1084,7 @@ export default function AgentPage() {
           currentSessionId={sessionId}
           projectPath={projectPath}
           onSelect={(s) => selectSession(s)}
-          onDelete={deleteSession}
+          onArchive={archiveSession}
           onNewChat={newTab}
         />
       )}
@@ -1102,6 +1150,7 @@ export default function AgentPage() {
                     onFailureRewind={handleFailureRewind}
                     skills={skills}
                     fileSet={fileSet}
+                    linkPreview
                   />
                 )
               }
@@ -1201,12 +1250,30 @@ export default function AgentPage() {
                   ))}
                 </div>
               )}
+              {/* 粘贴落盘 chip：超长粘贴已写入项目文件，发送时正文只带「先读后处理」指令 */}
+              {spill && (
+                <div className="agent-dock__spill" role="status">
+                  <FileText size={13} strokeWidth={1.8} />
+                  <span title={spill.path}>
+                    粘贴内容已存为 {spill.path.split(/[\\/]/).pop()}（{Math.max(1, Math.round(spill.size / 1024))} KB）· 发送时 Agent 将先读取全文
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSpill(null)}
+                    aria-label="移除粘贴文件"
+                    title="移除（文件保留在 .astra/pastes/，不随消息发送）"
+                  >
+                    <X size={12} strokeWidth={1.8} />
+                  </button>
+                </div>
+              )}
               <MentionInput
                 ref={composerRef}
                 value={input}
                 onChange={setInput}
                 files={files}
                 skills={skills}
+                onSpillPaste={handleSpillPaste}
                 placeholder={
                   running
                     ? 'Agent 正在回答…Enter 排队发送 · Ctrl/⌘+Enter 打断并优先发送'
@@ -1310,6 +1377,9 @@ export default function AgentPage() {
           </div>
         </div>
       </div>
+
+      {/* 链接预览面板：agent 回复中的链接拦截后在此用 iframe 打开 */}
+      {linkPreviewOpen && <LinkPreviewPanel />}
     </div>
   );
 }
@@ -1457,6 +1527,7 @@ const EntryView = memo(function EntryView({
   onFailureRewind,
   skills,
   fileSet,
+  linkPreview = false,
 }: {
   entry: Entry;
   /** 条目在会话流中的序号：写入 data-idx，供右侧圆点导轨快速定位 */
@@ -1474,6 +1545,8 @@ const EntryView = memo(function EntryView({
   onFailureRewind?: (mode: 'retry' | 'edit') => void;
   skills: UserSkillLite[];
   fileSet: Set<string>;
+  /** 开启链接拦截：assistant 消息里的 http(s) 链接在右侧预览面板打开 */
+  linkPreview?: boolean;
 }) {
   switch (entry.kind) {
     case 'user': {
@@ -1535,7 +1608,7 @@ const EntryView = memo(function EntryView({
           {entry.text ? (
             <>
               <div className="aentry__md">
-                <MarkdownMessage content={entry.text} streaming={entry.streaming} />
+                <MarkdownMessage content={entry.text} streaming={entry.streaming} linkPreview={linkPreview} />
               </div>
               {!entry.streaming && <AssistantCopyFooter text={fullText ?? entry.text} />}
             </>

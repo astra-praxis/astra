@@ -927,7 +927,19 @@ fn build_registry(
             // fs_tools（Zed 移植）：搜索/编辑/移动类
             agent_core::fs_tools::register(reg, root)
         }
-        None => reg,
+        None => {
+            // Pure chat (no project): still grant file/shell tools, rooted at
+            // the user's home directory, so the assistant can read/write/run
+            // things outside any project. Permission dispositions are identical
+            // to project mode (reads Allow, writes/shell Confirm); paths are
+            // validated against home instead of a project root.
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+            let reg = agent_core::fs_basic::register(reg, &home);
+            let reg = agent_core::doc_tools::register(reg, &home);
+            let reg = agent_core::shell_tool::register(reg, &home);
+            let reg = agent_core::shell_background::register(reg, &home, processes, Some(tasks));
+            agent_core::fs_tools::register(reg, &home)
+        }
     }
 }
 
@@ -1894,6 +1906,45 @@ fn artifact_info(record: agent_core::artifact_registry::ArtifactRecord) -> Agent
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| "ready".into()),
     }
+}
+
+/// 粘贴落盘结果（spilled 恒为 true，保留字段位以防未来引入禁写场景）。
+#[derive(serde::Serialize)]
+pub struct SpillPasteResult {
+    pub spilled: bool,
+    pub path: Option<String>,
+    pub size: u64,
+}
+
+/// 把用户粘贴的超长内容写入 `.astra/pastes/paste-<时间戳>.txt`，
+/// 发送时消息正文只带「先 read_file 读取该文件再处理指令」，避免超长文本撑爆
+/// 输入框与上下文。应用侧功能：只负责写文件，不参与 Agent 循环。
+/// 有项目时写在 `<project>/.astra/pastes/`；纯聊天时写在 `~/.astra/pastes/`
+/// （纯聊天的文件工具以主目录为 root，read_file 可直接读该绝对路径）。
+#[tauri::command]
+pub fn agent_spill_paste(
+    project_root: Option<String>,
+    content: String,
+) -> Result<SpillPasteResult, String> {
+    if content.is_empty() {
+        return Err("粘贴内容为空".into());
+    }
+    let dir = match project_root.filter(|p| std::path::Path::new(p).is_dir()) {
+        Some(root) => std::path::Path::new(&root).join(".astra").join("pastes"),
+        None => dirs::home_dir()
+            .ok_or_else(|| "无法定位用户主目录".to_string())?
+            .join(".astra")
+            .join("pastes"),
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建粘贴目录失败：{e}"))?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");
+    let path = dir.join(format!("paste-{stamp}.txt"));
+    std::fs::write(&path, &content).map_err(|e| format!("写入粘贴文件失败：{e}"))?;
+    Ok(SpillPasteResult {
+        spilled: true,
+        path: Some(path.display().to_string()),
+        size: content.len() as u64,
+    })
 }
 
 /// 列出一个会话的全部 artifact 记录（created_at 升序）。

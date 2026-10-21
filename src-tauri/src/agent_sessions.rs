@@ -20,6 +20,9 @@ pub struct AgentSession {
     pub entries: serde_json::Value,
     pub created_at: u64,
     pub updated_at: u64,
+    /// 归档标记：true 时前端历史面板默认隐藏（历史不再物理删除，只归档）
+    #[serde(default)]
+    pub archived: bool,
 }
 
 // ===== 辅助 =====
@@ -90,10 +93,31 @@ pub async fn save_agent_session(
         entries,
         created_at: now,
         updated_at: now,
+        archived: false,
     };
     sessions.push(session.clone());
     session_store::write_json_vec(&path, &sessions)?;
     Ok(session)
+}
+
+/// 归档 / 取消归档 Agent 会话（历史不再物理删除，只打标记；
+/// 归档的会话由前端在历史面板默认隐藏，可随时恢复）
+#[tauri::command]
+pub async fn agent_archive_session(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    id: String,
+    archived: bool,
+) -> Result<(), String> {
+    let _deleted = state.session_files.lock().await;
+    let path = ensure_sessions_file(&app)?;
+    let mut sessions = session_store::read_json_vec::<AgentSession>(&path);
+    let session = sessions
+        .iter_mut()
+        .find(|s| s.id == id)
+        .ok_or_else(|| format!("会话不存在：{id}"))?;
+    session.archived = archived;
+    session_store::write_json_vec(&path, &sessions)
 }
 
 /// 删除 Agent 会话

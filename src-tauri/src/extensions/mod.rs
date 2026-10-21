@@ -9,6 +9,9 @@
 //! 段定位规则：`[mcp.servers.<id>]` 起始，遇到下一个非子表 `[` 行结束
 //! （子表如 `[mcp.servers.<id>.permissions]` 归属本段）。
 
+pub(crate) mod market;
+pub(crate) mod mcp_config_tool;
+
 use agent_core::astra_config;
 use serde::Serialize;
 
@@ -60,7 +63,7 @@ pub struct ExtensionsList {
 
 #[tauri::command]
 pub fn extensions_list() -> Result<ExtensionsList, String> {
-    let path = crate::market::astra_config_path()?;
+    let path = crate::extensions::market::astra_config_path()?;
     let config_path = path.display().to_string();
     match astra_config::load() {
         Ok(cfg) => Ok(ExtensionsList {
@@ -201,7 +204,7 @@ fn section_header(kind: &str, id: &str) -> Result<String, String> {
 // ===== 写入命令 =====
 
 fn load_config_text() -> Result<String, String> {
-    let path = crate::market::astra_config_path()?;
+    let path = crate::extensions::market::astra_config_path()?;
     std::fs::read_to_string(&path).or_else(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             Ok(String::new())
@@ -212,7 +215,7 @@ fn load_config_text() -> Result<String, String> {
 }
 
 fn save_config_text(text: &str) -> Result<(), String> {
-    let path = crate::market::astra_config_path()?;
+    let path = crate::extensions::market::astra_config_path()?;
     // 原子写：临时文件 + rename，避免半写状态
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("写入临时文件失败: {e}"))?;
@@ -259,7 +262,7 @@ pub fn extensions_update(
             ));
         }
     }
-    let toml = crate::market::toml_array;
+    let toml = crate::extensions::market::toml_array;
     let keys = [
         ("command", quote_toml_str(command.trim())),
         (

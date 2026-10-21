@@ -270,5 +270,5 @@ impl AgentThreads {
 }
 
 #[cfg(test)]
-#[path = "agent_threads_tests.rs"]
+#[path = "threads_tests.rs"]
 mod tests;

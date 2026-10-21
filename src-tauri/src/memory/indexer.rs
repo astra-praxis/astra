@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::embedding::{embed_text, EmbeddingSource};
-use crate::vector_store::{open_db, store_chunks_conn};
+use crate::memory::embedding::{embed_text, EmbeddingSource};
+use crate::memory::vector_store::{open_db, store_chunks_conn};
 
 // ===== 常量 =====
 
@@ -549,7 +549,7 @@ mod tests {
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("test.db");
         let _ = fs::remove_file(&path);
-        crate::vector_store::open_db_at(&path).unwrap();
+        crate::memory::vector_store::open_db_at(&path).unwrap();
         path
     }
 
@@ -594,7 +594,7 @@ mod tests {
         let mut progress_events = Vec::new();
         let summary = rt
             .block_on(index_project_inner(
-                crate::vector_store::open_db_at(&db_path).unwrap(),
+                crate::memory::vector_store::open_db_at(&db_path).unwrap(),
                 &flag,
                 &proj_path,
                 fake_embedder,
@@ -611,9 +611,9 @@ mod tests {
         assert_eq!(progress_events.len(), 3);
 
         // 存储后可检索（重新打开连接）
-        let conn = crate::vector_store::open_db_at(&db_path).unwrap();
+        let conn = crate::memory::vector_store::open_db_at(&db_path).unwrap();
         let results =
-            crate::vector_store::search_similar_conn(&conn, &proj_path, &[10.0, 1.0, 0.0], 10)
+            crate::memory::vector_store::search_similar_conn(&conn, &proj_path, &[10.0, 1.0, 0.0], 10)
                 .unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0].project_path, proj_path);
@@ -636,7 +636,7 @@ mod tests {
         // 第一次：全部索引
         let s1 = rt
             .block_on(index_project_inner(
-                crate::vector_store::open_db_at(&db_path).unwrap(),
+                crate::memory::vector_store::open_db_at(&db_path).unwrap(),
                 &flag,
                 &proj_path,
                 fake_embedder,
@@ -648,7 +648,7 @@ mod tests {
         // 第二次：内容未变 → 跳过
         let s2 = rt
             .block_on(index_project_inner(
-                crate::vector_store::open_db_at(&db_path).unwrap(),
+                crate::memory::vector_store::open_db_at(&db_path).unwrap(),
                 &flag,
                 &proj_path,
                 fake_embedder,
@@ -662,7 +662,7 @@ mod tests {
         fs::write(project.join("app.rs"), "let a = 2;\n").unwrap();
         let s3 = rt
             .block_on(index_project_inner(
-                crate::vector_store::open_db_at(&db_path).unwrap(),
+                crate::memory::vector_store::open_db_at(&db_path).unwrap(),
                 &flag,
                 &proj_path,
                 fake_embedder,
@@ -687,7 +687,7 @@ mod tests {
         let noop = |_: &IndexProgress| {};
 
         rt.block_on(index_project_inner(
-            crate::vector_store::open_db_at(&db_path).unwrap(),
+            crate::memory::vector_store::open_db_at(&db_path).unwrap(),
             &flag,
             &proj_path,
             fake_embedder,
@@ -699,7 +699,7 @@ mod tests {
         fs::remove_file(project.join("b.ts")).unwrap();
         let s2 = rt
             .block_on(index_project_inner(
-                crate::vector_store::open_db_at(&db_path).unwrap(),
+                crate::memory::vector_store::open_db_at(&db_path).unwrap(),
                 &flag,
                 &proj_path,
                 fake_embedder,
@@ -709,9 +709,9 @@ mod tests {
         assert_eq!(s2.stale_removed, 1);
 
         // 数据库中只剩 a.rs 的分块
-        let conn = crate::vector_store::open_db_at(&db_path).unwrap();
+        let conn = crate::memory::vector_store::open_db_at(&db_path).unwrap();
         let results =
-            crate::vector_store::search_similar_conn(&conn, &proj_path, &[1.0, 1.0, 0.0], 50)
+            crate::memory::vector_store::search_similar_conn(&conn, &proj_path, &[1.0, 1.0, 0.0], 50)
                 .unwrap();
         assert!(results.iter().all(|r| r.file_path == "a.rs"));
 
@@ -731,7 +731,7 @@ mod tests {
 
         let summary = rt
             .block_on(index_project_inner(
-                crate::vector_store::open_db_at(&db_path).unwrap(),
+                crate::memory::vector_store::open_db_at(&db_path).unwrap(),
                 &flag,
                 &proj_path,
                 fake_embedder,

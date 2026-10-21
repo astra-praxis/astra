@@ -1,1401 +1,19 @@
 mod agent;
 mod agent_generation;
-mod agent_images;
-mod agent_sessions;
-mod agent_threads;
-mod command_runner;
-mod dev_mode;
-mod downloader;
-mod embedding;
+mod app;
 mod extensions;
-mod indexer;
-mod market;
-mod mcp_config_tool;
 mod memory;
-pub mod memory_tool;
-mod prompts;
 mod providers;
-mod session_store;
-mod user_skills;
-mod vector_store;
+mod skills;
 
-use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
-use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
-
-// ===== llama-server 管理 =====
-
-struct RunningServer {
-    child: Child,
-    port: u16,
-    model_name: String,
-    model_path: String,
-    started_at: u64,
-    pid: u32,
-}
-
-type ServerState = Mutex<Vec<RunningServer>>;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ModelConfig {
-    id: String,
-    name: String,
-    model_path: String,
-    server_path: String,
-    port: u16,
-    ngl: u32,
-}
-
-#[derive(Debug, Serialize)]
-struct RunningModelInfo {
-    #[serde(flatten)]
-    config: ModelConfig,
-    status: String,
-    pid: Option<u32>,
-    started_at: u64,
-}
-
-fn unix_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-fn default_port() -> u16 {
-    8080
-}
-
-fn default_ngl() -> u32 {
-    999
-}
-
-// ===== 类型定义（保持原有）=====
-
-#[derive(Debug, Serialize, Clone)]
-struct SubProject {
-    name: String,
-    path: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ProjectCard {
-    name: String,
-    path: String,
-    has_readme: bool,
-    sub_projects: Vec<SubProject>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct EditorSetting {
-    name: String,
-    command: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct WorkspaceConfig {
-    name: String,
-    path: String,
-}
-
-fn default_scan_depth() -> u32 {
-    3
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct DevModeFavorite {
-    path: String,
-    name: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct AppSettings {
-    editor: EditorSetting,
-    workspaces: Vec<WorkspaceConfig>,
-    active_workspace: Option<String>,
-    #[serde(default = "default_scan_depth")]
-    scan_depth: u32,
-    #[serde(default)]
-    models: Vec<ModelConfig>,
-    #[serde(default)]
-    favorite_dev_mode: Option<DevModeFavorite>,
-    /// Agent search_web 的搜索引擎（bing | duckduckgo | searxng；默认 bing）
-    #[serde(default)]
-    search_engine: Option<String>,
-    /// SearXNG 实例地址（search_engine = searxng 时使用；仅配置了它而未选
-    /// 引擎的旧设置仍走 SearXNG）
-    #[serde(default)]
-    search_endpoint: Option<String>,
-    /// 记忆 agent 路径总开关：true = 宿主 agent LLM 负责会话总结、记忆
-    /// 提炼（W1）与 supersedes 语义确认（W2），各自失败自动降级（规则
-    /// 合并 / 规则提炼 / 不建链）；false = 全部纯规则（默认）。重启后生效。
-    #[serde(default)]
-    memory_agent_summary: bool,
-    /// agent 摘要使用的 provider id；None = 自动选第一个配置齐全的
-    #[serde(default)]
-    memory_summary_provider_id: Option<String>,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            editor: EditorSetting {
-                name: "VS Code".to_string(),
-                command: "code".to_string(),
-            },
-            workspaces: Vec::new(),
-            active_workspace: None,
-            scan_depth: 3,
-            models: Vec::new(),
-            favorite_dev_mode: None,
-            search_engine: None,
-            search_endpoint: None,
-            memory_agent_summary: false,
-            memory_summary_provider_id: None,
-        }
-    }
-}
-
-// ===== 设置文件路径 =====
-
-fn get_settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let config_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-    fs::create_dir_all(&config_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
-    Ok(config_dir.join("settings.json"))
-}
-
-// ===== 命令：扫描工作空间 =====
-
-#[tauri::command]
-async fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, String> {
-    tokio::task::spawn_blocking(move || {
-        let dir = Path::new(&path);
-
-        if !dir.is_dir() {
-            return Err(format!("路径不是有效的目录: {}", path));
-        }
-
-        let entries = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
-
-        let mut projects = Vec::new();
-
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
-            let entry_path = entry.path();
-
-            if !entry_path.is_dir() {
-                continue;
-            }
-
-            // 跳过隐藏目录（以 . 开头）
-            let folder_name = entry_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            if folder_name.starts_with('.') {
-                continue;
-            }
-
-            // 检查 README.md
-            let readme_path = entry_path.join("README.md");
-            let has_readme = readme_path.exists();
-
-            let project_name = if has_readme {
-                match fs::read_to_string(&readme_path) {
-                    Ok(content) => content
-                        .lines()
-                        .next()
-                        .unwrap_or(&folder_name)
-                        .trim()
-                        .trim_start_matches("# ")
-                        .trim()
-                        .to_string(),
-                    Err(_) => folder_name.clone(),
-                }
-            } else {
-                let readme_content =
-                    format!("# {}\n\nThis is the {} project.", folder_name, folder_name);
-                if let Err(e) = fs::write(&readme_path, &readme_content) {
-                    eprintln!("创建 README.md 失败: {}", e);
-                }
-                folder_name.clone()
-            };
-
-            projects.push(ProjectCard {
-                name: project_name,
-                path: entry_path.to_string_lossy().to_string(),
-                has_readme,
-                sub_projects: scan_sub_projects(&entry_path),
-            });
-        }
-
-        projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        Ok(projects)
-    })
-    .await
-    .map_err(|e| format!("扫描工作空间失败: {}", e))?
-}
-
-// ===== 命令：列出项目内文件（@ 文件引用候选） =====
-
-/// 递归列出项目内文件的相对路径（`/` 分隔），供输入框 @ 引用弹层搜索。
-#[tauri::command]
-async fn list_project_files(path: String) -> Result<Vec<String>, String> {
-    tokio::task::spawn_blocking(move || {
-        let root = Path::new(&path);
-        if !root.is_dir() {
-            return Err(format!("路径不是有效的目录: {}", path));
-        }
-        Ok(collect_project_files(root))
-    })
-    .await
-    .map_err(|e| format!("扫描项目文件失败: {}", e))?
-}
-
-/// 递归收集项目内文件的相对路径，独立成函数便于单测。
-/// 跳过隐藏目录与常见构建产物目录，限制深度与数量，避免超大项目拖慢弹层。
-fn collect_project_files(root: &Path) -> Vec<String> {
-    const MAX_DEPTH: u32 = 8;
-    const MAX_FILES: usize = 2000;
-    // 这些目录几乎不会是 @ 引用的目标，跳过既省时间也避免候选被噪音塞满
-    const SKIP_DIRS: &[&str] = &[
-        "node_modules",
-        ".git",
-        "dist",
-        "build",
-        "target",
-        ".next",
-        ".nuxt",
-        "__pycache__",
-        ".venv",
-        "venv",
-        "vendor",
-        "coverage",
-        ".idea",
-        ".vscode",
-        ".cache",
-        "out",
-        ".output",
-        "bin",
-        "obj",
-    ];
-
-    fn walk(dir: &Path, rel: &str, depth: u32, out: &mut Vec<String>) {
-        if depth >= MAX_DEPTH || out.len() >= MAX_FILES {
-            return;
-        }
-        let Ok(entries) = fs::read_dir(dir) else {
-            return;
-        };
-        let mut items: Vec<_> = entries.flatten().collect();
-        items.sort_by_key(|e| e.file_name());
-        for entry in items {
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            let name = entry.file_name().to_string_lossy().to_string();
-            let child_rel = if rel.is_empty() {
-                name.clone()
-            } else {
-                format!("{rel}/{name}")
-            };
-            if file_type.is_dir() {
-                if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
-                    continue;
-                }
-                walk(&entry.path(), &child_rel, depth + 1, out);
-            } else if file_type.is_file() && !name.starts_with('.') {
-                if out.len() >= MAX_FILES {
-                    return;
-                }
-                out.push(child_rel);
-            }
-        }
-    }
-
-    let mut files = Vec::new();
-    walk(root, "", 0, &mut files);
-    files
-}
-
-// ===== 扫描项目子目录 =====
-
-fn scan_sub_projects(project_dir: &Path) -> Vec<SubProject> {
-    let mut subs = Vec::new();
-
-    let entries = match fs::read_dir(project_dir) {
-        Ok(e) => e,
-        Err(_) => return subs,
-    };
-
-    for entry in entries.flatten() {
-        let entry_path = entry.path();
-
-        if !entry_path.is_dir() {
-            continue;
-        }
-
-        let folder_name = match entry_path.file_name() {
-            Some(n) => n.to_string_lossy().to_string(),
-            None => continue,
-        };
-
-        if folder_name.starts_with('.') || folder_name == "node_modules" {
-            continue;
-        }
-
-        subs.push(SubProject {
-            name: folder_name,
-            path: entry_path.to_string_lossy().to_string(),
-        });
-    }
-
-    subs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    subs
-}
-
-// ===== 获取 Git 远程地址 =====
-
-fn get_git_remote_url(repo_path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &repo_path.to_string_lossy(),
-            "remote",
-            "get-url",
-            "origin",
-        ])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !url.is_empty() {
-            Some(url)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-// ===== 项目详情 =====
-
-#[derive(Debug, Serialize)]
-struct GitRepo {
-    name: String,
-    path: String,
-    remote_url: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct SubDetail {
-    name: String,
-    path: String,
-    git_repo: Option<GitRepo>,
-    children: Vec<SubDetail>,
-    readme_preview: String,
-    depth: u32,
-}
-
-#[derive(Debug, Serialize)]
-struct ProjectDetail {
-    name: String,
-    path: String,
-    has_readme: bool,
-    readme_preview: String,
-    sub_items: Vec<SubDetail>,
-}
-
-fn read_readme_preview(dir: &Path) -> String {
-    let readme_path = dir.join("README.md");
-    if !readme_path.exists() {
-        return String::new();
-    }
-    match fs::read_to_string(&readme_path) {
-        Ok(content) => content.chars().take(1000).collect::<String>(),
-        Err(_) => String::new(),
-    }
-}
-
-// ===== 递归扫描子目录（用于详情视图）=====
-
-fn scan_subdirectory(dir: &Path, current_depth: u32, max_depth: u32) -> Vec<SubDetail> {
-    if current_depth >= max_depth {
-        return Vec::new();
-    }
-
-    let mut items = Vec::new();
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return items,
-    };
-
-    for entry in entries.flatten() {
-        let entry_path = entry.path();
-        if !entry_path.is_dir() {
-            continue;
-        }
-
-        let name = match entry_path.file_name() {
-            Some(n) => n.to_string_lossy().to_string(),
-            None => continue,
-        };
-
-        if name.starts_with('.') || name == "node_modules" {
-            continue;
-        }
-
-        let git_repo = get_git_remote_url(&entry_path).map(|url| GitRepo {
-            name: name.clone(),
-            path: entry_path.to_string_lossy().to_string(),
-            remote_url: Some(url),
-        });
-
-        // 如果目录本身有 .git 子目录，说明这是一个 git 仓库根目录，不再遍历其子目录
-        let has_git_dir = entry_path.join(".git").exists();
-        let children = if has_git_dir {
-            Vec::new()
-        } else {
-            scan_subdirectory(&entry_path, current_depth + 1, max_depth)
-        };
-
-        items.push(SubDetail {
-            name,
-            path: entry_path.to_string_lossy().to_string(),
-            git_repo,
-            children,
-            readme_preview: read_readme_preview(&entry_path),
-            depth: current_depth + 1,
-        });
-    }
-
-    items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    items
-}
-
-#[tauri::command]
-fn get_project_detail(app: tauri::AppHandle, path: String) -> Result<ProjectDetail, String> {
-    let settings = get_settings(app);
-    let max_depth = settings.scan_depth;
-
-    let dir = Path::new(&path);
-    if !dir.is_dir() {
-        return Err("项目目录不存在".to_string());
-    }
-
-    let folder_name = dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    let readme_path = dir.join("README.md");
-    let (project_name, readme_preview, has_readme) = if readme_path.exists() {
-        match fs::read_to_string(&readme_path) {
-            Ok(content) => {
-                let first_line = content
-                    .lines()
-                    .next()
-                    .unwrap_or(&folder_name)
-                    .trim()
-                    .trim_start_matches("# ")
-                    .trim()
-                    .to_string();
-                let preview = content.chars().take(300).collect::<String>();
-                (
-                    if first_line.is_empty() {
-                        folder_name.clone()
-                    } else {
-                        first_line
-                    },
-                    preview,
-                    true,
-                )
-            }
-            Err(_) => (folder_name.clone(), String::new(), false),
-        }
-    } else {
-        (folder_name.clone(), String::new(), false)
-    };
-
-    // 如果项目根目录本身就有 .git，说明整个项目就是一个 git 仓库，不遍历子目录
-    let sub_items = if dir.join(".git").exists() {
-        Vec::new()
-    } else {
-        scan_subdirectory(&dir, 0, max_depth)
-    };
-
-    Ok(ProjectDetail {
-        name: project_name,
-        path: dir.to_string_lossy().to_string(),
-        has_readme,
-        readme_preview,
-        sub_items,
-    })
-}
-
-// ===== 命令：查找 casp-portal 目录（用于「开发模式」按钮判断） =====
-
-#[tauri::command]
-fn find_casp_portal_dir(path: String) -> Result<Option<String>, String> {
-    let dir = Path::new(&path);
-    if !dir.is_dir() {
-        return Err("目录不存在".to_string());
-    }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(e) => return Err(format!("读取目录失败: {}", e)),
-    };
-    for entry in entries.flatten() {
-        let entry_path = entry.path();
-        if !entry_path.is_dir() {
-            continue;
-        }
-        if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("casp-portal") {
-                return Ok(Some(entry_path.to_string_lossy().to_string()));
-            }
-        }
-    }
-    Ok(None)
-}
-
-// ===== 命令：创建新项目 =====
-
-#[tauri::command]
-fn create_project(
-    workspace_path: String,
-    folder_name: String,
-    project_name: String,
-) -> Result<ProjectCard, String> {
-    // 验证文件夹名称
-    if folder_name.trim().is_empty() {
-        return Err("文件夹名称不能为空".to_string());
-    }
-
-    let folder_name = folder_name.trim();
-
-    // 不允许以 . 开头（隐藏目录）
-    if folder_name.starts_with('.') {
-        return Err("文件夹名称不能以 . 开头".to_string());
-    }
-
-    // 不允许包含路径分隔符
-    if folder_name.contains('/') || folder_name.contains('\\') {
-        return Err("文件夹名称不能包含路径分隔符".to_string());
-    }
-
-    let project_dir = Path::new(&workspace_path).join(folder_name);
-
-    // 检查目录是否已存在
-    if project_dir.exists() {
-        return Err(format!("文件夹 '{}' 已存在", folder_name));
-    }
-
-    // 创建目录
-    fs::create_dir_all(&project_dir).map_err(|e| format!("创建目录失败: {}", e))?;
-
-    let project_name = if project_name.trim().is_empty() {
-        folder_name.to_string()
-    } else {
-        project_name.trim().to_string()
-    };
-
-    // 写入 README.md
-    let readme_content = format!("# {}\n\nThis is the {} project.", project_name, folder_name);
-    let readme_path = project_dir.join("README.md");
-    fs::write(&readme_path, &readme_content).map_err(|e| format!("创建 README.md 失败: {}", e))?;
-
-    Ok(ProjectCard {
-        name: project_name,
-        path: project_dir.to_string_lossy().to_string(),
-        has_readme: true,
-        sub_projects: scan_sub_projects(&project_dir),
-    })
-}
-
-// ===== 命令：获取设置 =====
-
-#[tauri::command]
-fn get_settings(app: tauri::AppHandle) -> AppSettings {
-    let path = match get_settings_path(&app) {
-        Ok(p) => p,
-        Err(_) => return AppSettings::default(),
-    };
-
-    if !path.exists() {
-        return AppSettings::default();
-    }
-
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => AppSettings::default(),
-    }
-}
-
-/// 已配置的工作空间根目录（多级放权 Workspace 级别的判定边界）
-pub(crate) fn workspace_roots(app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
-    get_settings(app.clone())
-        .workspaces
-        .into_iter()
-        .map(|w| std::path::PathBuf::from(w.path))
-        .collect()
-}
-
-// ===== 命令：保存设置 =====
-
-#[tauri::command]
-fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
-    let path = get_settings_path(&app)?;
-    let json =
-        serde_json::to_string_pretty(&settings).map_err(|e| format!("序列化设置失败: {}", e))?;
-    fs::write(&path, json).map_err(|e| format!("写入设置文件失败: {}", e))?;
-    Ok(())
-}
-
-// ===== 命令：设置收藏的开发模式 =====
-
-#[tauri::command]
-fn set_favorite_dev_mode(
-    app: tauri::AppHandle,
-    path: Option<String>,
-    name: Option<String>,
-) -> Result<AppSettings, String> {
-    let mut settings = get_settings(app.clone());
-    settings.favorite_dev_mode = path.map(|p| DevModeFavorite {
-        path: p,
-        name: name.unwrap_or_else(|| "开发模式".to_string()),
-    });
-    let path = get_settings_path(&app)?;
-    let json =
-        serde_json::to_string_pretty(&settings).map_err(|e| format!("序列化设置失败: {}", e))?;
-    fs::write(&path, json).map_err(|e| format!("写入设置文件失败: {}", e))?;
-    Ok(settings)
-}
-
-#[tauri::command]
-fn add_workspace(app: tauri::AppHandle, name: String, path: String) -> Result<AppSettings, String> {
-    let mut settings = get_settings(app.clone());
-    // 检查是否已存在相同路径
-    if settings.workspaces.iter().any(|w| w.path == path) {
-        return Err("该路径已是工作空间".to_string());
-    }
-    settings.workspaces.push(WorkspaceConfig {
-        name,
-        path: path.clone(),
-    });
-    // 如果是第一个工作空间，自动设为活跃
-    if settings.active_workspace.is_none() {
-        settings.active_workspace = Some(path);
-    }
-    let path = get_settings_path(&app)?;
-    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(settings)
-}
-
-#[tauri::command]
-fn remove_workspace(app: tauri::AppHandle, path: String) -> Result<AppSettings, String> {
-    let mut settings = get_settings(app.clone());
-    settings.workspaces.retain(|w| w.path != path);
-    if settings.active_workspace.as_ref() == Some(&path) {
-        settings.active_workspace = settings.workspaces.first().map(|w| w.path.clone());
-    }
-    let save_path = get_settings_path(&app)?;
-    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(&save_path, json).map_err(|e| e.to_string())?;
-    Ok(settings)
-}
-
-#[tauri::command]
-fn set_active_workspace(app: tauri::AppHandle, path: String) -> Result<AppSettings, String> {
-    let mut settings = get_settings(app.clone());
-    if !settings.workspaces.iter().any(|w| w.path == path) {
-        return Err("工作空间不存在".to_string());
-    }
-    settings.active_workspace = Some(path);
-    let save_path = get_settings_path(&app)?;
-    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(&save_path, json).map_err(|e| e.to_string())?;
-    Ok(settings)
-}
-
-// ===== 命令：在编辑器中打开项目 =====
-
-#[tauri::command]
-fn open_in_editor(path: String, editor_command: String) -> Result<(), String> {
-    // 打包后 PATH 可能不完整，补充常见编辑器安装路径
-    let existing_path = std::env::var("PATH").unwrap_or_default();
-    let extra_paths = [
-        "/usr/local/bin",
-        "/opt/homebrew/bin",
-        "/opt/local/bin",
-        "/usr/bin",
-        "/bin",
-    ];
-    let full_path = if existing_path.is_empty() {
-        extra_paths.join(":")
-    } else {
-        let mut parts: Vec<&str> = extra_paths.iter().map(|s| *s).collect();
-        parts.push(&existing_path);
-        parts.join(":")
-    };
-
-    Command::new(&editor_command)
-        .arg(&path)
-        .env("PATH", &full_path)
-        .spawn()
-        .map_err(|e| {
-            format!(
-                "启动编辑器失败: {}（请确认 {} 已安装且在系统 PATH 中）",
-                e, editor_command
-            )
-        })?;
-    Ok(())
-}
-
-// ===== 命令：最小化到托盘 =====
-
-#[tauri::command]
-fn minimize_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-// ===== 命令： llama-server 管理 =====
-
-#[tauri::command]
-fn start_llama_server(
-    app: tauri::AppHandle,
-    server_path: String,
-    model_path: String,
-    port: Option<u16>,
-    ngl: Option<u32>,
-    model_name: String,
-) -> Result<(u16, u32), String> {
-    let actual_port = port.unwrap_or(default_port());
-    let actual_ngl = ngl.unwrap_or(default_ngl());
-
-    // 检查端口是否已被占用（操作系统层面检测）
-    std::net::TcpListener::bind(format!("0.0.0.0:{}", actual_port))
-        .map_err(|e| format!("端口 {} 已被占用：{}", actual_port, e))?;
-
-    // 检查内部状态中是否有相同端口的进程（双重检查）
-    let state = app.state::<ServerState>();
-    let servers = state.lock().unwrap();
-    for server in servers.iter() {
-        if server.port == actual_port {
-            return Err(format!("端口 {} 已被占用", actual_port));
-        }
-    }
-    // 释放锁，以便后续可以再次获取
-    drop(servers);
-
-    // 构建命令：llama serve -m <model> --port <port> -ngl <ngl> --host 0.0.0.0
-    // 空则默认使用 'llama'（依赖系统 PATH）
-    let server_bin = if server_path.trim().is_empty() {
-        "llama"
-    } else {
-        &server_path
-    };
-
-    // 打包后 PATH 可能不完整，补充常见安装路径
-    let existing_path = std::env::var("PATH").unwrap_or_default();
-    let extra_paths = [
-        "/usr/local/bin",
-        "/opt/homebrew/bin",
-        "/opt/local/bin",
-        "/usr/bin",
-        "/bin",
-        "/Users/hanbiao/.llama-app",
-    ];
-    let full_path = if existing_path.is_empty() {
-        extra_paths.join(":")
-    } else {
-        let mut parts: Vec<&str> = extra_paths.iter().map(|s| *s).collect();
-        parts.push(&existing_path);
-        parts.join(":")
-    };
-
-    let mut cmd = Command::new(server_bin);
-    cmd.arg("serve")
-        .arg("-m")
-        .arg(&model_path)
-        .arg("--port")
-        .arg(actual_port.to_string())
-        .arg("-ngl")
-        .arg(actual_ngl.to_string())
-        .arg("--host")
-        .arg("0.0.0.0")
-        .env("PATH", &full_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("启动 llama serve 失败：{}", e))?;
-
-    // 记录运行中的服务
-    let pid = child.id();
-    let server = RunningServer {
-        child,
-        port: actual_port,
-        model_name,
-        model_path,
-        started_at: unix_timestamp(),
-        pid,
-    };
-    app.state::<ServerState>().lock().unwrap().push(server);
-
-    Ok((actual_port, actual_ngl))
-}
-
-#[tauri::command]
-fn stop_llama_server(app: tauri::AppHandle, port: u16) -> Result<bool, String> {
-    let state = app.state::<ServerState>();
-    let mut servers = state.lock().unwrap();
-    let mut server_index = None;
-
-    for (i, server) in servers.iter().enumerate() {
-        if server.port == port {
-            server_index = Some(i);
-            break;
-        }
-    }
-
-    if let Some(index) = server_index {
-        let mut server = servers.remove(index);
-        // 尝试优雅关闭
-        match server.child.try_wait() {
-            Ok(Some(_)) => {
-                // 进程已经终止
-                Ok(true)
-            }
-            Ok(None) => {
-                // 进程仍在运行，强制终止
-                server
-                    .child
-                    .kill()
-                    .map_err(|e| format!("终止进程失败: {}", e))?;
-                Ok(true)
-            }
-            Err(_) => Ok(false),
-        }
-    } else {
-        Ok(false)
-    }
-}
-
-#[tauri::command]
-fn list_running_servers(app: tauri::AppHandle) -> Result<Vec<RunningModelInfo>, String> {
-    let mut servers = Vec::new();
-    let state = app.state::<ServerState>();
-    let mut running_servers = state.lock().unwrap();
-    let mut dead_servers = Vec::new();
-
-    for (i, server) in running_servers.iter_mut().enumerate() {
-        // 检查进程状态
-        let status = match server.child.try_wait() {
-            Ok(Some(_)) => "stopped",
-            Ok(None) => "running",
-            Err(_) => "unknown",
-        };
-
-        servers.push(RunningModelInfo {
-            config: ModelConfig {
-                id: format!("model-{}-{}", server.model_name, server.port),
-                name: server.model_name.clone(),
-                model_path: server.model_path.clone(),
-                server_path: String::new(),
-                port: server.port,
-                ngl: 0,
-            },
-            status: status.to_string(),
-            pid: Some(server.pid),
-            started_at: server.started_at,
-        });
-
-        if status != "running" {
-            dead_servers.push(i);
-        }
-    }
-
-    // 清理已终止的服务
-    for index in dead_servers.into_iter().rev() {
-        let _ = running_servers.remove(index);
-    }
-
-    Ok(servers)
-}
-
-#[tauri::command]
-fn check_server_status(app: tauri::AppHandle, port: u16) -> Result<Option<String>, String> {
-    let state = app.state::<ServerState>();
-    let mut servers = state.lock().unwrap();
-
-    for server in servers.iter_mut() {
-        if server.port == port {
-            return Ok(Some(
-                match server.child.try_wait() {
-                    Ok(Some(_)) => "stopped",
-                    Ok(None) => "running",
-                    Err(_) => {
-                        // 进程可能已崩溃，尝试通过 TCP 探测确认
-                        if std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).is_ok() {
-                            // 可以绑定 = 端口没有进程在监听
-                            "stopped"
-                        } else {
-                            // 仍然被占用 = 有外部进程
-                            "running"
-                        }
-                    }
-                }
-                .to_string(),
-            ));
-        }
-    }
-
-    Ok(None)
-}
-
-#[tauri::command]
-fn list_model_configs(app: tauri::AppHandle) -> Vec<ModelConfig> {
-    let settings = get_settings(app);
-    settings.models
-}
-
-/// 检查模型配置路径是否有效
-/// 返回: (model_path_valid, model_path_error, server_path_valid, server_path_error)
-#[tauri::command]
-fn check_model_paths(
-    model_path: String,
-    server_path: String,
-) -> Result<(bool, String, bool, String), String> {
-    let mut model_path_valid = false;
-    let mut model_path_error = String::new();
-    let mut server_path_valid = false;
-    let mut server_path_error = String::new();
-
-    // 检查模型文件路径
-    if model_path.trim().is_empty() {
-        model_path_error = "模型文件路径不能为空".to_string();
-    } else {
-        let path = std::path::Path::new(model_path.trim());
-        if path.exists() {
-            if path.is_file() {
-                // 检查是否是 .gguf 文件（可选）
-                if let Some(ext) = path.extension() {
-                    if ext == "gguf" {
-                        model_path_valid = true;
-                    } else {
-                        model_path_error =
-                            format!("文件扩展名不是 .gguf，当前为: {}", ext.to_string_lossy());
-                    }
-                } else {
-                    model_path_valid = true; // 没有扩展名也允许
-                }
-            } else {
-                model_path_error = "路径指向的是目录，不是文件".to_string();
-            }
-        } else {
-            model_path_error = "文件不存在".to_string();
-        }
-    }
-
-    // 检查服务器路径
-    let server_bin = server_path.trim();
-    if server_bin.is_empty() {
-        // 空则默认使用 'llama'，检查是否在 PATH 中
-        if which::which("llama").is_ok() {
-            server_path_valid = true;
-        } else {
-            server_path_error =
-                "未找到 'llama' 命令，请确保已安装 llama.cpp 并添加到 PATH".to_string();
-        }
-    } else {
-        let path = std::path::Path::new(server_bin);
-        if path.exists() {
-            if path.is_file() {
-                server_path_valid = true;
-            } else {
-                // 可能是目录，尝试在其中找 llama 或 llama-server
-                let llama_path = path.join("llama");
-                let llama_server_path = path.join("llama-server");
-                if llama_path.exists() || llama_server_path.exists() {
-                    server_path_valid = true;
-                } else {
-                    server_path_error = "目录中未找到 llama 或 llama-server 可执行文件".to_string();
-                }
-            }
-        } else {
-            // 尝试作为命令名在 PATH 中查找
-            if which::which(server_bin).is_ok() {
-                server_path_valid = true;
-            } else {
-                server_path_error = format!("未找到可执行文件: {}", server_bin);
-            }
-        }
-    }
-
-    Ok((
-        model_path_valid,
-        model_path_error,
-        server_path_valid,
-        server_path_error,
-    ))
-}
-
-/// 扫描目录中的 .gguf 模型文件
-/// 返回找到的模型文件列表：路径、文件名、大小
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ModelFileInfo {
-    pub path: String,
-    pub filename: String,
-    pub size_bytes: u64,
-    pub size_display: String,
-}
-
-#[tauri::command]
-fn scan_model_directory(dir: String) -> Result<Vec<ModelFileInfo>, String> {
-    let dir_path = std::path::Path::new(&dir);
-    if !dir_path.exists() {
-        return Err("目录不存在".to_string());
-    }
-    if !dir_path.is_dir() {
-        return Err("路径不是目录".to_string());
-    }
-
-    let mut results = Vec::new();
-    let entries = std::fs::read_dir(dir_path).map_err(|e| format!("读取目录失败: {}", e))?;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("读取目录条目失败: {}", e))?;
-        let path = entry.path();
-
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "gguf" {
-                    let filename = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    let size_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                    let size_display = format_file_size(size_bytes);
-
-                    results.push(ModelFileInfo {
-                        path: path.to_string_lossy().to_string(),
-                        filename,
-                        size_bytes,
-                        size_display,
-                    });
-                }
-            }
-        }
-    }
-
-    // 按文件名排序
-    results.sort_by(|a, b| a.filename.cmp(&b.filename));
-
-    Ok(results)
-}
-
-fn format_file_size(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    if bytes == 0 {
-        return "0 B".to_string();
-    }
-    let i = (bytes as f64).log(1024.0).floor() as usize;
-    if i >= UNITS.len() {
-        return format!("{} TB", bytes as f64 / 1099511627776.0);
-    }
-    let value = bytes as f64 / (1024u64.pow(i as u32) as f64);
-    format!("{:.1} {}", value, UNITS[i])
-}
-
-#[tauri::command]
-fn save_model_config(app: tauri::AppHandle, model: ModelConfig) -> Result<(), String> {
-    let mut settings = get_settings(app.clone());
-    let model_id = model.id.clone();
-    // 检查 ID 是否冲突（排除自己）
-    if let Some(pos) = settings.models.iter().position(|m| m.id == model_id) {
-        settings.models[pos] = model;
-    } else {
-        settings.models.push(model);
-    }
-    save_settings(app, settings)
-}
-
-#[tauri::command]
-fn delete_model_config(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut settings = get_settings(app.clone());
-    settings.models.retain(|m| m.id != id);
-    save_settings(app, settings)
-}
-
-// ===== 命令：窗口拖拽 =====
-
-#[tauri::command]
-fn drag_window(app: tauri::AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "主窗口未找到".to_string())?;
-    window
-        .start_dragging()
-        .map_err(|e| format!("拖拽失败: {}", e))?;
-    Ok(())
-}
-
-// ===== 命令：设置窗口背景色（主题切换时调用）=====
-
-#[tauri::command]
-fn set_window_background(app: tauri::AppHandle, is_dark: bool) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "主窗口未找到".to_string())?;
-    use tauri::window::Color;
-    let color = if is_dark {
-        Color(20, 20, 32, 255)
-    } else {
-        Color(240, 242, 245, 255)
-    };
-    window
-        .set_background_color(Some(color))
-        .map_err(|e| format!("设置背景色失败: {}", e))?;
-    Ok(())
-}
-
-#[tauri::command]
-fn get_preset_editors() -> Vec<EditorSetting> {
-    vec![
-        EditorSetting {
-            name: "VS Code".to_string(),
-            command: "code".to_string(),
-        },
-        EditorSetting {
-            name: "Zed".to_string(),
-            command: "zed".to_string(),
-        },
-        EditorSetting {
-            name: "Cursor".to_string(),
-            command: "cursor".to_string(),
-        },
-        EditorSetting {
-            name: "WebStorm".to_string(),
-            command: "webstorm".to_string(),
-        },
-        EditorSetting {
-            name: "IntelliJ IDEA".to_string(),
-            command: "idea".to_string(),
-        },
-        EditorSetting {
-            name: "Sublime Text".to_string(),
-            command: "subl".to_string(),
-        },
-        EditorSetting {
-            name: "Atom".to_string(),
-            command: "atom".to_string(),
-        },
-        EditorSetting {
-            name: "Windsurf".to_string(),
-            command: "windsurf".to_string(),
-        },
-    ]
-}
-
-// ===== 命令：扫描 node_modules =====
-
-#[derive(Debug, Clone, serde::Serialize)]
-struct NodeModulesInfo {
-    path: String,
-    project_path: String,
-    size_bytes: u64,
-    size_display: String,
-    project_name: String,
-    has_pnpm_lock: bool,
-}
-
-#[tauri::command]
-async fn scan_node_modules(
-    app: AppHandle,
-    workspace_path: String,
-    max_depth: Option<usize>,
-) -> Result<Vec<NodeModulesInfo>, String> {
-    tokio::task::spawn_blocking(move || {
-        use std::fs;
-        use std::path::Path;
-
-        let max_depth = max_depth.unwrap_or(15);
-        let mut results: Vec<NodeModulesInfo> = Vec::new();
-
-        fn scan_dir(
-            app: &AppHandle,
-            path: &Path,
-            depth: usize,
-            max_depth: usize,
-            results: &mut Vec<NodeModulesInfo>,
-        ) {
-            if depth > max_depth {
-                return;
-            }
-            if !path.exists() || !path.is_dir() {
-                return;
-            }
-
-            // 顶层及项目目录扫描时通知前端当前进度
-            if depth <= 1 {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| path.to_string_lossy().to_string());
-                let _ = app.emit("nm-scan-progress", name);
-            }
-
-            if let Ok(entries) = fs::read_dir(path) {
-                for entry in entries.flatten() {
-                    let entry_path = entry.path();
-                    if !entry_path.is_dir() {
-                        continue;
-                    }
-
-                    if entry_path
-                        .file_name()
-                        .map(|n| n == "node_modules")
-                        .unwrap_or(false)
-                    {
-                        let size = get_dir_size(&entry_path);
-                        let parent_path = entry_path.parent();
-                        let project_name = parent_path
-                            .and_then(|p| p.file_name())
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-
-                        // 检测父目录是否有 pnpm-lock.yaml
-                        let has_pnpm_lock = parent_path
-                            .map(|p| p.join("pnpm-lock.yaml").exists())
-                            .unwrap_or(false);
-
-                        let project_path = parent_path
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_default();
-
-                        results.push(NodeModulesInfo {
-                            path: entry_path.to_string_lossy().to_string(),
-                            project_path,
-                            size_bytes: size,
-                            size_display: format_file_size(size),
-                            project_name,
-                            has_pnpm_lock,
-                        });
-                        // 不再递归进入 node_modules 内部
-                    } else {
-                        let name = entry_path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("");
-                        if !name.starts_with('.')
-                            && name != "target"
-                            && name != "dist"
-                            && name != "build"
-                        {
-                            scan_dir(app, &entry_path, depth + 1, max_depth, results);
-                        }
-                    }
-                }
-            }
-        }
-
-        scan_dir(&app, Path::new(&workspace_path), 0, max_depth, &mut results);
-        results.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
-        Ok(results)
-    })
-    .await
-    .map_err(|e| format!("扫描任务失败: {}", e))?
-}
-
-fn get_dir_size(path: &std::path::Path) -> u64 {
-    use std::fs;
-
-    let mut total_size: u64 = 0;
-
-    if path.is_dir() {
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let entry_path = entry.path();
-                if entry_path.is_dir() {
-                    total_size += get_dir_size(&entry_path);
-                } else if entry_path.is_file() {
-                    if let Ok(metadata) = entry.metadata() {
-                        total_size += metadata.len();
-                    }
-                }
-            }
-        }
-    }
-
-    total_size
-}
-
-#[derive(Debug, serde::Serialize)]
-struct CleanResult {
-    success: bool,
-    cleaned_paths: Vec<String>,
-    failed_paths: Vec<(String, String)>, // (path, error message)
-    total_freed_bytes: u64,
-    total_freed_display: String,
-}
-
-#[tauri::command]
-async fn clean_node_modules(paths: Vec<String>) -> Result<CleanResult, String> {
-    tokio::task::spawn_blocking(move || {
-        use std::fs;
-
-        let mut cleaned_paths: Vec<String> = Vec::new();
-        let mut failed_paths: Vec<(String, String)> = Vec::new();
-        let mut total_freed_bytes: u64 = 0;
-
-        for path in paths {
-            let path_obj = std::path::Path::new(&path);
-            if !path_obj.exists() {
-                failed_paths.push((path.clone(), "路径不存在".to_string()));
-                continue;
-            }
-
-            let size = get_dir_size(path_obj);
-
-            match fs::remove_dir_all(path_obj) {
-                Ok(_) => {
-                    cleaned_paths.push(path.clone());
-                    total_freed_bytes += size;
-                }
-                Err(e) => {
-                    failed_paths.push((path, e.to_string()));
-                }
-            }
-        }
-
-        Ok(CleanResult {
-            success: failed_paths.is_empty(),
-            cleaned_paths,
-            failed_paths,
-            total_freed_bytes,
-            total_freed_display: format_file_size(total_freed_bytes),
-        })
-    })
-    .await
-    .map_err(|e| format!("清理任务失败: {}", e))?
-}
+use tauri::Manager;
+
+// 拆分后的模块在 crate 根的转发绑定（agent 等兄弟模块经 crate:: 访问）
+use app::llama_server::RunningServer;
+use app::settings::{get_settings, get_settings_path, workspace_roots};
 
 // ===== 应用入口 =====
 
@@ -1413,13 +31,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(Mutex::new(Vec::<RunningServer>::new()))
-        .manage(indexer::IndexCancelFlag(
+        .manage(memory::indexer::IndexCancelFlag(
             std::sync::atomic::AtomicBool::new(false),
         ))
-        .manage(downloader::DownloadManager::new())
+        .manage(app::downloader::DownloadManager::new())
         .manage(agent::AgentState::default())
         .manage(Mutex::new(
-            HashMap::<String, dev_mode::RunningDevProcess>::new(),
+            HashMap::<String, app::dev_mode::RunningDevProcess>::new(),
         ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1455,7 +73,7 @@ pub fn run() {
                     "[memory] agent summary enabled (provider: {})",
                     provider_id.as_deref().unwrap_or("auto")
                 );
-                Some(Box::new(crate::memory::HostAgentSummaryClient::new(
+                Some(Box::new(crate::memory::host::HostAgentSummaryClient::new(
                     app.handle().clone(),
                     provider_id.clone(),
                 ))
@@ -1467,7 +85,7 @@ pub fn run() {
             // supersedes 语义确认（W2）：都复用宿主 agent LLM 通道，失败
             // 各自降级（提炼回规则、确认不建链）。
             let agent_extraction_client = if settings.memory_agent_summary {
-                Some(Box::new(crate::memory::HostAgentExtractionClient::new(
+                Some(Box::new(crate::memory::host::HostAgentExtractionClient::new(
                     app.handle().clone(),
                     provider_id.clone(),
                 ))
@@ -1476,7 +94,7 @@ pub fn run() {
                 None
             };
             let supersede_reviewer = if settings.memory_agent_summary {
-                Some(Box::new(crate::memory::HostSupersedeReviewer::new(
+                Some(Box::new(crate::memory::host::HostSupersedeReviewer::new(
                     app.handle().clone(),
                     provider_id,
                 ))
@@ -1486,9 +104,9 @@ pub fn run() {
             };
             match app.path().app_data_dir() {
                 Ok(dir) => {
-                    match crate::memory::MemoryHost::init(
+                    match crate::memory::host::MemoryHost::init(
                         &dir,
-                        crate::memory::MemoryInitOptions {
+                        crate::memory::host::MemoryInitOptions {
                             agent_summary_client,
                             agent_extraction_client,
                             supersede_reviewer,
@@ -1509,7 +127,7 @@ pub fn run() {
 
             // 内置技能（astra-memory 记忆指南 + astra-find-skills 找装技能）：
             // 技能库中已有同名技能时不覆盖，用户修改优先。best-effort。
-            if let Err(error) = user_skills::ensure_builtin_skills(app.handle()) {
+            if let Err(error) = skills::user::ensure_builtin_skills(app.handle()) {
                 eprintln!("[skills] builtin memory skill install failed: {error}");
             }
 
@@ -1531,13 +149,13 @@ pub fn run() {
                     }
                     "quit" => {
                         // 清理所有运行中的开发服务器（终止整个进程树 + 端口兜底，确保端口释放）
-                        let state = app.state::<dev_mode::DevServerState>();
+                        let state = app.state::<app::dev_mode::DevServerState>();
                         let mut servers = state.lock().unwrap();
                         for (_, mut server) in servers.drain() {
                             let port = server.port;
-                            dev_mode::terminate_process_tree(&mut server.child);
+                            app::dev_mode::terminate_process_tree(&mut server.child);
                             if let Some(p) = port {
-                                dev_mode::kill_processes_on_port(p);
+                                app::dev_mode::kill_processes_on_port(p);
                             }
                         }
                         app.exit(0);
@@ -1575,39 +193,39 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
-            scan_workspace,
-            list_project_files,
-            create_project,
-            get_settings,
-            save_settings,
-            open_in_editor,
-            command_runner::run_command,
-            get_preset_editors,
-            list_skills,
-            delete_skill,
-            read_skill_doc,
-            update_skill,
-            update_all_skills,
-            get_project_detail,
-            find_casp_portal_dir,
-            add_workspace,
-            remove_workspace,
-            set_active_workspace,
-            set_favorite_dev_mode,
-            minimize_to_tray,
-            drag_window,
-            set_window_background,
-            scan_node_modules,
-            clean_node_modules,
-            start_llama_server,
-            stop_llama_server,
-            list_running_servers,
-            check_server_status,
-            check_model_paths,
-            scan_model_directory,
-            list_model_configs,
-            save_model_config,
-            delete_model_config,
+            app::workspace::scan_workspace,
+            app::workspace::list_project_files,
+            app::workspace::create_project,
+            app::settings::get_settings,
+            app::settings::save_settings,
+            app::settings::open_in_editor,
+            app::command_runner::run_command,
+            app::settings::get_preset_editors,
+            skills::registry::list_skills,
+            skills::registry::delete_skill,
+            skills::registry::read_skill_doc,
+            skills::registry::update_skill,
+            skills::registry::update_all_skills,
+            app::workspace::get_project_detail,
+            app::workspace::find_casp_portal_dir,
+            app::settings::add_workspace,
+            app::settings::remove_workspace,
+            app::settings::set_active_workspace,
+            app::settings::set_favorite_dev_mode,
+            app::window::minimize_to_tray,
+            app::window::drag_window,
+            app::window::set_window_background,
+            app::node_modules::scan_node_modules,
+            app::node_modules::clean_node_modules,
+            app::llama_server::start_llama_server,
+            app::llama_server::stop_llama_server,
+            app::llama_server::list_running_servers,
+            app::llama_server::check_server_status,
+            app::llama_server::check_model_paths,
+            app::llama_server::scan_model_directory,
+            app::llama_server::list_model_configs,
+            app::llama_server::save_model_config,
+            app::llama_server::delete_model_config,
             // Providers
             providers::list_providers,
             providers::save_provider,
@@ -1616,439 +234,100 @@ pub fn run() {
             providers::set_active_model,
             providers::get_provider,
             // Agent
-            agent::agent_start_run,
-            agent_images::agent_normalize_image,
-            agent::agent_cancel,
-            agent::agent_permission_decide,
-            agent::agent_question_answer,
-            agent::agent_set_auto_mode,
-            agent::agent_reset_session,
-            agent::agent_status,
-            agent::agent_recent_events,
-            agent::agent_spill_paste,
+            agent::run::agent_start_run,
+            agent::images::agent_normalize_image,
+            agent::commands::agent_cancel,
+            agent::commands::agent_permission_decide,
+            agent::commands::agent_question_answer,
+            agent::commands::agent_set_auto_mode,
+            agent::commands::agent_reset_session,
+            agent::status::agent_status,
+            agent::events::agent_recent_events,
+            agent::artifacts::agent_spill_paste,
             // Agent Generation（多模态 M5：生成供应商配置）
             agent_generation::generation_get_config,
             agent_generation::generation_set_config,
             agent_generation::media_read_asset,
             agent_generation::media_open_asset,
             // Agent Checkpoints
-            agent::agent_checkpoint_list,
-            agent::agent_checkpoint_create,
-            agent::agent_checkpoint_restore,
-            agent::agent_rewind_to_user_message,
+            agent::checkpoints::agent_checkpoint_list,
+            agent::checkpoints::agent_checkpoint_create,
+            agent::checkpoints::agent_checkpoint_restore,
+            agent::checkpoints::agent_rewind_to_user_message,
             // Agent Artifacts（ARTIFACT_SPEC：产物元数据登记）
-            agent::agent_artifact_list,
+            agent::artifacts::agent_artifact_list,
             // Memory（astra-memory 集成：recall 注入 + 显式管理）
-            memory::memory_status,
-            memory::memory_search,
-            memory::memory_remember,
-            memory::memory_forget,
+            memory::host::memory_status,
+            memory::host::memory_search,
+            memory::host::memory_remember,
+            memory::host::memory_forget,
             // Agent Sessions
-            agent_sessions::list_agent_sessions,
-            agent_sessions::save_agent_session,
-            agent_sessions::delete_agent_session,
-            agent_sessions::agent_archive_session,
+            agent::sessions::list_agent_sessions,
+            agent::sessions::save_agent_session,
+            agent::sessions::delete_agent_session,
+            agent::sessions::agent_archive_session,
             // Agent Preview（后台任务预览窗口）
-            agent::agent_preview_tasks,
-            agent::agent_open_preview,
+            agent::preview::agent_preview_tasks,
+            agent::preview::agent_open_preview,
             // User Skills
-            user_skills::list_user_skills,
-            user_skills::create_user_skill,
-            user_skills::import_user_skill,
-            user_skills::sync_global_skills,
-            user_skills::list_user_skill_files,
-            user_skills::read_user_skill_file,
-            user_skills::write_user_skill_file,
-            user_skills::delete_user_skill_file,
-            user_skills::delete_user_skill,
+            skills::user::list_user_skills,
+            skills::user::create_user_skill,
+            skills::user::import_user_skill,
+            skills::user::sync_global_skills,
+            skills::user::list_user_skill_files,
+            skills::user::read_user_skill_file,
+            skills::user::write_user_skill_file,
+            skills::user::delete_user_skill_file,
+            skills::user::delete_user_skill,
             // Extensions 市场（状态展示；安装走 Agent 对话）
-            market::market_status,
+            extensions::market::market_status,
             // Extensions 管理（MCP / ACP 启停、编辑、删除）
             extensions::extensions_list,
             extensions::extensions_set_enabled,
             extensions::extensions_remove,
             extensions::extensions_update,
-            agent::agent_unload_all_sessions,
-            agent::extensions_runtime_status,
+            agent::commands::agent_unload_all_sessions,
+            agent::status::extensions_runtime_status,
             // Dev Mode
-            dev_mode::scan_dev_dirs,
-            dev_mode::run_card_command,
-            dev_mode::start_dev_server,
-            dev_mode::stop_dev_server,
-            dev_mode::stop_all_dev_servers,
-            dev_mode::list_dev_servers,
-            dev_mode::list_dev_history,
-            dev_mode::clear_dev_history,
-            dev_mode::read_dev_config,
-            dev_mode::save_dev_cookie,
-            dev_mode::open_login_url,
+            app::dev_mode::commands::scan_dev_dirs,
+            app::dev_mode::commands::run_card_command,
+            app::dev_mode::commands::start_dev_server,
+            app::dev_mode::commands::stop_dev_server,
+            app::dev_mode::commands::stop_all_dev_servers,
+            app::dev_mode::commands::list_dev_servers,
+            app::dev_mode::history::list_dev_history,
+            app::dev_mode::history::clear_dev_history,
+            app::dev_mode::config::read_dev_config,
+            app::dev_mode::config::save_dev_cookie,
+            app::dev_mode::config::open_login_url,
             // Downloader
-            downloader::list_downloads,
-            downloader::add_download,
-            downloader::start_download,
-            downloader::pause_download,
-            downloader::delete_download,
-            downloader::retry_download,
-            downloader::open_download_folder,
-            downloader::open_download_file,
-            downloader::clear_download_history,
+            app::downloader::list_downloads,
+            app::downloader::add_download,
+            app::downloader::start_download,
+            app::downloader::pause_download,
+            app::downloader::delete_download,
+            app::downloader::retry_download,
+            app::downloader::open_download_folder,
+            app::downloader::open_download_file,
+            app::downloader::clear_download_history,
             // Embedding
-            embedding::embed_text,
-            embedding::test_embedding_source,
+            memory::embedding::embed_text,
+            memory::embedding::test_embedding_source,
             // Vector Store
-            vector_store::store_chunks,
-            vector_store::delete_project_index,
-            vector_store::search_similar,
-            vector_store::get_index_stats,
+            memory::vector_store::store_chunks,
+            memory::vector_store::delete_project_index,
+            memory::vector_store::search_similar,
+            memory::vector_store::get_index_stats,
             // Indexer
-            indexer::index_project,
-            indexer::cancel_index,
+            memory::indexer::index_project,
+            memory::indexer::cancel_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
 // ===== 保留默认 greet =====
 
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-// ===== Skills 管理 =====
-
-#[derive(Debug, Serialize)]
-struct SkillCard {
-    name: String,
-    description: String,
-    path: String,
-    version: String,
-    is_git: bool,
-}
-
-/// 解析 SKILL.md 的 YAML frontmatter
-fn parse_skill_frontmatter(content: &str) -> (String, String, String) {
-    let mut name = String::new();
-    let mut description = String::new();
-    let mut version = String::new();
-
-    let content = content.trim();
-    if !content.starts_with("---") {
-        return (name, description, version);
-    }
-
-    let after_first = content.strip_prefix("---").unwrap_or("");
-    if let Some(end) = after_first.find("---") {
-        let frontmatter = &after_first[..end];
-        let mut in_description = false;
-        let mut desc_parts: Vec<String> = Vec::new();
-
-        for line in frontmatter.lines() {
-            if in_description {
-                let trimmed = line.trim();
-                if trimmed.is_empty()
-                    || !trimmed.starts_with(' ')
-                        && !trimmed.starts_with(|c: char| c.is_whitespace())
-                {
-                    // check if this is a new key
-                    if trimmed.contains(':') && !trimmed.starts_with(' ') {
-                        in_description = false;
-                        // parse as key... but just fall through
-                    } else {
-                        desc_parts.push(trimmed.to_string());
-                    }
-                } else {
-                    desc_parts.push(trimmed.to_string());
-                }
-                continue;
-            }
-
-            if let Some(val) = line.strip_prefix("name:") {
-                name = val.trim().trim_matches('"').to_string();
-            } else if let Some(val) = line.strip_prefix("description:") {
-                let val = val.trim();
-                if val.starts_with('"') {
-                    description = val.trim_matches('"').to_string();
-                } else if val.starts_with(">-") || val.starts_with('|') {
-                    in_description = true;
-                } else if !val.is_empty() {
-                    description = val.to_string();
-                } else {
-                    in_description = true;
-                }
-            } else if let Some(val) = line.strip_prefix("version:") {
-                version = val.trim().trim_matches('"').to_string();
-            }
-        }
-
-        if !desc_parts.is_empty() {
-            description = desc_parts.join(" ");
-        }
-    }
-
-    (name, description, version)
-}
-
-#[tauri::command]
-fn list_skills() -> Result<Vec<SkillCard>, String> {
-    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
-    let skills_dir = home.join(".agents").join("skills");
-
-    if !skills_dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let entries = fs::read_dir(&skills_dir).map_err(|e| format!("读取 skills 目录失败: {}", e))?;
-
-    let mut skills = Vec::new();
-
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
-        let entry_path = entry.path();
-
-        if !entry_path.is_dir() {
-            continue;
-        }
-
-        let folder_name = entry_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        if folder_name.starts_with('.') {
-            continue;
-        }
-
-        let skill_md_path = entry_path.join("SKILL.md");
-        let (name, description, version) = if skill_md_path.exists() {
-            match fs::read_to_string(&skill_md_path) {
-                Ok(content) => parse_skill_frontmatter(&content),
-                Err(_) => (folder_name.clone(), String::new(), String::new()),
-            }
-        } else {
-            (folder_name.clone(), String::new(), String::new())
-        };
-
-        // 检查是否是 git 仓库
-        let is_git = entry_path.join(".git").exists();
-
-        skills.push(SkillCard {
-            name: if name.is_empty() { folder_name } else { name },
-            description,
-            path: entry_path.to_string_lossy().to_string(),
-            version,
-            is_git,
-        });
-    }
-
-    skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    Ok(skills)
-}
-
-#[tauri::command]
-fn delete_skill(path: String) -> Result<(), String> {
-    let dir = Path::new(&path);
-    if !dir.exists() {
-        return Err("技能目录不存在".to_string());
-    }
-    fs::remove_dir_all(dir).map_err(|e| format!("删除失败: {}", e))?;
-    Ok(())
-}
-
-/// 更新单个 Skill（通过 npx skills add）
-#[tauri::command]
-fn update_skill(path: String) -> Result<String, String> {
-    let dir = Path::new(&path);
-    if !dir.exists() || !dir.is_dir() {
-        return Err("技能目录不存在".to_string());
-    }
-
-    // 从路径中提取 skill 名称
-    let skill_name = dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    if skill_name.is_empty() {
-        return Err("无法提取技能名称".to_string());
-    }
-
-    // 执行 npx skills add <skill-name> -g -y 来更新
-    let output = Command::new("npx")
-        .args(["skills", "add", &skill_name, "-g", "-y"])
-        .output()
-        .map_err(|e| format!("执行 npx skills add 失败: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if output.status.success() {
-        Ok(format!("{}\n{}", stdout, stderr))
-    } else {
-        Err(format!("更新失败: {}\n{}", stdout, stderr))
-    }
-}
-
-/// 更新所有 Skills（通过 npx skills update -g）
-#[tauri::command]
-fn update_all_skills() -> Result<Vec<(String, Result<String, String>)>, String> {
-    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
-    let skills_dir = home.join(".agents").join("skills");
-
-    if !skills_dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    // 执行 npx skills update -g 命令
-    let output = Command::new("npx")
-        .args(["skills", "update", "-g"])
-        .output()
-        .map_err(|e| format!("执行 npx skills update 失败: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !output.status.success() {
-        return Err(format!("更新失败: {}\n{}", stdout, stderr));
-    }
-
-    // 解析输出，提取更新的 skills
-    let mut results = Vec::new();
-    let mut current_skill = String::new();
-    let mut current_status = String::new();
-
-    for line in stdout.lines() {
-        let line = line.trim();
-
-        // 匹配 "Updating <skill-name>…" 格式
-        if line.starts_with("Updating ") && line.ends_with("…") {
-            // 保存上一个 skill 的结果
-            if !current_skill.is_empty() {
-                let result = if current_status.contains("✓") {
-                    Ok(current_status.clone())
-                } else {
-                    Err(current_status.clone())
-                };
-                results.push((current_skill.clone(), result));
-            }
-
-            // 提取新的 skill 名称
-            current_skill = line
-                .strip_prefix("Updating ")
-                .unwrap_or("")
-                .strip_suffix("…")
-                .unwrap_or("")
-                .to_string();
-            current_status = String::new();
-        } else if line.contains("✓ Updated") || line.contains("✗ Failed") {
-            current_status = line.to_string();
-        }
-    }
-
-    // 添加最后一个 skill 的结果
-    if !current_skill.is_empty() {
-        let result = if current_status.contains("✓") {
-            Ok(current_status)
-        } else {
-            Err(current_status)
-        };
-        results.push((current_skill, result));
-    }
-
-    // 如果没有解析到任何结果，返回整体输出
-    if results.is_empty() {
-        results.push(("all".to_string(), Ok(format!("{}\n{}", stdout, stderr))));
-    }
-
-    Ok(results)
-}
-
-#[tauri::command]
-fn read_skill_doc(path: String) -> Result<String, String> {
-    let dir = Path::new(&path);
-    if !dir.exists() || !dir.is_dir() {
-        return Err("技能目录不存在".to_string());
-    }
-
-    // 按优先级尝试读取文档文件
-    let candidates = ["SKILL.md", "README.md", "readme.md", "README", "Readme.md"];
-    for candidate in &candidates {
-        let file_path = dir.join(candidate);
-        if file_path.exists() && file_path.is_file() {
-            return fs::read_to_string(&file_path).map_err(|e| format!("读取文件失败: {}", e));
-        }
-    }
-
-    // 尝试任意 .md 文件
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let entry_path = entry.path();
-            if entry_path.is_file() {
-                if let Some(ext) = entry_path.extension() {
-                    if ext == "md" {
-                        return fs::read_to_string(&entry_path)
-                            .map_err(|e| format!("读取文件失败: {}", e));
-                    }
-                }
-            }
-        }
-    }
-
-    Err("未找到文档文件（SKILL.md / README.md）".to_string())
-}
-
-// ===== 测试 =====
-
-#[cfg(test)]
-mod lib_tests {
-    use super::*;
-
-    /// 在临时目录里搭一棵小项目树，验证 collect_project_files 的收集/过滤规则
-    #[test]
-    fn collect_project_files_skips_hidden_and_junk_dirs() {
-        let root = std::env::temp_dir().join("astra-lib-collect-files");
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("src/components")).unwrap();
-        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
-        fs::create_dir_all(root.join(".git")).unwrap();
-        fs::create_dir_all(root.join("dist")).unwrap();
-
-        fs::write(root.join("README.md"), "# demo").unwrap();
-        fs::write(root.join(".env"), "K=V").unwrap();
-        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
-        fs::write(root.join("src/components/Button.tsx"), "x").unwrap();
-        fs::write(root.join("node_modules/pkg/index.js"), "x").unwrap();
-        fs::write(root.join(".git/config"), "x").unwrap();
-        fs::write(root.join("dist/index.html"), "x").unwrap();
-
-        let files = collect_project_files(&root);
-
-        // 只收普通文件，跳过隐藏文件与 node_modules/.git/dist
-        assert_eq!(
-            files,
-            vec![
-                "README.md".to_string(),
-                "src/components/Button.tsx".to_string(),
-                "src/main.rs".to_string(),
-            ]
-        );
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    /// 非目录路径报错（命令层校验）
-    #[test]
-    fn collect_project_files_nested_dirs_use_slash() {
-        let root = std::env::temp_dir().join("astra-lib-collect-nested");
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("a/b/c")).unwrap();
-        fs::write(root.join("a/b/c/deep.txt"), "x").unwrap();
-
-        let files = collect_project_files(&root);
-        assert_eq!(files, vec!["a/b/c/deep.txt".to_string()]);
-
-        let _ = fs::remove_dir_all(&root);
-    }
 }

@@ -12,7 +12,7 @@ pub const APP_NAME: &str = "astra";
 /// Agent 默认系统提示词（模板：prompts/agent_system_prompt.md）。
 /// 用户在 Agent 页 Settings 手填的系统提示会整体覆盖它。
 pub fn agent_system_prompt() -> String {
-    render(include_str!("../prompts/agent_system_prompt.md"))
+    render(include_str!("../../prompts/agent_system_prompt.md"))
 }
 
 /// 系统提示词中的技能库列表节头（模板：prompts/agent_skills_section.md）。
@@ -20,7 +20,7 @@ pub fn agent_system_prompt() -> String {
 pub fn agent_skills_section() -> String {
     format!(
         "\n\n{}\n",
-        render(include_str!("../prompts/agent_skills_section.md"))
+        render(include_str!("../../prompts/agent_skills_section.md"))
     )
 }
 

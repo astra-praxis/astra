@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
-use crate::session_store;
+use super::session_store;
 
 // ===== 类型 =====
 

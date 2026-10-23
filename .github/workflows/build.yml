@@ -194,9 +194,9 @@ jobs:
       - name: List downloaded files
         run: |
           echo "=== macOS files ==="
-          ls -la ./release-assets/macos || echo "No macOS files"
+          find ./release-assets/macos -type f || echo "No macOS files"
           echo "=== Windows files ==="
-          ls -la ./release-assets/windows || echo "No Windows files"
+          find ./release-assets/windows -type f || echo "No Windows files"
         shell: bash
 
       # ================= 创建 Release 并上传产物 =================
@@ -209,7 +209,9 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            release-assets/macos/*.dmg
-            release-assets/windows/*.exe
+            release-assets/macos/**/*.dmg
+            release-assets/windows/**/*.exe
+          # glob 未匹配到文件时直接失败，避免再出现“构建成功但 Release 缺资产”的静默问题
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

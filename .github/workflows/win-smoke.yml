@@ -24,7 +24,7 @@ jobs:
       - name: Checkout astra-core
         uses: actions/checkout@v4
         with:
-          repository: alanpaper/astra-core
+          repository: astra-praxis/astra-core
           ref: main
           path: astra-core
           token: ${{ secrets.PAT }}
@@ -32,7 +32,7 @@ jobs:
       - name: Checkout astra-memory
         uses: actions/checkout@v4
         with:
-          repository: alanpaper/astra-memory
+          repository: astra-praxis/astra-memory
           ref: main
           path: astra-memory
           token: ${{ secrets.PAT }}

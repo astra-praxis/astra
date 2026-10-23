@@ -4,7 +4,7 @@
 
 Astra 是一个基于 Tauri 2 的桌面应用：把你的项目目录交给一个具备 **23+ 内置工具、MCP 扩展、技能系统、长期记忆** 的 AI Agent，它能读写文件、执行命令、检索网页、生成图片与文档——所有操作都在你本机完成，权限边界清晰可控。
 
-> Agent Runtime 基于 [astra-core](https://github.com/alanpaper/astra-core)（Rust 实现的可嵌入 Agent Runtime SDK）与 [astra-memory](https://github.com/alanpaper/astra-memory)（认知记忆引擎）构建。
+> Agent Runtime 基于 [astra-core](https://github.com/astra-praxis/astra-core)（Rust 实现的可嵌入 Agent Runtime SDK）与 [astra-memory](https://github.com/astra-praxis/astra-memory)（认知记忆引擎）构建。
 
 ---
 
@@ -60,8 +60,8 @@ Astra 是一个基于 Tauri 2 的桌面应用：把你的项目目录交给一�
 |----|------|
 | 桌面框架 | **Tauri 2**（Rust） |
 | 前端 | **React 19** + TypeScript + Zustand + Radix UI |
-| Agent Runtime | [astra-core](https://github.com/alanpaper/astra-core) — 自研 Rust Agent Runtime（工具系统 / 权限策略 / 事件协议 / Artifact） |
-| 记忆引擎 | [astra-memory](https://github.com/alanpaper/astra-memory) — CME 认知记忆（加密 SQLite） |
+| Agent Runtime | [astra-core](https://github.com/astra-praxis/astra-core) — 自研 Rust Agent Runtime（工具系统 / 权限策略 / 事件协议 / Artifact） |
+| 记忆引擎 | [astra-memory](https://github.com/astra-praxis/astra-memory) — CME 认知记忆（加密 SQLite） |
 | 协议 | MCP（Model Context Protocol）/ ACP / OpenAI 兼容 API |
 | 构建 | pnpm + Vite + GitHub Actions（macOS / Windows / Linux 自动打包发布） |
 
@@ -100,9 +100,9 @@ astra/
 
 ```bash
 # 前置：Rust + pnpm；astra-core / astra-memory 按兄弟目录克隆到同级
-git clone https://github.com/alanpaper/astra.git
-git clone https://github.com/alanpaper/astra-core.git    # ../astra-core
-git clone https://github.com/alanpaper/astra-memory.git  # ../astra-memory
+git clone https://github.com/astra-praxis/astra.git
+git clone https://github.com/astra-praxis/astra-core.git    # ../astra-core
+git clone https://github.com/astra-praxis/astra-memory.git  # ../astra-memory
 
 pnpm install            # 根目录（tauri CLI）
 pnpm --dir src install  # 前端依赖

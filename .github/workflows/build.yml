@@ -47,7 +47,7 @@ jobs:
       - name: Checkout astra-core
         uses: actions/checkout@v4
         with:
-          repository: alanpaper/astra-core
+          repository: astra-praxis/astra-core
           ref: main
           path: astra-core
           # GITHUB_TOKEN 只作用于本仓库，私有兄弟仓库需要 PAT（repo 读取权限）
@@ -56,7 +56,7 @@ jobs:
       - name: Checkout astra-memory
         uses: actions/checkout@v4
         with:
-          repository: alanpaper/astra-memory
+          repository: astra-praxis/astra-memory
           ref: main
           path: astra-memory
           # GITHUB_TOKEN 只作用于本仓库，私有兄弟仓库需要 PAT（repo 读取权限）

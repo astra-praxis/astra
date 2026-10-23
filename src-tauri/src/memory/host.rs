@@ -1,4 +1,4 @@
-//! 宿主侧记忆集成（astra-memory CME → 星野桌面）。
+//! 宿主侧记忆集成（astra-memory CME → Astra 桌面）。
 //!
 //! 分层（astra-memory docs/12 + docs/02 铁律）：
 //! - `MemoryHost` 拥有 cme `MemoryEngine`：加密 SQLite 存储

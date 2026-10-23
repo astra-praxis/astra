@@ -1,6 +1,6 @@
 # agent-core 项目规划
 
-> 从「星野应用内 Agent 模块」升级为「可嵌入的 Agent Runtime SDK」。
+> 从「Astra应用内 Agent 模块」升级为「可嵌入的 Agent Runtime SDK」。
 >
 > 输入来源：
 > 1. Zed agent 架构对比（2026-10，见 `build-agent-runtime` skill / architecture.md）

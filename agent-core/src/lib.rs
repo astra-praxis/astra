@@ -1,6 +1,6 @@
 //! # agent-core
 //!
-//! 星野 Agent Runtime 核心库。参考 Zed agent 架构分四层：
+//! Astra Agent Runtime 核心库。参考 Zed agent 架构分四层：
 //!
 //! 1. **model**（模型适配层）：`ModelBackend` trait —— 任何能流式产生
 //!    `Delta` 的后端都可接入（rig / 自研 SSE / 未来 ACP 外部 agent）。

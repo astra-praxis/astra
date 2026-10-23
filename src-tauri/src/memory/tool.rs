@@ -78,7 +78,7 @@ impl AgentTool for MemoryRememberTool {
                 "content": {
                     "type": "string",
                     "description": "一条完整、自包含的记忆。写清主体与范围（哪个项目/什么环境），\
-                                    不要只写代词指代。例：「星野项目的 Pandoc 路径是 /opt/homebrew/bin/pandoc（2026-01 验证）」"
+                                    不要只写代词指代。例：「astra 项目的 Pandoc 路径是 /opt/homebrew/bin/pandoc（2026-01 验证）」"
                 },
                 "kind": {
                     "type": "string",
@@ -332,7 +332,7 @@ mod tests {
 
         let out = remember
             .call(
-                json!({"content": "星野项目的 pandoc 路径是 /opt/homebrew/bin/pandoc", "kind": "fact"}),
+                json!({"content": "astra 项目的 pandoc 路径是 /opt/homebrew/bin/pandoc", "kind": "fact"}),
                 &ctx,
             )
             .await

@@ -2,7 +2,7 @@
 name = "agent-core"
 version = "0.1.0"
 edition = "2021"
-description = "星野 Agent Runtime 核心库：模型适配层 + Run 循环 + 工具系统 + 权限判定（参考 Zed agent 架构分层）"
+description = "Astra Agent Runtime 核心库：模型适配层 + Run 循环 + 工具系统 + 权限判定（参考 Zed agent 架构分层）"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }

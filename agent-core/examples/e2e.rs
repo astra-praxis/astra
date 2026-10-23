@@ -8,7 +8,7 @@
 //!   deny       Confirm 工具自动拒绝（AutoBridge(Deny)，文件不应生成，模型优雅恢复）
 //!   cancel     流式输出中途取消
 //!
-//! provider 默认「火山」（内网 newApi 可能不通），读星野应用真实 providers.json。
+//! provider 默认「火山」（内网 newApi 可能不通），读Astra应用真实 providers.json。
 
 use agent_core::events::RunEvent;
 use agent_core::model::{ChatMessage, MessageContent, ModelBackend, RigBackend, Role};

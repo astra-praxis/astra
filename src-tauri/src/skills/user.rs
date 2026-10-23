@@ -418,7 +418,7 @@ description: Astra 跨会话记忆系统的使用指南。说明自动记忆如�
 **content 写法**：一条完整、自包含的话。写清主体与范围（哪个项目、什么
 环境），不要用代词指代。对比：
 - 差：「路径在 /opt/homebrew/bin」（哪个工具的路径？）
-- 好：「星野项目的 pandoc 路径是 /opt/homebrew/bin/pandoc（2026-10 验证）」
+- 好：「astra 项目的 pandoc 路径是 /opt/homebrew/bin/pandoc（2026-10 验证）」
 
 **kind 选择**：preference=用户偏好（默认）｜decision=已确认决策｜
 fact=环境/项目事实｜experience=经验/解决方案｜task=待续任务。

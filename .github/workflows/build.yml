@@ -200,7 +200,7 @@ jobs:
       - name: Create Release & Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          name: 星野 ${{ steps.version.outputs.version }}
+          name: Astra ${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
           generate_release_notes: true

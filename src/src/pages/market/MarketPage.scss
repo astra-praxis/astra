@@ -145,6 +145,14 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 16px;
+
+    // 空状态：占满剩余视口高度并垂直居中，避免提示块顶在页面
+    // 上部、下半屏空白的不均衡视觉（如 MCP/技能页未安装任何内容时）
+    &.is-empty {
+      grid-template-columns: 1fr;
+      min-height: clamp(360px, calc(100vh - 320px), 640px);
+      align-content: center;
+    }
   }
 
   // MCP 页安装引导横幅（跨满整行）

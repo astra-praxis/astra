@@ -323,26 +323,38 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
           <span>正在加载...</span>
         </div>
       ) : (
-        <div className="market-grid">
+        <div
+          className={`market-grid${
+            kind === 'mcp'
+              ? installedTotal === 0 && !installed?.parseError
+                ? ' is-empty'
+                : ''
+              : skills.length === 0
+                ? ' is-empty'
+                : ''
+          }`}
+        >
           {kind === 'mcp' ? (
             <>
-              {/* 安装引导：新扩展回 Agent 对话安装 */}
-              <div className="mcp-guide">
-                <div className="mcp-guide-text">
-                  <span className="mcp-guide-title">
-                    <MessageSquarePlus size={15} strokeWidth={2.2} />
-                    想安装新扩展？
-                  </span>
-                  <span className="mcp-guide-desc">
-                    回到 Agent 对话直接说，例如：「帮我安装 Playwright 浏览器 MCP」，AI 会下载依赖并写好
-                    ~/.astra/config.toml 配置，保存后新建会话生效。
-                  </span>
+              {/* 安装引导：新扩展回 Agent 对话安装（空状态时隐藏，避免与空状态引导重复） */}
+              {!(installedTotal === 0 && !installed?.parseError) && (
+                <div className="mcp-guide">
+                  <div className="mcp-guide-text">
+                    <span className="mcp-guide-title">
+                      <MessageSquarePlus size={15} strokeWidth={2.2} />
+                      想安装新扩展？
+                    </span>
+                    <span className="mcp-guide-desc">
+                      回到 Agent 对话直接说，例如：「帮我安装 Playwright 浏览器 MCP」，AI 会下载依赖并写好
+                      ~/.astra/config.toml 配置，保存后新建会话生效。
+                    </span>
+                  </div>
+                  <button className="btn-install" onClick={goAgentInstall}>
+                    <MessageSquarePlus size={14} strokeWidth={2.5} />
+                    去 Agent 对话安装
+                  </button>
                 </div>
-                <button className="btn-install" onClick={goAgentInstall}>
-                  <MessageSquarePlus size={14} strokeWidth={2.5} />
-                  去 Agent 对话安装
-                </button>
-              </div>
+              )}
 
               {/* 配置解析失败（坏配置也要露出，不能静默空白） */}
               {installed?.parseError && (
@@ -462,23 +474,25 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
             </>
           ) : (
             <>
-              {/* 安装引导：新技能回 Agent 对话安装 */}
-              <div className="mcp-guide">
-                <div className="mcp-guide-text">
-                  <span className="mcp-guide-title">
-                    <MessageSquarePlus size={15} strokeWidth={2.2} />
-                    想安装新技能？
-                  </span>
-                  <span className="mcp-guide-desc">
-                    回到 Agent 对话直接说，例如：「帮我安装 docx 技能」，AI 会从 GitHub /
-                    skills.sh 下载并装进 ~/.config/astra/skills，装完用 /技能名 调用。
-                  </span>
+              {/* 安装引导：新技能回 Agent 对话安装（空状态时隐藏，避免与空状态引导重复） */}
+              {skills.length > 0 && (
+                <div className="mcp-guide">
+                  <div className="mcp-guide-text">
+                    <span className="mcp-guide-title">
+                      <MessageSquarePlus size={15} strokeWidth={2.2} />
+                      想安装新技能？
+                    </span>
+                    <span className="mcp-guide-desc">
+                      回到 Agent 对话直接说，例如：「帮我安装 docx 技能」，AI 会从 GitHub /
+                      skills.sh 下载并装进 ~/.config/astra/skills，装完用 /技能名 调用。
+                    </span>
+                  </div>
+                  <button className="btn-install" onClick={goAgentInstall}>
+                    <MessageSquarePlus size={14} strokeWidth={2.5} />
+                    去 Agent 对话安装
+                  </button>
                 </div>
-                <button className="btn-install" onClick={goAgentInstall}>
-                  <MessageSquarePlus size={14} strokeWidth={2.5} />
-                  去 Agent 对话安装
-                </button>
-              </div>
+              )}
 
               {skills.map((s) => {
                 const busy = busyId === `skill/${s.name}`;

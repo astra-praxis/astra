@@ -151,14 +151,26 @@ jobs:
         run: pnpm --dir src install --frozen-lockfile
 
       # ================= BUILD =================
-      # Linux 上显式指定 bundle 类型，避免读到 conf 里的 nsis/app/dmg
+      # Linux 上显式指定 bundle 类型，避免读到 conf 里的 nsis/app/dmg；
+      # Windows 构建两遍：默认 downloadBootstrapper（在线小包）+ offlineInstaller（WebView2 内置版）
       - name: Build Tauri App
         run: |
           if [ "${{ matrix.platform }}" = "linux" ]; then
             pnpm tauri build --bundles appimage deb
+          elif [ "${{ matrix.platform }}" = "windows" ]; then
+            pnpm tauri build
+            mkdir -p bundle-keep
+            cp src-tauri/target/release/bundle/nsis/*.exe bundle-keep/
+            pnpm tauri build --config src-tauri/tauri.conf.webview2.json
+            for f in src-tauri/target/release/bundle/nsis/*.exe; do
+              mv "$f" "${f/-setup/-setup-offline}"
+            done
+            mv bundle-keep/*.exe src-tauri/target/release/bundle/nsis/
+            rmdir bundle-keep
           else
             pnpm tauri build
           fi
+        shell: bash
         env:
           TAURI_SKIP_VALIDATION: true
 

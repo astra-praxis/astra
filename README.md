@@ -63,7 +63,7 @@ Astra 是一个基于 Tauri 2 的桌面应用：把你的项目目录交给一�
 | Agent Runtime | [astra-core](https://github.com/alanpaper/astra-core) — 自研 Rust Agent Runtime（工具系统 / 权限策略 / 事件协议 / Artifact） |
 | 记忆引擎 | [astra-memory](https://github.com/alanpaper/astra-memory) — CME 认知记忆（加密 SQLite） |
 | 协议 | MCP（Model Context Protocol）/ ACP / OpenAI 兼容 API |
-| 构建 | pnpm + Vite + GitHub Actions（macOS / Windows 自动打包发布） |
+| 构建 | pnpm + Vite + GitHub Actions（macOS / Windows / Linux 自动打包发布） |
 
 ---
 
@@ -91,7 +91,7 @@ astra/
 │       ├── memory/               # CME 宿主集成（加密库 + Provider 注入）
 │       ├── skills/               # 技能库管理（内置技能安装）
 │       └── app/                  # 工作空间 / 设置 / 下载器 / 编辑器启动
-└── .github/workflows/            # CI：tag 推送自动出 macOS dmg + Windows exe
+└── .github/workflows/            # CI：tag 推送自动出 macOS dmg + Windows exe + Linux AppImage/deb
 ```
 
 ---
@@ -130,7 +130,17 @@ cd src-tauri && cargo check           # Rust
 git tag v0.x.y && git push origin v0.x.y
 ```
 
-产物：`astra_<version>_x64-setup.exe`（Windows NSIS）+ `astra_<version>_aarch64.dmg`（Apple Silicon）。
+产物：
+
+| 平台 | 产物 | 说明 |
+|---|---|---|
+| Windows | `astra_<version>_x64-setup.exe` | NSIS 安装器，WebView2 在线下载 |
+| Windows | `astra_<version>_x64-setup-offline.exe` | WebView2 已内置（离线机器用，体积 +~130MB） |
+| macOS | `astra_<version>_aarch64.dmg` | Apple Silicon |
+| Linux | `astra_<version>_amd64.AppImage` | 通用格式，Arch 等滚动发行版 `chmod +x` 直接运行 |
+| Linux | `astra_<version>_amd64.deb` | Ubuntu / Debian |
+
+> Linux 产物（AppImage / deb）自 v0.3.4 起提供，尚未在真机上充分测试，遇到问题欢迎提 issue。运行依赖 WebKitGTK 4.1（多数桌面发行版默认具备）；AppImage 内已自带大部分依赖。
 
 > Windows 首次安装如遇 SmartScreen 提示，点「更多信息 → 仍要运行」。
 

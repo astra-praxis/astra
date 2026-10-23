@@ -75,7 +75,7 @@ jobs:
       - name: Smoke test (run exe for 20s)
         shell: pwsh
         run: |
-          $exe = Join-Path $PWD "astra\src-tauri\target\release\astra.exe"
+          $exe = Join-Path $PWD "src-tauri\target\release\astra.exe"
           if (-not (Test-Path $exe)) { Write-Host "exe not found: $exe"; exit 1 }
           $errLog = Join-Path $PWD "astra_err.log"
           $outLog = Join-Path $PWD "astra_out.log"

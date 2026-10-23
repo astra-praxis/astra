@@ -114,6 +114,7 @@ export default function DevelopmentSettings() {
       <SettingsRow
         title="测试启动"
         desc="用当前编辑器命令打开用户目录验证配置，不会保存设置。"
+        stacked
       >
         <div className="test-bar">
           <button

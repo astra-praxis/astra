@@ -223,6 +223,9 @@
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  // 内容过宽（如测试提示长文本）时允许收缩换行，不溢出卡片
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 /* ===== 保存栏 ===== */

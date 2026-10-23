@@ -198,29 +198,64 @@ pub(crate) fn set_active_workspace(
 }
 // ===== 命令：在编辑器中打开项目 =====
 
+/// 在候选目录中把编辑器命令解析为绝对路径。
+/// 不信任 std 的 PATH 查找：macOS 打包后 GUI 应用走 posix_spawnp，
+/// 可执行文件搜索用父进程 PATH（.env 修改的子进程 PATH 不参与）；
+/// Windows 上 CreateProcess 同样只看父进程 PATH。两平台都自己解析最稳。
+fn resolve_editor_command(command: &str, dirs: &[std::path::PathBuf]) -> std::path::PathBuf {
+    // 已含路径分隔符：视为明确路径，直接交给 std
+    if command.contains('/') || command.contains('\\') {
+        return std::path::PathBuf::from(command);
+    }
+    // Windows 下 CLI 入口常是 .cmd/.bat（code.cmd / zed.cmd），逐扩展名试
+    #[cfg(windows)]
+    let names: Vec<String> = ["", ".exe", ".cmd", ".bat"]
+        .iter()
+        .map(|ext| format!("{command}{ext}"))
+        .collect();
+    #[cfg(not(windows))]
+    let names: Vec<String> = vec![command.to_string()];
+    for dir in dirs {
+        for name in &names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    // 解析不到：原样返回，让 std 报出同样的 ENOENT 错误
+    std::path::PathBuf::from(command)
+}
+
 #[tauri::command]
 pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(), String> {
-    // 补充 PATH（打包后可能不完整）：Windows 直接沿用（分隔符/路径不同，
-    // Unix 目录无意义），Unix 补常见目录并用 join_paths 按平台拼接
-    let existing = std::env::var_os("PATH").unwrap_or_default();
-    #[cfg(windows)]
-    let extra: Vec<std::path::PathBuf> = Vec::new();
+    // 候选目录（打包后 GUI 应用继承的 PATH 只有 /usr/bin:/bin 等系统目录）
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     #[cfg(not(windows))]
-    let extra: Vec<std::path::PathBuf> = [
-        "/usr/local/bin",
-        "/opt/homebrew/bin",
-        "/opt/local/bin",
-        "/usr/bin",
-        "/bin",
-    ]
-    .iter()
-    .map(std::path::PathBuf::from)
-    .collect();
-    let mut dirs: Vec<std::path::PathBuf> = extra;
-    dirs.push(existing.into());
+    {
+        for dir in [
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/opt/local/bin",
+            "/usr/bin",
+            "/bin",
+        ] {
+            dirs.push(std::path::PathBuf::from(dir));
+        }
+        // zed 官方安装脚本默认装到 ~/.local/bin，部分工具在 ~/bin
+        if let Ok(home) = std::env::var("HOME") {
+            dirs.push(std::path::PathBuf::from(&home).join(".local/bin"));
+            dirs.push(std::path::PathBuf::from(home).join("bin"));
+        }
+    }
+    // 用户继承的 PATH 排在自定义目录后（自定义目录优先命中）
+    if let Some(existing) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&existing));
+    }
     let full_path = std::env::join_paths(&dirs).unwrap_or_default();
 
-    Command::new(&editor_command)
+    let editor = resolve_editor_command(&editor_command, &dirs);
+    Command::new(editor)
         .arg(&path)
         .env("PATH", &full_path)
         .spawn()
@@ -269,4 +304,48 @@ pub(crate) fn get_preset_editors() -> Vec<EditorSetting> {
             command: "windsurf".to_string(),
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(not(windows))]
+    #[test]
+    fn resolve_editor_finds_binary_in_candidate_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("zed");
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let dirs = vec![dir.path().to_path_buf()];
+        assert_eq!(
+            resolve_editor_command("zed", &dirs),
+            bin,
+            "候选目录中的命令应解析为绝对路径"
+        );
+        // 带路径分隔符的命令原样返回，不做目录拼接
+        assert_eq!(
+            resolve_editor_command("/opt/homebrew/bin/zed", &dirs),
+            std::path::PathBuf::from("/opt/homebrew/bin/zed")
+        );
+        // 解析不到时原样返回（让 std 报 ENOENT）
+        assert_eq!(
+            resolve_editor_command("not-installed", &dirs),
+            std::path::PathBuf::from("not-installed")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_editor_tries_windows_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let code = dir.path().join("code.cmd");
+        std::fs::write(&code, "@echo off\r\n").unwrap();
+        let dirs = vec![dir.path().to_path_buf()];
+        assert_eq!(resolve_editor_command("code", &dirs), code);
+    }
 }

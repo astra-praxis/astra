@@ -1,8 +1,56 @@
 # Astra
 
-**项目工作空间管理工具 + AI 对话助手**
+**本地优先的 AI Agent 桌面应用** — 项目工作空间管理 + 全能 Agent 对话助手
 
-Astra 是一个桌面应用，帮助你管理工作空间中的多个项目，并通过 AI 对话助手提升开发效率。支持调用远程 API（OpenAI 兼容）或本地模型（llama.cpp）进行对话，AI 可以读取项目上下文、在编辑器中打开项目，甚至可以执行 shell 命令。
+Astra 是一个基于 Tauri 2 的桌面应用：把你的项目目录交给一个具备 **23+ 内置工具、MCP 扩展、技能系统、长期记忆** 的 AI Agent，它能读写文件、执行命令、检索网页、生成图片与文档——所有操作都在你本机完成，权限边界清晰可控。
+
+> Agent Runtime 基于 [astra-core](https://github.com/alanpaper/astra-core)（Rust 实现的可嵌入 Agent Runtime SDK）与 [astra-memory](https://github.com/alanpaper/astra-memory)（认知记忆引擎）构建。
+
+---
+
+## ✨ 功能亮点
+
+### 🤖 Agent 对话
+
+- **流式对话**：实时展示回答、思考过程（Reasoning）与工具调用进度
+- **23+ 内置工具**：文件读写（`read_file` / `edit_file` / `find_path`…）、Shell 执行（前台 + 后台任务）、网页抓取（`fetch` / `search_web`）、图片生成（`generate_image`）、文档转换（`extract_document` / `build_docx`）等
+- **Artifact 系统**：Agent 产出的文件/代码/图片以卡片形式沉淀，支持预览（Markdown / 代码高亮 / 图片 / 视频渲染）
+- **多会话并行**：多标签页管理多个 Agent 会话，互不干扰
+- **多模态输入**：粘贴图片直接进对话
+- **@ 项目提及**：Agent 感知当前项目上下文
+- **斜杠技能**：`/技能名` 调用已安装的 Agent 技能
+- **Checkpoint 回退**：会话支持历史回退与编辑重发
+
+### 🔐 权限与安全
+
+- 每个工具调用都有**权限等级**：只读操作自动放行，写入/执行类操作弹出确认卡
+- 工具级 `allow` / `deny` 名单，MCP 工具按需放行
+- 敏感操作（覆盖文件、执行命令）完整展示 diff 或命令内容后才执行
+
+### 🧩 MCP / ACP 扩展
+
+- 兼容 **Model Context Protocol**：在 Agent 对话中说「帮我安装 xxx MCP」，AI 自动下载依赖并写好配置
+- 支持 ACP Agent 扩展
+- 启停 / 删除 / 运行状态监控，工具数量实时显示
+
+### 🧠 认知记忆（CME）
+
+- Run 结束自动提炼长期记忆（确定性规则 + 词法检索，无模型依赖）
+- 加密 SQLite 存储，密钥落在本机
+- 跨会话召回：新对话自动注入「REMEMBERED CONTEXT」，Agent 记得你的偏好与项目背景
+- 记忆按项目作用域隔离，不串线
+
+### 🗂️ 工作空间
+
+- 多工作空间管理，自动扫描项目
+- 项目详情：git remote、子项目、README 预览
+- 一键在编辑器中打开（VS Code / Zed / Cursor / 自定义命令）
+
+### 🎨 其他
+
+- **亮 / 暗主题**，完整的设计变量体系
+- **系统托盘**：关闭窗口最小化到托盘，`Alt+Space` 全局唤起
+- **本地模型**：接入 llama.cpp 服务器运行 `.gguf` 模型；也支持任意 OpenAI 兼容 API
 
 ---
 
@@ -10,10 +58,12 @@ Astra 是一个桌面应用，帮助你管理工作空间中的多个项目，�
 
 | 层 | 技术 |
 |----|------|
-| 前端 | **SvelteKit 5** (SPA, runes) + **TypeScript** |
-| 后端 | **Rust** + **Tauri 2** |
-| 包管理 | **pnpm** |
-| AI 协议 | OpenAI 兼容接口（流式 SSE） |
+| 桌面框架 | **Tauri 2**（Rust） |
+| 前端 | **React 19** + TypeScript + Zustand + Radix UI |
+| Agent Runtime | [astra-core](https://github.com/alanpaper/astra-core) — 自研 Rust Agent Runtime（工具系统 / 权限策略 / 事件协议 / Artifact） |
+| 记忆引擎 | [astra-memory](https://github.com/alanpaper/astra-memory) — CME 认知记忆（加密 SQLite） |
+| 协议 | MCP（Model Context Protocol）/ ACP / OpenAI 兼容 API |
+| 构建 | pnpm + Vite + GitHub Actions（macOS / Windows 自动打包发布） |
 
 ---
 
@@ -21,126 +71,71 @@ Astra 是一个桌面应用，帮助你管理工作空间中的多个项目，�
 
 ```
 astra/
-├── src/                              # 前端源码
-│   ├── lib/
-│   │   ├── theme.svelte.ts           # 主题管理（亮/暗 + 渐变背景）
-│   │   └── workspace.svelte.ts       # 全局工作空间状态
-│   ├── routes/
-│   │   ├── +layout.svelte            # 根布局：侧边栏导航 + 可拖拽标题栏
-│   │   ├── +layout.ts                # SPA 配置（ssr = false）
-│   │   ├── +page.svelte              # 工作空间页面（/）
-│   │   ├── chat/
-│   │   │   ├── +page.svelte          # 对话页面（/chat）
-│   │   │   └── MarkdownMessage.svelte# Markdown 渲染 + 代码块执行 + Action 链接
-│   │   ├── models/                   # 本地模型管理（/models）
-│   │   ├── providers/                # API Provider 配置（/providers）
-│   │   ├── settings/                 # 设置页面（/settings）
-│   │   └── skills/                   # Skills 管理（/skills）
-│   ├── styles/
-│   │   └── global.css                # 全局 CSS 变量 + 样式
-│   └── app.html
-├── src-tauri/                        # Rust 后端
-│   ├── src/
-│   │   ├── main.rs                   # 入口
-│   │   ├── lib.rs                    # 主库：工作空间、项目、编辑器、模型服务、Skills
-│   │   ├── chat.rs                   # AI 对话（流式 SSE）
-│   │   ├── chat_sessions.rs          # 对话会话持久化
-│   │   ├── command_runner.rs         # Shell 命令执行（流式输出）
-│   │   └── providers.rs              # API Provider CRUD
-│   ├── capabilities/                 # Tauri 权限配置
-│   ├── tauri.conf.json
-│   └── Cargo.toml
-└── package.json
+├── src/                          # 前端（React 19 + Vite）
+│   └── src/
+│       ├── pages/
+│       │   ├── agent/            # Agent 对话页（多会话 / 权限卡 / 预览面板）
+│       │   ├── artifacts/        # Artifact 产出管理
+│       │   ├── market/           # MCP / ACP / 技能管理
+│       │   ├── workspace/        # 工作空间与项目
+│       │   ├── chat/             # 基础对话组件（Mention 输入等）
+│       │   ├── providers/        # API Provider 配置
+│       │   ├── models/           # 本地模型（llama.cpp）
+│       │   ├── tools/            # 内置工具页
+│       │   └── settings/         # 设置（编辑器 / 记忆 / 图像生成 / 搜索…）
+│       ├── stores/               # Zustand 全局状态（agent 事件流等）
+│       └── components/           # 通用组件
+├── src-tauri/                    # Rust 后端（Tauri 2）
+│   └── src/
+│       ├── agent/                # Agent 桥接层（Run 启动 / 事件转发 / 记忆采集）
+│       ├── memory/               # CME 宿主集成（加密库 + Provider 注入）
+│       ├── skills/               # 技能库管理（内置技能安装）
+│       └── app/                  # 工作空间 / 设置 / 下载器 / 编辑器启动
+└── .github/workflows/            # CI：tag 推送自动出 macOS dmg + Windows exe
 ```
-
----
-
-## 功能
-
-### 🧠 AI 对话 (chat)
-
-- 支持 **API Provider**（OpenAI 兼容接口）和 **本地模型**（llama.cpp）
-- 流式对话，实时展示内容与推理过程
-- 会话历史管理（保存 / 加载 / 删除）
-- **@ 项目提及** — 输入 `@` 触发项目搜索，AI 可感知项目上下文
-- **Action 链接** — AI 可输出可点击的操作按钮
-- **代码块执行** — shell/bash 代码块可直接执行
-
-### 🔗 Action 链接
-
-AI 在对话中可生成 action 链接，自动触发操作：
-
-| Action | 说明 |
-|--------|------|
-| `action://open_project?path=xxx` | 在编辑器中打开项目（新消息自动执行） |
-| `action://run_command?cmd=xxx&cwd=xxx` | 执行 shell 命令（需用户确认） |
-
-新消息中的 `open_project` 链接会自动执行，无需手动点击。历史消息不会重复执行。
-
-### 💻 Shell 命令执行
-
-AI 输出的 bash/sh/shell 代码块支持一键执行：
-
-1. AI 输出代码块 → 右上角出现 **▶ 执行** 和 **📋 复制** 按钮
-2. 点击 **▶ 执行** → 展开确认弹窗，显示完整命令
-3. 点击 **允许执行** → 命令运行，输出实时显示在代码块下方
-4. 完成后显示退出码和结果
-
-> 仅 `bash`、`sh`、`shell` 语言标签的代码块有执行按钮，普通代码块只有复制功能。
-
-### 🗂️ 工作空间管理 (workspace)
-
-- 添加 / 切换工作空间目录
-- 自动扫描项目（检测 README.md）
-- 查看项目详情（git remote、子项目、README 预览）
-- 绑定默认编辑器，一键打开项目
-- 新建项目目录
-
-### ⚙️ 设置 (settings)
-
-- 工作空间管理（添加 / 移除 / 切换）
-- 默认编辑器配置（预置 VS Code、Cursor、Windsurf 等）
-- 自定义编辑器命令
-- 主题切换
-
-### 🔧 模型 & Provider 管理
-
-- **API Provider**：添加 OpenAI 兼容接口，自动拉取模型列表
-- **本地模型**：配置 `.gguf` 模型文件，启动 / 停止 llama.cpp 服务器
 
 ---
 
 ## 开发
 
 ```bash
-pnpm dev              # Vite 开发服务器
-pnpm tauri dev        # 完整 Tauri 应用（含 Rust 热重载）
-pnpm build            # 前端构建
-pnpm tauri build      # 打包 macOS app
-pnpm check            # svelte-check 类型检查
-pnpm check:watch      # 监听式类型检查
+# 前置：Rust + pnpm；astra-core / astra-memory 按兄弟目录克隆到同级
+git clone https://github.com/alanpaper/astra.git
+git clone https://github.com/alanpaper/astra-core.git    # ../astra-core
+git clone https://github.com/alanpaper/astra-memory.git  # ../astra-memory
+
+pnpm install            # 根目录（tauri CLI）
+pnpm --dir src install  # 前端依赖
+
+pnpm tauri dev          # 完整应用（前端 + Rust 热重载）
+pnpm tauri build        # 打包
+```
+
+前端测试与检查：
+
+```bash
+pnpm --dir src typecheck              # TypeScript
+pnpm --dir src test                   # node --test 单测（store 纯逻辑）
+pnpm --dir src build                  # 前端构建
+cd src-tauri && cargo check           # Rust
 ```
 
 ---
 
-## 系统提示注入
+## 发布
 
-AI 的系统提示中会动态注入工作空间上下文（`buildWorkspaceContext()`），包括：
+推送 `v*` tag 即触发 [GitHub Actions](.github/workflows/build.yml) 构建并发布：
 
-- 当前工作空间名称和路径
-- 项目列表（名称 + 路径）
-- Action 链接协议说明
-- Shell 代码块执行说明
+```bash
+git tag v0.x.y && git push origin v0.x.y
+```
 
-这使得 AI 能感知项目上下文并生成可执行的操作。
+产物：`astra_<version>_x64-setup.exe`（Windows NSIS）+ `astra_<version>_aarch64.dmg`（Apple Silicon）。
+
+> Windows 首次安装如遇 SmartScreen 提示，点「更多信息 → 仍要运行」。
 
 ---
 
-## 依赖
+## License
 
-- **Tauri 2** — 桌面应用框架
-- **SvelteKit** — 前端框架（SPA 模式）
-- **marked** + **highlight.js** — Markdown 渲染 + 代码高亮
-- **reqwest** — Rust HTTP 客户端（AI 接口调用）
-- **serde** / **serde_json** — 序列化
-- **tokio** — 异步运行时（命令执行）
+MIT

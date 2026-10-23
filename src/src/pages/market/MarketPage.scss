@@ -433,6 +433,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    // 空状态（flex column）内用 auto 外边距水平居中；
+    // 在 mcp-guide 横幅里由 flex-shrink:0 + 父级 space-between 定位，不受影响
+    margin: 0 auto;
     gap: 6px;
     align-self: flex-start;
     margin-top: auto;

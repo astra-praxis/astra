@@ -44,6 +44,8 @@ jobs:
           repository: alanpaper/astra-core
           ref: main
           path: astra-core
+          # GITHUB_TOKEN 只作用于本仓库，私有兄弟仓库需要 PAT（repo 读取权限）
+          token: ${{ secrets.PAT }}
 
       - name: Checkout astra-memory
         uses: actions/checkout@v4
@@ -51,6 +53,8 @@ jobs:
           repository: alanpaper/astra-memory
           ref: main
           path: astra-memory
+          # GITHUB_TOKEN 只作用于本仓库，私有兄弟仓库需要 PAT（repo 读取权限）
+          token: ${{ secrets.PAT }}
 
       # ================= 从 git tag 提取版本 =================
       - name: Extract version from tag

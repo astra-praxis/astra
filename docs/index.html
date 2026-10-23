@@ -59,6 +59,10 @@
   .nav-links a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color .2s; }
   .nav-links a:hover { color: var(--text); }
   .nav-cta { padding: 7px 16px !important; border: 1px solid rgba(99,102,241,.5); border-radius: 10px; color: var(--text) !important; background: rgba(99,102,241,.12); }
+  .lang-toggle { margin-left: 6px; padding: 6px 12px; border-radius: 9px; border: 1px solid var(--card-border);
+    background: var(--card); color: var(--text-dim); font-size: 12.5px; font-weight: 700; cursor: pointer;
+    transition: color .2s, border-color .2s; font-family: inherit; }
+  .lang-toggle:hover { color: var(--text); border-color: rgba(99,102,241,.5); }
 
   /* ---------- Hero ---------- */
   .hero { text-align: center; padding: 108px 0 84px; }
@@ -171,79 +175,76 @@
       Astra
     </div>
     <div class="nav-links">
-      <a href="#features">功能</a>
-      <a href="#demo">演示</a>
-      <a href="#stack">技术栈</a>
-      <a class="nav-cta" href="https://github.com/alanpaper/astra/releases" target="_blank" rel="noopener">下载</a>
+      <a href="#features" data-i18n="nav_features">功能</a>
+      <a href="#demo" data-i18n="nav_demo">演示</a>
+      <a href="#stack" data-i18n="nav_stack">技术栈</a>
+      <a class="nav-cta" href="https://github.com/alanpaper/astra/releases" target="_blank" rel="noopener" data-i18n="nav_download">下载</a>
+      <button class="lang-toggle" id="langToggle" aria-label="Switch language">EN</button>
     </div>
   </div>
 </nav>
 
 <header class="wrap hero">
-  <div class="hero-badge"><span class="dot"></span>macOS · Windows 免费下载</div>
+  <div class="hero-badge"><span class="dot"></span><span data-i18n="hero_badge">macOS · Windows 免费下载</span></div>
   <br />
   <img class="hero-icon" src="icon.png" alt="Astra" onerror="this.style.display='none'" />
-  <h1>把项目交给<br /><span class="grad-text">真正能干活的 AI Agent</span></h1>
-  <p class="hero-sub">
+  <h1><span data-i18n="hero_title_1">把项目交给</span><br /><span class="grad-text" data-i18n="hero_title_2">真正能干活的 AI Agent</span></h1>
+  <p class="hero-sub" data-i18n="hero_sub">
     Astra 是一个本地优先的桌面 AI Agent：23+ 内置工具、MCP 扩展、技能系统与认知记忆，
     读写文件、执行命令、生成图片与文档——每一步都在你的权限边界内。
   </p>
   <div class="hero-actions">
-    <a class="btn btn-primary" href="https://github.com/alanpaper/astra/releases" target="_blank" rel="noopener">
-      ⬇ 免费下载
-    </a>
-    <a class="btn btn-ghost" href="https://github.com/alanpaper/astra" target="_blank" rel="noopener">
-      ⭐ GitHub 仓库
-    </a>
+    <a class="btn btn-primary" href="https://github.com/alanpaper/astra/releases" target="_blank" rel="noopener" data-i18n="hero_download">⬇ 免费下载</a>
+    <a class="btn btn-ghost" href="https://github.com/alanpaper/astra" target="_blank" rel="noopener" data-i18n="hero_github">⭐ GitHub 仓库</a>
   </div>
   <div class="hero-meta">
-    <span>🔒 本地优先，记忆加密存储</span>
-    <span>⚡ Tauri 2，安装包仅 ~10MB</span>
-    <span>🧩 兼容 MCP 协议</span>
+    <span data-i18n="hero_meta_1">🔒 本地优先，记忆加密存储</span>
+    <span data-i18n="hero_meta_2">⚡ Tauri 2，安装包仅 ~10MB</span>
+    <span data-i18n="hero_meta_3">🧩 兼容 MCP 协议</span>
   </div>
 </header>
 
 <section class="wrap" id="features">
   <div class="sec-head">
     <div class="sec-kicker">Features</div>
-    <h2 class="sec-title">一个 Agent，全链路干活</h2>
-    <p class="sec-desc">不是聊天玩具，是具备完整工具链与权限体系的工作伙伴。</p>
+    <h2 class="sec-title" data-i18n="feat_title">一个 Agent，全链路干活</h2>
+    <p class="sec-desc" data-i18n="feat_desc">不是聊天玩具，是具备完整工具链与权限体系的工作伙伴。</p>
   </div>
   <div class="features">
     <div class="feature">
       <div class="feature-icon">🛠️</div>
-      <h3>23+ 内置工具</h3>
-      <p>文件读写 <code>edit_file</code>、路径搜索 <code>find_path</code>、Shell 执行与后台任务、
+      <h3 data-i18n="f1_h">23+ 内置工具</h3>
+      <p data-i18n-html="f1_p">文件读写 <code>edit_file</code>、路径搜索 <code>find_path</code>、Shell 执行与后台任务、
         网页抓取 <code>fetch</code>、图像生成、<code>build_docx</code> 文档产出……开箱即用。</p>
     </div>
     <div class="feature">
       <div class="feature-icon">🔐</div>
-      <h3>权限边界可控</h3>
-      <p>只读操作自动放行，写入与命令执行弹出确认卡，完整展示 diff 与命令内容。
+      <h3 data-i18n="f2_h">权限边界可控</h3>
+      <p data-i18n-html="f2_p">只读操作自动放行，写入与命令执行弹出确认卡，完整展示 diff 与命令内容。
         工具级 allow / deny 名单，敏感操作绝不静默执行。</p>
     </div>
     <div class="feature">
       <div class="feature-icon">🧠</div>
-      <h3>认知记忆</h3>
-      <p>对话结束自动提炼长期记忆，加密 SQLite 存储、密钥不出本机。
+      <h3 data-i18n="f3_h">认知记忆</h3>
+      <p data-i18n-html="f3_p">对话结束自动提炼长期记忆，加密 SQLite 存储、密钥不出本机。
         新会话自动召回上下文——Agent 记得你的偏好与项目背景。</p>
     </div>
     <div class="feature">
       <div class="feature-icon">🧩</div>
-      <h3>MCP 扩展生态</h3>
-      <p>兼容 Model Context Protocol。在对话里说一句「帮我安装 Playwright MCP」，
+      <h3 data-i18n="f4_h">MCP 扩展生态</h3>
+      <p data-i18n-html="f4_p">兼容 Model Context Protocol。在对话里说一句「帮我安装 Playwright MCP」，
         AI 自动下载依赖写好配置，重启会话即生效。</p>
     </div>
     <div class="feature">
       <div class="feature-icon">📦</div>
-      <h3>Artifact 沉淀</h3>
-      <p>Agent 产出的代码、文档、图片以卡片形式管理，支持 Markdown 渲染、
+      <h3 data-i18n="f5_h">Artifact 沉淀</h3>
+      <p data-i18n-html="f5_p">Agent 产出的代码、文档、图片以卡片形式管理，支持 Markdown 渲染、
         代码高亮、图片视频预览，一键在编辑器中打开。</p>
     </div>
     <div class="feature">
       <div class="feature-icon">⚡</div>
-      <h3>本地 &amp; 轻量</h3>
-      <p>Tauri 2 + 系统 WebView，安装包仅 ~10MB。支持 OpenAI 兼容 API 与
+      <h3 data-i18n="f6_h">本地 &amp; 轻量</h3>
+      <p data-i18n-html="f6_p">Tauri 2 + 系统 WebView，安装包仅 ~10MB。支持 OpenAI 兼容 API 与
         llama.cpp 本地模型，数据不出你的机器。</p>
     </div>
   </div>
@@ -252,27 +253,27 @@
 <section class="wrap" id="demo">
   <div class="sec-head">
     <div class="sec-kicker">Demo</div>
-    <h2 class="sec-title">看它怎么工作</h2>
-    <p class="sec-desc">权限确认 → 工具执行 → Artifact 沉淀，全程可见、可控。</p>
+    <h2 class="sec-title" data-i18n="demo_title">看它怎么工作</h2>
+    <p class="sec-desc" data-i18n="demo_desc">权限确认 → 工具执行 → Artifact 沉淀，全程可见、可控。</p>
   </div>
   <div class="demo">
     <div class="demo-bar">
       <span class="demo-dot" style="background:#ff5f57"></span>
       <span class="demo-dot" style="background:#febc2e"></span>
       <span class="demo-dot" style="background:#28c840"></span>
-      <span class="demo-title">Astra — Agent 会话</span>
+      <span class="demo-title" data-i18n="demo_window">Astra — Agent 会话</span>
     </div>
     <div class="demo-body">
-      <div class="bubble bubble-user">帮我把这个仓库的 README 翻译成英文，顺便生成一张宣传图放进 docs/</div>
-      <div class="tool-call pending"><span class="spinner"></span>edit_file · 等待确认（写入操作）</div>
-      <div class="tool-call">✓ edit_file — README.md · +42 −18</div>
+      <div class="bubble bubble-user" data-i18n="demo_user">帮我把这个仓库的 README 翻译成英文，顺便生成一张宣传图放进 docs/</div>
+      <div class="tool-call pending"><span class="spinner"></span><span data-i18n="demo_tool_pending">edit_file · 等待确认（写入操作）</span></div>
+      <div class="tool-call">✓ edit_file — README.md · <span data-i18n="demo_diff">+42 −18</span></div>
       <div class="tool-call">✓ generate_image — promo.png · 1024×1024</div>
-      <div class="bubble bubble-ai">已完成：README 英文版已写入，宣传图保存在 <b>docs/promo.png</b>。两个变更都是你在确认卡里批准过的，随时可以在 Artifact 面板里回看。</div>
+      <div class="bubble bubble-ai" data-i18n-html="demo_ai">已完成：README 英文版已写入，宣传图保存在 <b>docs/promo.png</b>。两个变更都是你在确认卡里批准过的，随时可以在 Artifact 面板里回看。</div>
       <div class="artifact-card">
         <div class="artifact-icon">🖼️</div>
         <div>
           <div class="artifact-name">promo.png</div>
-          <div class="artifact-meta">generate_image · 刚刚 · 点击预览</div>
+          <div class="artifact-meta" data-i18n="demo_artifact">generate_image · 刚刚 · 点击预览</div>
         </div>
       </div>
     </div>
@@ -282,23 +283,23 @@
 <section class="wrap" id="permission">
   <div class="sec-head">
     <div class="sec-kicker">Safety</div>
-    <h2 class="sec-title">权限确认，三步闭环</h2>
+    <h2 class="sec-title" data-i18n="perm_title">权限确认，三步闭环</h2>
   </div>
   <div class="perm-flow">
     <div class="perm-step">
       <div class="perm-num">1</div>
-      <h4>Agent 发起请求</h4>
-      <p>写入文件、执行命令等敏感操作触发确认卡，完整展示 diff 或命令。</p>
+      <h4 data-i18n="p1_h">Agent 发起请求</h4>
+      <p data-i18n="p1_p">写入文件、执行命令等敏感操作触发确认卡，完整展示 diff 或命令。</p>
     </div>
     <div class="perm-step">
       <div class="perm-num">2</div>
-      <h4>你做决定</h4>
-      <p>批准或拒绝，一次一议；只读操作按策略自动放行，不打断心流。</p>
+      <h4 data-i18n="p2_h">你做决定</h4>
+      <p data-i18n="p2_p">批准或拒绝，一次一议；只读操作按策略自动放行，不打断心流。</p>
     </div>
     <div class="perm-step">
       <div class="perm-num">3</div>
-      <h4>结果可追溯</h4>
-      <p>每次工具调用与产出都有记录，Artifact 面板随时回看。</p>
+      <h4 data-i18n="p3_h">结果可追溯</h4>
+      <p data-i18n="p3_p">每次工具调用与产出都有记录，Artifact 面板随时回看。</p>
     </div>
   </div>
 </section>
@@ -306,24 +307,24 @@
 <section class="wrap" id="stack">
   <div class="sec-head">
     <div class="sec-kicker">Tech Stack</div>
-    <h2 class="sec-title">自研 Rust Agent Runtime</h2>
-    <p class="sec-desc">Astra 的底座是开源的 astra-core（Agent Runtime SDK）与 astra-memory（认知记忆引擎）——工具系统、权限策略、事件协议、Artifact 全部自主实现。</p>
+    <h2 class="sec-title" data-i18n="stack_title">自研 Rust Agent Runtime</h2>
+    <p class="sec-desc" data-i18n="stack_desc">Astra 的底座是开源的 astra-core（Agent Runtime SDK）与 astra-memory（认知记忆引擎）——工具系统、权限策略、事件协议、Artifact 全部自主实现。</p>
   </div>
   <div class="stack">
-    <span class="stack-chip">🦀 Rust <small>· Agent Runtime</small></span>
-    <span class="stack-chip">⚡ Tauri 2 <small>· 桌面框架</small></span>
-    <span class="stack-chip">⚛️ React 19 <small>· 前端</small></span>
-    <span class="stack-chip">🔌 MCP <small>· 扩展协议</small></span>
-    <span class="stack-chip">🧠 CME <small>· 认知记忆</small></span>
-    <span class="stack-chip">🦙 llama.cpp <small>· 本地模型</small></span>
+    <span class="stack-chip">🦀 Rust <small data-i18n="stack_rust">· Agent Runtime</small></span>
+    <span class="stack-chip">⚡ Tauri 2 <small data-i18n="stack_tauri">· 桌面框架</small></span>
+    <span class="stack-chip">⚛️ React 19 <small data-i18n="stack_react">· 前端</small></span>
+    <span class="stack-chip">🔌 MCP <small data-i18n="stack_mcp">· 扩展协议</small></span>
+    <span class="stack-chip">🧠 CME <small data-i18n="stack_cme">· 认知记忆</small></span>
+    <span class="stack-chip">🦙 llama.cpp <small data-i18n="stack_llama">· 本地模型</small></span>
   </div>
 </section>
 
 <section class="wrap">
   <div class="cta">
-    <h2>现在就试试 Astra</h2>
-    <p>免费、开源、本地运行。下载安装包，几分钟内让 Agent 开始干活。</p>
-    <a class="btn btn-primary" href="https://github.com/alanpaper/astra/releases" target="_blank" rel="noopener">⬇ 下载最新版</a>
+    <h2 data-i18n="cta_h">现在就试试 Astra</h2>
+    <p data-i18n="cta_p">免费、开源、本地运行。下载安装包，几分钟内让 Agent 开始干活。</p>
+    <a class="btn btn-primary" href="https://github.com/alanpaper/astra/releases" target="_blank" rel="noopener" data-i18n="cta_btn">⬇ 下载最新版</a>
   </div>
 </section>
 
@@ -334,8 +335,145 @@
     <a href="https://github.com/alanpaper/astra-core" target="_blank" rel="noopener">astra-core</a>
     <a href="https://github.com/alanpaper/astra-memory" target="_blank" rel="noopener">astra-memory</a>
   </div>
-  <div>Astra · 本地优先的 AI Agent 桌面应用 · MIT License</div>
+  <div data-i18n="footer_note">Astra · 本地优先的 AI Agent 桌面应用 · MIT License</div>
 </footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var I18N = {
+    zh: {
+      doc_title: 'Astra — 本地优先的 AI Agent 桌面应用',
+      doc_desc: 'Astra：把项目交给一个具备 23+ 工具、MCP 扩展、技能系统与长期记忆的 AI Agent。本地运行，权限可控，基于 Tauri 2 + 自研 Rust Agent Runtime。',
+      nav_features: '功能', nav_demo: '演示', nav_stack: '技术栈', nav_download: '下载',
+      hero_badge: 'macOS · Windows 免费下载',
+      hero_title_1: '把项目交给', hero_title_2: '真正能干活的 AI Agent',
+      hero_sub: 'Astra 是一个本地优先的桌面 AI Agent：23+ 内置工具、MCP 扩展、技能系统与认知记忆，读写文件、执行命令、生成图片与文档——每一步都在你的权限边界内。',
+      hero_download: '⬇ 免费下载', hero_github: '⭐ GitHub 仓库',
+      hero_meta_1: '🔒 本地优先，记忆加密存储',
+      hero_meta_2: '⚡ Tauri 2，安装包仅 ~10MB',
+      hero_meta_3: '🧩 兼容 MCP 协议',
+      feat_title: '一个 Agent，全链路干活',
+      feat_desc: '不是聊天玩具，是具备完整工具链与权限体系的工作伙伴。',
+      f1_h: '23+ 内置工具',
+      f1_p: '文件读写 <code>edit_file</code>、路径搜索 <code>find_path</code>、Shell 执行与后台任务、网页抓取 <code>fetch</code>、图像生成、<code>build_docx</code> 文档产出……开箱即用。',
+      f2_h: '权限边界可控',
+      f2_p: '只读操作自动放行，写入与命令执行弹出确认卡，完整展示 diff 与命令内容。工具级 allow / deny 名单，敏感操作绝不静默执行。',
+      f3_h: '认知记忆',
+      f3_p: '对话结束自动提炼长期记忆，加密 SQLite 存储、密钥不出本机。新会话自动召回上下文——Agent 记得你的偏好与项目背景。',
+      f4_h: 'MCP 扩展生态',
+      f4_p: '兼容 Model Context Protocol。在对话里说一句「帮我安装 Playwright MCP」，AI 自动下载依赖写好配置，重启会话即生效。',
+      f5_h: 'Artifact 沉淀',
+      f5_p: 'Agent 产出的代码、文档、图片以卡片形式管理，支持 Markdown 渲染、代码高亮、图片视频预览，一键在编辑器中打开。',
+      f6_h: '本地 & 轻量',
+      f6_p: 'Tauri 2 + 系统 WebView，安装包仅 ~10MB。支持 OpenAI 兼容 API 与 llama.cpp 本地模型，数据不出你的机器。',
+      demo_title: '看它怎么工作',
+      demo_desc: '权限确认 → 工具执行 → Artifact 沉淀，全程可见、可控。',
+      demo_window: 'Astra — Agent 会话',
+      demo_user: '帮我把这个仓库的 README 翻译成英文，顺便生成一张宣传图放进 docs/',
+      demo_tool_pending: 'edit_file · 等待确认（写入操作）',
+      demo_diff: '+42 −18',
+      demo_ai: '已完成：README 英文版已写入，宣传图保存在 <b>docs/promo.png</b>。两个变更都是你在确认卡里批准过的，随时可以在 Artifact 面板里回看。',
+      demo_artifact: 'generate_image · 刚刚 · 点击预览',
+      perm_title: '权限确认，三步闭环',
+      p1_h: 'Agent 发起请求', p1_p: '写入文件、执行命令等敏感操作触发确认卡，完整展示 diff 或命令。',
+      p2_h: '你做决定', p2_p: '批准或拒绝，一次一议；只读操作按策略自动放行，不打断心流。',
+      p3_h: '结果可追溯', p3_p: '每次工具调用与产出都有记录，Artifact 面板随时回看。',
+      stack_title: '自研 Rust Agent Runtime',
+      stack_desc: 'Astra 的底座是开源的 astra-core（Agent Runtime SDK）与 astra-memory（认知记忆引擎）——工具系统、权限策略、事件协议、Artifact 全部自主实现。',
+      stack_rust: '· Agent Runtime', stack_tauri: '· 桌面框架', stack_react: '· 前端',
+      stack_mcp: '· 扩展协议', stack_cme: '· 认知记忆', stack_llama: '· 本地模型',
+      cta_h: '现在就试试 Astra',
+      cta_p: '免费、开源、本地运行。下载安装包，几分钟内让 Agent 开始干活。',
+      cta_btn: '⬇ 下载最新版',
+      footer_note: 'Astra · 本地优先的 AI Agent 桌面应用 · MIT License',
+      toggle_label: 'EN'
+    },
+    en: {
+      doc_title: 'Astra — Local-first AI Agent Desktop App',
+      doc_desc: 'Astra: hand your projects to an AI Agent with 23+ built-in tools, MCP extensions, skills and long-term memory. Runs locally with a strict permission boundary. Built on Tauri 2 + a custom Rust Agent Runtime.',
+      nav_features: 'Features', nav_demo: 'Demo', nav_stack: 'Tech Stack', nav_download: 'Download',
+      hero_badge: 'Free for macOS · Windows',
+      hero_title_1: 'Hand your projects to', hero_title_2: 'an AI Agent that gets things done',
+      hero_sub: 'Astra is a local-first desktop AI Agent: 23+ built-in tools, MCP extensions, a skill system and cognitive memory. Read and write files, run commands, generate images and documents — every step inside your permission boundary.',
+      hero_download: '⬇ Download Free', hero_github: '⭐ GitHub Repository',
+      hero_meta_1: '🔒 Local-first, encrypted memory',
+      hero_meta_2: '⚡ Tauri 2, ~10MB installer',
+      hero_meta_3: '🧩 MCP compatible',
+      feat_title: 'One Agent, Full-Cycle Work',
+      feat_desc: 'Not a chat toy — a working partner with a complete toolchain and permission system.',
+      f1_h: '23+ Built-in Tools',
+      f1_p: 'File editing <code>edit_file</code>, path search <code>find_path</code>, shell execution with background tasks, web fetching <code>fetch</code>, image generation, <code>build_docx</code> document output — all out of the box.',
+      f2_h: 'Controllable Permission Boundary',
+      f2_p: 'Read-only operations run automatically; writes and commands pop up a confirmation card with the full diff or command. Tool-level allow / deny lists — sensitive actions never run silently.',
+      f3_h: 'Cognitive Memory',
+      f3_p: 'Long-term memories are distilled after each conversation, stored in an encrypted SQLite database with the key kept on your machine. New sessions recall context automatically — the Agent remembers your preferences and project background.',
+      f4_h: 'MCP Extension Ecosystem',
+      f4_p: 'Compatible with Model Context Protocol. Just say "install the Playwright MCP for me" in the chat — the Agent downloads dependencies and writes the config, effective after a new session.',
+      f5_h: 'Artifact Management',
+      f5_p: 'Code, documents and images produced by the Agent are managed as cards, with Markdown rendering, syntax highlighting, image and video previews, and one-click open in your editor.',
+      f6_h: 'Local & Lightweight',
+      f6_p: 'Tauri 2 + system WebView — the installer is only ~10MB. Works with OpenAI-compatible APIs and local llama.cpp models. Your data never leaves your machine.',
+      demo_title: 'See How It Works',
+      demo_desc: 'Permission confirmation → tool execution → artifact management. Visible and controllable throughout.',
+      demo_window: 'Astra — Agent Session',
+      demo_user: 'Translate this repo\'s README into English and generate a promo image into docs/',
+      demo_tool_pending: 'edit_file · awaiting confirmation (write operation)',
+      demo_diff: '+42 −18',
+      demo_ai: 'Done: the English README is written and the promo image saved to <b>docs/promo.png</b>. Both changes were approved by you in the confirmation cards — review them anytime in the Artifact panel.',
+      demo_artifact: 'generate_image · just now · click to preview',
+      perm_title: 'Permission Confirmation in 3 Steps',
+      p1_h: 'Agent Requests', p1_p: 'Sensitive operations like file writes and commands trigger a confirmation card showing the full diff or command.',
+      p2_h: 'You Decide', p2_p: 'Approve or deny, one at a time; read-only operations pass automatically by policy, so your flow is never interrupted.',
+      p3_h: 'Everything Traceable', p3_p: 'Every tool call and artifact is recorded — review them anytime in the Artifact panel.',
+      stack_title: 'A Custom Rust Agent Runtime',
+      stack_desc: 'Astra is built on open-source astra-core (an embeddable Agent Runtime SDK) and astra-memory (a cognitive memory engine) — the tool system, permission policy, event protocol and artifacts are all implemented in-house.',
+      stack_rust: '· Agent Runtime', stack_tauri: '· Desktop Framework', stack_react: '· Frontend',
+      stack_mcp: '· Extension Protocol', stack_cme: '· Cognitive Memory', stack_llama: '· Local Models',
+      cta_h: 'Try Astra Today',
+      cta_p: 'Free, open source, runs locally. Download the installer and let the Agent get to work in minutes.',
+      cta_btn: '⬇ Download Latest',
+      footer_note: 'Astra · Local-first AI Agent Desktop App · MIT License',
+      toggle_label: '中文'
+    }
+  };
+
+  var toggle = document.getElementById('langToggle');
+
+  function applyLang(lang) {
+    var dict = I18N[lang] || I18N.zh;
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
+    document.title = dict.doc_title;
+    var meta = document.querySelector('meta[name="description"]');
+    if (meta) meta.setAttribute('content', dict.doc_desc);
+    document.querySelectorAll('[data-i18n]').forEach(function (el) {
+      var key = el.getAttribute('data-i18n');
+      if (dict[key] != null) el.textContent = dict[key];
+    });
+    document.querySelectorAll('[data-i18n-html]').forEach(function (el) {
+      var key = el.getAttribute('data-i18n-html');
+      if (dict[key] != null) el.innerHTML = dict[key];
+    });
+    toggle.textContent = dict.toggle_label;
+    try { localStorage.setItem('astra-lang', lang); } catch (e) {}
+  }
+
+  toggle.addEventListener('click', function () {
+    var current = document.documentElement.lang.indexOf('en') === 0 ? 'en' : 'zh';
+    applyLang(current === 'en' ? 'zh' : 'en');
+  });
+
+  // 首次访问按浏览器语言；之后按 localStorage 记忆的选择
+  var saved = null;
+  try { saved = localStorage.getItem('astra-lang'); } catch (e) {}
+  if (saved === 'en' || saved === 'zh') {
+    applyLang(saved);
+  } else if (navigator.language && navigator.language.indexOf('zh') !== 0) {
+    applyLang('en');
+  }
+})();
+</script>
 
 </body>
 </html>

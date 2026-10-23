@@ -89,23 +89,25 @@ pub(crate) fn start_llama_server(
         &server_path
     };
 
-    // 打包后 PATH 可能不完整，补充常见安装路径
-    let existing_path = std::env::var("PATH").unwrap_or_default();
-    let extra_paths = [
+    // 补充 PATH（打包后可能不完整）：Windows 直接沿用，Unix 补常见目录，
+    // join_paths 按平台分隔符拼接
+    let existing = std::env::var_os("PATH").unwrap_or_default();
+    #[cfg(windows)]
+    let extra: Vec<std::path::PathBuf> = Vec::new();
+    #[cfg(not(windows))]
+    let extra: Vec<std::path::PathBuf> = [
         "/usr/local/bin",
         "/opt/homebrew/bin",
         "/opt/local/bin",
         "/usr/bin",
         "/bin",
-        "/Users/hanbiao/.llama-app",
-    ];
-    let full_path = if existing_path.is_empty() {
-        extra_paths.join(":")
-    } else {
-        let mut parts: Vec<&str> = extra_paths.iter().map(|s| *s).collect();
-        parts.push(&existing_path);
-        parts.join(":")
-    };
+    ]
+    .iter()
+    .map(std::path::PathBuf::from)
+    .collect();
+    let mut dirs: Vec<std::path::PathBuf> = extra;
+    dirs.push(existing.into());
+    let full_path = std::env::join_paths(&dirs).unwrap_or_default();
 
     let mut cmd = Command::new(server_bin);
     cmd.arg("serve")
@@ -219,7 +221,10 @@ pub(crate) fn list_running_servers(app: tauri::AppHandle) -> Result<Vec<RunningM
 }
 
 #[tauri::command]
-pub(crate) fn check_server_status(app: tauri::AppHandle, port: u16) -> Result<Option<String>, String> {
+pub(crate) fn check_server_status(
+    app: tauri::AppHandle,
+    port: u16,
+) -> Result<Option<String>, String> {
     let state = app.state::<ServerState>();
     let mut servers = state.lock().unwrap();
 

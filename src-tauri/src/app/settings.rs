@@ -200,22 +200,25 @@ pub(crate) fn set_active_workspace(
 
 #[tauri::command]
 pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(), String> {
-    // 打包后 PATH 可能不完整，补充常见编辑器安装路径
-    let existing_path = std::env::var("PATH").unwrap_or_default();
-    let extra_paths = [
+    // 补充 PATH（打包后可能不完整）：Windows 直接沿用（分隔符/路径不同，
+    // Unix 目录无意义），Unix 补常见目录并用 join_paths 按平台拼接
+    let existing = std::env::var_os("PATH").unwrap_or_default();
+    #[cfg(windows)]
+    let extra: Vec<std::path::PathBuf> = Vec::new();
+    #[cfg(not(windows))]
+    let extra: Vec<std::path::PathBuf> = [
         "/usr/local/bin",
         "/opt/homebrew/bin",
         "/opt/local/bin",
         "/usr/bin",
         "/bin",
-    ];
-    let full_path = if existing_path.is_empty() {
-        extra_paths.join(":")
-    } else {
-        let mut parts: Vec<&str> = extra_paths.iter().map(|s| *s).collect();
-        parts.push(&existing_path);
-        parts.join(":")
-    };
+    ]
+    .iter()
+    .map(std::path::PathBuf::from)
+    .collect();
+    let mut dirs: Vec<std::path::PathBuf> = extra;
+    dirs.push(existing.into());
+    let full_path = std::env::join_paths(&dirs).unwrap_or_default();
 
     Command::new(&editor_command)
         .arg(&path)

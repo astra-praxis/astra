@@ -117,8 +117,13 @@ pub(crate) fn replace_cookie_value(content: &str, new_cookie: &str) -> Option<St
 }
 
 /// 构建 PATH 环境变量，补充打包后可能缺失的路径（nvm/fnm/volta/homebrew 等）
+/// Windows 下 PATH 分隔符是 `;` 且目录结构不同，直接沿用继承的 PATH；
+/// Unix 下补充常见工具目录后用 `join_paths`（按平台分隔符）拼接。
 pub(crate) fn build_full_path() -> String {
     let existing = std::env::var("PATH").unwrap_or_default();
+    if cfg!(windows) {
+        return existing;
+    }
     let home = std::env::var("HOME").unwrap_or_default();
 
     let mut extra: Vec<String> = vec![
@@ -188,7 +193,9 @@ pub(crate) fn build_full_path() -> String {
 
     // 现有 PATH 放最后（优先使用上面稳定的路径）
     extra.push(existing);
-    extra.join(":")
+    std::env::join_paths(&extra)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// 检测是否为日期目录（如 20260717）
@@ -253,4 +260,3 @@ pub(crate) fn check_subdir(sub_dirs: &mut Vec<DevSubDir>, dir: &Path, label: &st
         }
     }
 }
-

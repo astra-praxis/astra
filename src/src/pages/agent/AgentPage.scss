@@ -18,197 +18,12 @@ body .content:has(.agent-root) {
   background: var(--bg-body);
 }
 
-/* ===== 标题栏功能（portal 到 AppLayout 的 /agent 标题栏，样式与标题栏融合） ===== */
-
-.agent-tb {
-  // 项目 chip：文件夹图标 + 名称（Zed 式：点击弹出项目切换菜单）
-  &__project {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 6px 3px 10px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    background: var(--brand-50);
-    border: 1px solid var(--brand-200);
-    border-radius: 999px;
-    min-width: 0;
-  }
-
-  &__project-name {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    max-width: 180px;
-    font-weight: 600;
-    font-size: 12px;
-    color: var(--brand-700);
-    background: transparent;
-    border: none;
-    padding: 2px 4px 2px 0;
-    cursor: pointer;
-    border-radius: 6px;
-    transition: background 0.12s ease;
-
-    svg:first-child {
-      flex-shrink: 0;
-    }
-
-    &:hover {
-      background: var(--brand-100);
-    }
-  }
-
-  &__project-label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__project-chevron {
-    flex-shrink: 0;
-    color: var(--brand-600);
-    transition: transform 0.15s ease;
-
-    &.is-open {
-      transform: rotate(180deg);
-    }
-  }
-
-  // 未选项目时的入口容器：锚定最近文件夹下拉菜单
-  &__pickwrap {
-    position: relative;
-  }
-
-  // 项目切换菜单（锚在 chip 下方，Zed project picker 式）
-  &__proj-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    min-width: 220px;
-    max-width: 300px;
-    padding: 4px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
-    z-index: 80;
-    display: flex;
-    flex-direction: column;
-  }
-
-  &__proj-list {
-    max-height: 260px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-
-  &__proj-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    font-size: 12px;
-    color: var(--text-primary);
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.1s ease;
-
-    &:hover:not(:disabled) {
-      background: var(--bg-surface-soft, var(--bg-surface));
-    }
-
-    &:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    &.is-active {
-      color: var(--brand-700);
-      font-weight: 500;
-
-      svg {
-        margin-left: auto;
-        flex-shrink: 0;
-        color: var(--brand-600);
-      }
-    }
-
-    &.is-danger {
-      color: var(--danger-600);
-
-      &:hover:not(:disabled) {
-        background: var(--danger-50, var(--bg-surface-soft));
-      }
-    }
-  }
-
-  &__proj-item-name {
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &__proj-item-path {
-    flex-shrink: 1;
-    min-width: 0;
-    max-width: 140px;
-    font-size: 10.5px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &__proj-sep {
-    height: 1px;
-    margin: 4px 2px;
-    background: var(--border-color);
-    flex-shrink: 0;
-  }
-
-  // 未选项目时的「选择项目文件夹」按钮（编辑器式打开文件夹入口）
-  &__pick {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    background: transparent;
-    border: 1px dashed var(--border-strong, var(--border-color));
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.12s ease;
-    white-space: nowrap;
-
-    &:hover {
-      color: var(--brand-600);
-      border-color: var(--brand-400);
-      background: var(--brand-50);
-    }
-  }
-
-  // 右上角仅保留历史面板开关；模型显示与新建 tab 已移除（模型在输入框下方切换）
-}
-
-/* ===== 错误提示 ===== */
+/* ===== 错误提示（在对话框内部，与其他 chip 同层；间距随 dock 的 gap） ===== */
 
 .agent-warn {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 10px 16px 0;
   padding: 8px 12px;
   font-size: 12px;
   color: var(--danger-700);
@@ -251,8 +66,9 @@ body .content:has(.agent-root) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  // 水平不留 padding：让 entries 的滚动条贴到面板右缘（与 chat 页一致），
-  // 侧边距由 entries 左 padding 和 dock 自身 margin 承担
+  // 与上方 tab 栏隔开 10px；水平不留 padding：让 entries 的滚动条贴到
+  // 面板右缘（与 chat 页一致），侧边距由 entries 左 padding 和 dock 自身 margin 承担
+  margin-top: 10px;
   padding: 0 0 16px;
 }
 
@@ -360,7 +176,31 @@ body .content:has(.agent-root) {
   & > [data-viewport-type='element'] {
     left: 16px;
     right: 16px;
+    top: 10px;
     width: auto !important;
+  }
+}
+
+// 文件路径链接（FilePathText：工具卡摘要 / 工具结果 / 粘贴提示中可点击的绝对路径）
+.file-path-link {
+  color: var(--brand-500, var(--text-primary));
+  cursor: pointer;
+  text-decoration: underline dashed;
+  text-decoration-color: var(--border-strong, currentColor);
+  text-underline-offset: 3px;
+  transition: color 0.12s ease;
+
+  &:hover {
+    color: var(--brand-600, var(--text-primary));
+    text-decoration-style: solid;
+  }
+}
+
+.agent-dock__spill-path {
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
   }
 }
 
@@ -1652,6 +1492,173 @@ body .content:has(.agent-root) {
       color: var(--brand-600);
       background: var(--brand-50);
     }
+  }
+
+  // 文件夹选择器（底栏）：按钮 = 图标 + 文件夹名（过长省略，悬停看全路径）；
+  // 菜单向上弹出，列表项点击直接绑定/切换
+  &__folderwrap {
+    position: relative;
+  }
+
+  &__folder-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 200px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    transition:
+      background 0.12s ease,
+      border-color 0.12s ease;
+
+    &:hover {
+      color: var(--brand-700);
+      background: var(--brand-50);
+    }
+
+    &.is-bound {
+      color: var(--brand-700);
+      background: var(--brand-50);
+      border-color: var(--brand-200);
+
+      &:hover {
+        background: var(--brand-100);
+      }
+    }
+
+    &.is-open {
+      background: var(--brand-100);
+    }
+  }
+
+  &__folder-name {
+    min-width: 0;
+    max-width: 140px;
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__folder-chevron {
+    flex-shrink: 0;
+    color: var(--brand-600);
+    transition: transform 0.15s ease;
+
+    &.is-open {
+      transform: rotate(180deg);
+    }
+  }
+
+  &__folder-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 30;
+    min-width: 220px;
+    max-width: 320px;
+    padding: 4px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    animation: agent-fade-in 0.14s ease both;
+  }
+
+  // 当前文件夹展示：过长省略，悬停（title）看全路径
+  &__folder-current {
+    max-width: 300px;
+    padding: 6px 10px 8px;
+    margin-bottom: 4px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--brand-700);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  &__folder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+
+  &__folder-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text-primary);
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+
+    svg {
+      flex-shrink: 0;
+      color: var(--text-muted);
+    }
+
+    &:hover:not(:disabled) {
+      color: var(--brand-700);
+      background: var(--brand-50);
+
+      svg {
+        color: var(--brand-600);
+      }
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    &.is-danger {
+      color: var(--danger-600);
+
+      &:hover:not(:disabled) {
+        color: var(--danger-600);
+        background: rgba(188, 75, 50, 0.08);
+      }
+    }
+  }
+
+  &__folder-item-name {
+    flex-shrink: 0;
+    max-width: 110px;
+    overflow: hidden;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__folder-item-path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__folder-sep {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--border-color);
   }
 
   // 发送按钮：与 chat 页 send-btn 同款（34px 品牌色方块）；快捷键说明在 title 里

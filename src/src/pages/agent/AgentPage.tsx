@@ -9,11 +9,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso';
-import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
-import { ArrowRight, AtSign, Check, ChevronDown, CircleAlert, FileText, FolderOpen, PanelLeftClose, PanelLeftOpen, Pencil, Trash, X } from 'lucide-react';
+import { ArrowRight, AtSign, ChevronDown, CircleAlert, FileText, FolderOpen, PanelLeftClose, PanelLeftOpen, Pencil, Trash, X } from 'lucide-react';
 import OrbArt from '@/components/illustrations/OrbArt';
 
 import { useChatToolbarStore } from '@/stores/chatToolbar';
@@ -34,7 +33,10 @@ import { parseSlashCommand, type UserSkillLite } from '@/hooks/useSlash';
 import AgentHistoryPanel, { type AgentSessionMeta } from './AgentHistoryPanel';
 import AgentTabs from './AgentTabs';
 import LinkPreviewPanel from './LinkPreviewPanel';
+import FilePreviewPanel from './FilePreviewPanel';
 import { useLinkPreviewStore } from '@/stores/linkPreview';
+import { useFilePreviewStore } from '@/stores/filePreview';
+import { openFilePath } from '@/components/agent/FilePathText';
 
 import './AgentPage.scss';
 
@@ -208,6 +210,7 @@ export default function AgentPage() {
 
   // 链接预览面板（agent 回复中的链接拦截后在此用 iframe 打开）
   const linkPreviewOpen = useLinkPreviewStore((s) => s.open);
+  const filePreviewOpen = useFilePreviewStore((s) => s.open);
   const toggleHistory = useCallback(() => {
     setHistoryOpen((o) => {
       localStorage.setItem('astra.history.open', o ? '0' : '1');
@@ -659,7 +662,18 @@ export default function AgentPage() {
     });
   }, [projectPath, editor]);
 
-  // 未选项目时的入口：系统文件夹选择器（对齐一般编辑器的「打开文件夹」）
+  // 最近使用文件夹（localStorage）；去重置顶，上限 8 条
+  const recordRecentProject = useCallback((path: string) => {
+    try {
+      const recents: string[] = JSON.parse(localStorage.getItem('astra.recentProjects') ?? '[]');
+      const next = [path, ...recents.filter((p) => p !== path)].slice(0, 8);
+      localStorage.setItem('astra.recentProjects', JSON.stringify(next));
+    } catch {
+      localStorage.setItem('astra.recentProjects', JSON.stringify([path]));
+    }
+  }, []);
+
+  // 一键选择文件夹：系统目录选择器，选中即绑定（记录到最近使用）
   const pickProjectFolder = useCallback(async () => {
     try {
       const picked = await openDialog({
@@ -668,39 +682,32 @@ export default function AgentPage() {
         title: '选择项目文件夹',
       });
       if (picked) {
+        recordRecentProject(picked);
         openDraftForProject(picked);
         setError('');
       }
     } catch (e) {
       setError(`选择文件夹失败: ${e}`);
     }
-  }, []);
+  }, [openDraftForProject, recordRecentProject, setError]);
 
-  // ===== 标题栏挂载点（AppLayout 在 /agent 路由下渲染的 portal 容器） =====
-  const [tbLeft, setTbLeft] = useState<HTMLElement | null>(null);
+  // ===== 文件夹选择（Zed 式）：底栏文件夹按钮即入口 ——
+  //  已绑定时按钮显示文件夹名（过长省略、悬停看全路径），点击弹出
+  //  向上菜单（最近文件夹点击即直接切换）；未绑定时点击同样弹菜单，
+  //  列表项点击直接绑定。无模式开关、无二级确认 =====
+  const [folderMenuOpen, setFolderMenuOpen] = useState(false);
+  const folderRootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    setTbLeft(document.getElementById('agent-titlebar-left'));
-  }, []);
-
-  // ===== 项目切换菜单（Zed 式：点项目名弹出最近项目 + 打开文件夹等操作） =====
-  const [projMenuOpen, setProjMenuOpen] = useState(false);
-  const projRootRef = useRef<HTMLDivElement | null>(null);
-  // 未选项目时的「选择项目文件夹」入口：同样支持最近使用文件夹下拉（Zed 式）
-  const [pickMenuOpen, setPickMenuOpen] = useState(false);
-  const [recentPicks, setRecentPicks] = useState<{ name: string; path: string }[]>([]);
-  const pickRootRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!projMenuOpen && !pickMenuOpen) return;
+    if (!folderMenuOpen) return;
     function onDown(e: MouseEvent) {
-      if (!projRootRef.current?.contains(e.target as Node)) setProjMenuOpen(false);
-      if (!pickRootRef.current?.contains(e.target as Node)) setPickMenuOpen(false);
+      if (!folderRootRef.current?.contains(e.target as Node)) setFolderMenuOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
-  }, [projMenuOpen, pickMenuOpen]);
+  }, [folderMenuOpen]);
 
-  /** 未选项目入口：合并工作空间已知项目 + 最近使用记录，总是弹菜单（无记录时仅剩「选择其他文件夹…」） */
-  const openPickMenu = useCallback(() => {
+  /** 打开菜单：合并工作空间已知项目 + 最近使用记录（点击项直接绑定，不再确认） */
+  const openFolderMenu = useCallback(() => {
     const known = projects.map((p) => ({ name: p.name, path: p.path }));
     let recents: string[] = [];
     try {
@@ -713,8 +720,9 @@ export default function AgentPage() {
       .filter((p) => typeof p === 'string' && p && !seen.has(p))
       .map((p) => ({ name: p.split('/').pop() || p, path: p }));
     setRecentPicks([...known, ...extras]);
-    setPickMenuOpen(true);
+    setFolderMenuOpen(true);
   }, [projects]);
+  const [recentPicks, setRecentPicks] = useState<{ name: string; path: string }[]>([]);
 
   /** 新建会话标签：当前会话驻留内存，切回零重建 */
   const newTab = useCallback(() => {
@@ -740,155 +748,6 @@ export default function AgentPage() {
   // ===== 渲染 =====
   return (
     <div className="agent-root">
-      {/* 标题栏功能：portal 到 AppLayout 的 /agent 标题栏挂载点
-          左侧 = 项目文件夹（编辑器式）；右侧 = 模型显示 + 新对话 + 历史（Zed 式） */}
-      {tbLeft &&
-        createPortal(
-          projectPath ? (
-            <div className="agent-tb__project" ref={projRootRef}>
-              <button
-                type="button"
-                className="agent-tb__project-name"
-                onClick={() => setProjMenuOpen((o) => !o)}
-                title="切换项目"
-              >
-                <FolderOpen size={14} strokeWidth={1.8} />
-                <span className="agent-tb__project-label">
-                  {projects.find((p) => p.path === projectPath)?.name ?? projectPath.split('/').pop()}
-                </span>
-                <ChevronDown size={11} strokeWidth={2.2} className={`agent-tb__project-chevron${projMenuOpen ? ' is-open' : ''}`} />
-              </button>
-
-              {projMenuOpen && (
-                <div className="agent-tb__proj-menu" role="menu">
-                  <div className="agent-tb__proj-list">
-                    {/* 当前目录可能不在项目列表（手动选的任意文件夹）：置顶展示 */}
-                    {!projects.some((p) => p.path === projectPath) && (
-                      <button type="button" role="menuitem" className="agent-tb__proj-item is-active" disabled>
-                        <span className="agent-tb__proj-item-name">{projectPath.split('/').pop()}</span>
-                        <span className="agent-tb__proj-item-path">{projectPath}</span>
-                        <Check size={13} strokeWidth={2.2} />
-                      </button>
-                    )}
-                    {projects.map((p) => (
-                      <button
-                        key={p.path}
-                        type="button"
-                        role="menuitem"
-                        className={`agent-tb__proj-item${p.path === projectPath ? ' is-active' : ''}`}
-                        disabled={running}
-                        title={p.path}
-                        onClick={() => {
-                          openDraftForProject(p.path);
-                          setError('');
-                          setProjMenuOpen(false);
-                        }}
-                      >
-                        <span className="agent-tb__proj-item-name">{p.name}</span>
-                        {p.path === projectPath && <Check size={13} strokeWidth={2.2} />}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="agent-tb__proj-sep" />
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="agent-tb__proj-item"
-                    onClick={() => {
-                      setProjMenuOpen(false);
-                      void pickProjectFolder();
-                    }}
-                  >
-                    选择其他文件夹…
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="agent-tb__proj-item"
-                    onClick={() => {
-                      setProjMenuOpen(false);
-                      void openProjectInFolder();
-                    }}
-                  >
-                    在 Finder 中打开
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="agent-tb__proj-item"
-                    onClick={() => {
-                      setProjMenuOpen(false);
-                      openProjectInEditor();
-                    }}
-                  >
-                    在编辑器中打开
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="agent-tb__proj-item is-danger"
-                    disabled={running}
-                    onClick={() => {
-                      setProjMenuOpen(false);
-                      openDraftForProject('');
-                    }}
-                  >
-                    解绑项目（转为纯聊天）
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="agent-tb__pickwrap" ref={pickRootRef}>
-              <button type="button" className="agent-tb__pick" onClick={openPickMenu}>
-                <FolderOpen size={14} strokeWidth={1.8} />
-                选择项目文件夹
-              </button>
-              {pickMenuOpen && (
-                <div className="agent-tb__proj-menu" role="menu">
-                  {recentPicks.length > 0 && (
-                    <>
-                      <div className="agent-tb__proj-list">
-                        {recentPicks.map((p) => (
-                          <button
-                            key={p.path}
-                            type="button"
-                            role="menuitem"
-                            className="agent-tb__proj-item"
-                            title={p.path}
-                            onClick={() => {
-                              openDraftForProject(p.path);
-                              setError('');
-                              setPickMenuOpen(false);
-                            }}
-                          >
-                            <span className="agent-tb__proj-item-name">{p.name}</span>
-                            <span className="agent-tb__proj-item-path">{p.path}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <div className="agent-tb__proj-sep" />
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="agent-tb__proj-item"
-                    onClick={() => {
-                      setPickMenuOpen(false);
-                      void pickProjectFolder();
-                    }}
-                  >
-                    选择其他文件夹…
-                  </button>
-                </div>
-              )}
-            </div>
-          ),
-          tbLeft,
-        )}
-
       {/* 历史面板：全高左侧栏（Zed 式），与右列并排；开合时右列整体（tab + 对话）一起右移/左移 */}
       {historyOpen && (
         <AgentHistoryPanel
@@ -901,20 +760,10 @@ export default function AgentPage() {
         />
       )}
 
-      {/* 右列：标签栏 + 错误提示 + 对话流 */}
+      {/* 右列：标签栏 + 对话流 */}
       <div className="agent-col">
         {/* 多会话标签栏（tab 即 AgentSession 视图；当前会话切换时驻留内存） */}
         <AgentTabs />
-
-        {error && (
-          <div className="agent-warn">
-            <CircleAlert size={14} strokeWidth={1.8} />
-            {error}
-            <button type="button" onClick={() => setError('')}>
-              <X size={12} strokeWidth={2} />
-            </button>
-          </div>
-        )}
 
         <div className="agent-main">
           {entries.length === 0 ? (
@@ -999,6 +848,16 @@ export default function AgentPage() {
           {/* 输入区（@ 提及 / / 技能弹层内聚在 MentionInput 内，浮层绝对定位于输入框上方） */}
           <div className="agent-dock-wrap">
             <div className="agent-dock">
+              {/* 错误提示：与编辑/排队/粘贴 chip 同层，展示在对话框最上方 */}
+              {error && (
+                <div className="agent-warn">
+                  <CircleAlert size={14} strokeWidth={1.8} />
+                  {error}
+                  <button type="button" onClick={() => setError('')}>
+                    <X size={12} strokeWidth={2} />
+                  </button>
+                </div>
+              )}
               {editing && (
                 <div className="agent-dock__editing" role="status">
                   <Pencil size={12} strokeWidth={1.8} />
@@ -1065,7 +924,11 @@ export default function AgentPage() {
               {spill && (
                 <div className="agent-dock__spill" role="status">
                   <FileText size={13} strokeWidth={1.8} />
-                  <span title={spill.path}>
+                  <span
+                    title={spill.path}
+                    className="agent-dock__spill-path"
+                    onClick={() => openFilePath(spill.path)}
+                  >
                     粘贴内容已存为 {spill.path.split(/[\\/]/).pop()}（{Math.max(1, Math.round(spill.size / 1024))} KB）· 发送时 Agent 将先读取全文
                   </span>
                   <button
@@ -1090,7 +953,7 @@ export default function AgentPage() {
                     ? 'Agent 正在回答…Enter 排队发送 · Ctrl/⌘+Enter 打断并优先发送'
                     : projectPath
                       ? '描述任务，例如：读取 @需求.md 并生成方案保存为 txt…'
-                      : '纯聊天模式，顶部选择项目后可用 @ 引用文件 · / 调用技能…'
+                      : '纯聊天模式，底栏选择文件夹后可用 @ 引用文件 · / 调用技能…'
                 }
                 onKeyDown={(e) => {
                   // Zed 式：输入框为空时按 ↑ 把队尾消息拉回编辑器（等价 move_to_main_editor）
@@ -1128,6 +991,117 @@ export default function AgentPage() {
                       <PanelLeftOpen size={15} strokeWidth={1.8} />
                     )}
                   </button>
+                  {/* 文件夹：已绑定时按钮显示文件夹名（过长省略、悬停看全路径），
+                      点击弹出向上菜单直接切换/解绑；未绑定时列出最近文件夹 */}
+                  <div className="agent-dock__folderwrap" ref={folderRootRef}>
+                    <button
+                      type="button"
+                      className={`agent-dock__folder-btn${projectPath ? ' is-bound' : ''}${folderMenuOpen ? ' is-open' : ''}`}
+                      onClick={openFolderMenu}
+                      title={projectPath ?? '选择文件夹，让助手读取其中的文件'}
+                      aria-haspopup="menu"
+                      aria-expanded={folderMenuOpen}
+                    >
+                      <FolderOpen size={15} strokeWidth={1.8} />
+                      {projectPath && (
+                        <span className="agent-dock__folder-name">
+                          {projects.find((p) => p.path === projectPath)?.name ?? projectPath.split('/').pop()}
+                        </span>
+                      )}
+                      {projectPath && (
+                        <ChevronDown size={11} strokeWidth={2.2} className={`agent-dock__folder-chevron${folderMenuOpen ? ' is-open' : ''}`} />
+                      )}
+                    </button>
+                    {folderMenuOpen && (
+                      <div className="agent-dock__folder-menu" role="menu">
+                        {projectPath && (
+                          <div className="agent-dock__folder-current" title={projectPath}>
+                            {projects.find((p) => p.path === projectPath)?.name ?? projectPath.split('/').pop()}
+                          </div>
+                        )}
+                        {recentPicks.length > 0 && (
+                          <div className="agent-dock__folder-list">
+                            {recentPicks
+                              .filter((p) => p.path !== projectPath)
+                              .map((p) => (
+                                <button
+                                  key={p.path}
+                                  type="button"
+                                  role="menuitem"
+                                  className="agent-dock__folder-item"
+                                  title={p.path}
+                                  disabled={running}
+                                  onClick={() => {
+                                    setFolderMenuOpen(false);
+                                    openDraftForProject(p.path);
+                                    setError('');
+                                  }}
+                                >
+                                  <FolderOpen size={13} strokeWidth={1.8} />
+                                  <span className="agent-dock__folder-item-name">{p.name}</span>
+                                  <span className="agent-dock__folder-item-path">{p.path}</span>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                        <div className="agent-dock__folder-sep" />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="agent-dock__folder-item"
+                          onClick={() => {
+                            setFolderMenuOpen(false);
+                            void pickProjectFolder();
+                          }}
+                        >
+                          <FolderOpen size={13} strokeWidth={1.8} />
+                          选择其他文件夹…
+                        </button>
+                        {projectPath && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="agent-dock__folder-item"
+                            onClick={() => {
+                              setFolderMenuOpen(false);
+                              void openProjectInFolder();
+                            }}
+                          >
+                            <FolderOpen size={13} strokeWidth={1.8} />
+                            在 Finder 中打开
+                          </button>
+                        )}
+                        {projectPath && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="agent-dock__folder-item"
+                            onClick={() => {
+                              setFolderMenuOpen(false);
+                              openProjectInEditor();
+                            }}
+                          >
+                            <FolderOpen size={13} strokeWidth={1.8} />
+                            在编辑器中打开
+                          </button>
+                        )}
+                        {projectPath && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="agent-dock__folder-item is-danger"
+                            disabled={running}
+                            onClick={() => {
+                              setFolderMenuOpen(false);
+                              openDraftForProject('');
+                            }}
+                          >
+                            移除当前文件夹（转为纯聊天）
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   {projectPath && (
                     <button
                       type="button"
@@ -1191,6 +1165,8 @@ export default function AgentPage() {
 
       {/* 链接预览面板：agent 回复中的链接拦截后在此用 iframe 打开 */}
       {linkPreviewOpen && <LinkPreviewPanel />}
+      {/* 文件预览面板：产物条目点击「预览」后在此打开（单窗口，新开替换旧内容） */}
+      {filePreviewOpen && <FilePreviewPanel />}
     </div>
   );
 }

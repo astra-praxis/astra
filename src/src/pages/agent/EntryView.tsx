@@ -26,6 +26,7 @@ import {
 import MarkdownMessage from '../chat/MarkdownMessage';
 import { StreamBlock } from '@/components/agent/StreamBlock';
 import { ArtifactList } from '@/components/agent/ArtifactList';
+import FilePathText from '@/components/agent/FilePathText';
 import { useAgentStore, userImageUrl, type Entry } from '@/stores/agent';
 import type { UserSkillLite } from '@/hooks/useSlash';
 
@@ -280,7 +281,7 @@ export const EntryView = memo(function EntryView({
           {entry.text ? (
             <>
               <div className="aentry__md">
-                <MarkdownMessage content={entry.text} streaming={entry.streaming} linkPreview={linkPreview} />
+                <MarkdownMessage content={entry.text} streaming={entry.streaming} linkPreview={linkPreview} filePreview={linkPreview} />
               </div>
               {!entry.streaming && <AssistantCopyFooter text={fullText ?? entry.text} />}
             </>
@@ -596,7 +597,7 @@ function ToolEntry({
         )}
         <Wrench size={12} strokeWidth={1.8} />
         <code className="aentry__tool-name">{entry.toolName}</code>
-        <span className="aentry__tool-args">{entry.argsSummary}</span>
+        <span className="aentry__tool-args"><FilePathText text={entry.argsSummary} /></span>
         <span className="aentry__tool-status">
           {perm?.state === 'pending'
             ? '等待确认'
@@ -648,7 +649,7 @@ function ToolEntry({
       )}
       {open && hasBody && (
         <div className="aentry__tool-body">
-          {entry.result && <pre className="aentry__tool-result">{entry.result}</pre>}
+          {entry.result && <pre className="aentry__tool-result"><FilePathText text={entry.result} /></pre>}
           {entry.artifacts && entry.artifacts.length > 0 && (
             <ArtifactList artifacts={entry.artifacts} />
           )}

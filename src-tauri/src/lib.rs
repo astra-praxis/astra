@@ -6,7 +6,6 @@ mod memory;
 mod providers;
 mod skills;
 
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -19,6 +18,23 @@ use app::settings::{get_settings, get_settings_path, workspace_roots};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Panic 落盘：Windows GUI 子系统无控制台，panic 信息默认无人可见，
+    // 启动即崩时连应用日志都来不及建。写临时目录固定文件（%TEMP%\astra-panic.log），
+    // 任何机器崩溃后用户都能直接反馈该文件。stderr 同步保留（CI 重定向可捕获）。
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("panicked: {info}\n");
+        eprintln!("{msg}");
+        let log = std::env::temp_dir().join("astra-panic.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+        {
+            use std::io::Write;
+            let _ = f.write_all(msg.as_bytes());
+        }
+    }));
+
     // Logging: surface tracing output (agent-core recall failures/skips were
     // invisible before). ASTRA_LOG overrides; default info level.
     let _ = tracing_subscriber::fmt()
@@ -36,9 +52,10 @@ pub fn run() {
         ))
         .manage(app::downloader::DownloadManager::new())
         .manage(agent::AgentState::default())
-        .manage(Mutex::new(
-            HashMap::<String, app::dev_mode::RunningDevProcess>::new(),
-        ))
+        .manage(Mutex::new(HashMap::<
+            String,
+            app::dev_mode::RunningDevProcess,
+        >::new()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -85,11 +102,13 @@ pub fn run() {
             // supersedes 语义确认（W2）：都复用宿主 agent LLM 通道，失败
             // 各自降级（提炼回规则、确认不建链）。
             let agent_extraction_client = if settings.memory_agent_summary {
-                Some(Box::new(crate::memory::host::HostAgentExtractionClient::new(
-                    app.handle().clone(),
-                    provider_id.clone(),
-                ))
-                    as Box<dyn astra_memory::cme::extract::AgentExtractionClient>)
+                Some(
+                    Box::new(crate::memory::host::HostAgentExtractionClient::new(
+                        app.handle().clone(),
+                        provider_id.clone(),
+                    ))
+                        as Box<dyn astra_memory::cme::extract::AgentExtractionClient>,
+                )
             } else {
                 None
             };

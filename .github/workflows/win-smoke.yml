@@ -1,0 +1,112 @@
+# Windows 冒烟测试：远程 runner 上构建后直接拉起 exe 跑 20 秒，
+# 崩溃则打印 stderr / panic 日志 / 退出码并失败。用于排查"打开即退"。
+# 手动触发：Actions → Windows Smoke Test → Run workflow
+name: Windows Smoke Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    # astra 以 ../../ 相对路径引用 astra-core / astra-memory，三仓库兄弟目录摆放
+    defaults:
+      run:
+        working-directory: astra
+
+    steps:
+      - name: Checkout astra
+        uses: actions/checkout@v4
+        with:
+          path: astra
+
+      - name: Checkout astra-core
+        uses: actions/checkout@v4
+        with:
+          repository: alanpaper/astra-core
+          ref: main
+          path: astra-core
+          token: ${{ secrets.PAT }}
+
+      - name: Checkout astra-memory
+        uses: actions/checkout@v4
+        with:
+          repository: alanpaper/astra-memory
+          ref: main
+          path: astra-memory
+          token: ${{ secrets.PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: astra/src-tauri
+          cache-all-crates: true
+
+      - name: Install root dependencies (tauri CLI)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install frontend dependencies (src/)
+        run: pnpm --dir src install --frozen-lockfile
+
+      - name: Build Tauri App
+        run: pnpm tauri build
+        env:
+          TAURI_SKIP_VALIDATION: true
+
+      # ================= 冒烟测试：拉起 exe 跑 20 秒 =================
+      # 启动即退（panic/WebView2 失败）会在这里暴露：退出码 + stderr +
+      # %TEMP%\astra-panic.log 三路证据全部打印。
+      - name: Smoke test (run exe for 20s)
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "astra\src-tauri\target\release\astra.exe"
+          if (-not (Test-Path $exe)) { Write-Host "exe not found: $exe"; exit 1 }
+          $errLog = Join-Path $PWD "astra_err.log"
+          $outLog = Join-Path $PWD "astra_out.log"
+          Write-Host "Starting: $exe"
+          $p = Start-Process -FilePath $exe `
+            -WorkingDirectory (Split-Path $exe) `
+            -RedirectStandardError $errLog -RedirectStandardOutput $outLog `
+            -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) {
+            Write-Host "=== FAILED: process exited early, code = $($p.ExitCode) ==="
+          } else {
+            Write-Host "=== OK: process still running after 20s ==="
+          }
+          Write-Host "=== stderr (astra_err.log) ==="
+          Get-Content $errLog -ErrorAction SilentlyContinue
+          Write-Host "=== stdout (astra_out.log) ==="
+          Get-Content $outLog -ErrorAction SilentlyContinue
+          Write-Host "=== panic log (%TEMP%\astra-panic.log) ==="
+          Get-Content (Join-Path $env:TEMP "astra-panic.log") -ErrorAction SilentlyContinue
+          if ($p.HasExited) { exit 1 }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "Smoke test passed, process killed."
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-smoke-logs
+          path: |
+            astra/astra_err.log
+            astra/astra_out.log
+          if-no-files-found: ignore
+          retention-days: 7

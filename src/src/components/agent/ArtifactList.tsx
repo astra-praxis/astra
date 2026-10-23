@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { describeArtifact, type Artifact } from './artifact';
+import { useFilePreviewStore } from '@/stores/filePreview';
 import './ArtifactList.scss';
 
 export type { Artifact, LegacyArtifact, SdkArtifact } from './artifact';
@@ -123,6 +124,16 @@ function ArtifactItem({ artifact }: { artifact: Artifact }) {
       <div className="artifact-list__header">
         <span className="artifact-list__kind" title={artifact.kind}>{label}</span>
         {mode ? <span className="artifact-list__mode">{mode}</span> : null}
+        {location ? (
+          <button
+            type="button"
+            className="artifact-list__copy"
+            onClick={() => useFilePreviewStore.getState().openFile(location)}
+            aria-label={`预览文件：${location}`}
+          >
+            预览
+          </button>
+        ) : null}
         {assetId ? <OpenAssetButton assetId={assetId} /> : null}
         <button
           type="button"
@@ -167,7 +178,10 @@ function ArtifactItem({ artifact }: { artifact: Artifact }) {
   );
 }
 
-/** Presentation only: never reads, opens, or executes artifact locations. */
+/**
+ * 产物条目：展示元数据，不直接读写文件。点击「预览」只负责把路径交给
+ * 全局文件预览面板（FilePreviewPanel），读取与渲染都由面板经后端命令完成。
+ */
 export function ArtifactList({ artifacts }: ArtifactListProps) {
   if (artifacts.length === 0) return null;
   const occurrences = new Map<string, number>();

@@ -3,6 +3,7 @@
 pub(crate) mod command_runner;
 pub(crate) mod dev_mode;
 pub(crate) mod downloader;
+pub(crate) mod file_preview;
 pub(crate) mod llama_server;
 pub(crate) mod node_modules;
 pub(crate) mod settings;

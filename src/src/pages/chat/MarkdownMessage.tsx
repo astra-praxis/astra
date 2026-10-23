@@ -27,6 +27,7 @@ import { Copy, Play, Link2 } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { parseActionHref, executeAction } from './action-links';
 import { useLinkPreviewStore } from '@/stores/linkPreview';
+import { isAbsoluteFilePath, openFilePath } from '@/components/agent/FilePathText';
 import MermaidBlock from './MermaidBlock';
 import { useStreamingText } from '@/hooks/useStreamingText';
 import './MarkdownMessage.scss';
@@ -42,6 +43,8 @@ interface MdContextValue {
   streaming: boolean;
   /** 开启后拦截 http(s) 链接，改到 Agent 页右侧链接预览面板打开 */
   linkPreview: boolean;
+  /** 开启后行内代码中的绝对文件路径可点击，在右侧文件预览面板打开 */
+  filePreview: boolean;
 }
 
 const MdContext = createContext<MdContextValue>({
@@ -49,6 +52,7 @@ const MdContext = createContext<MdContextValue>({
   isFresh: false,
   streaming: false,
   linkPreview: false,
+  filePreview: false,
 });
 
 interface MarkdownMessageProps {
@@ -59,6 +63,8 @@ interface MarkdownMessageProps {
   streaming?: boolean;
   /** 开启链接拦截：http(s) 链接点击后在右侧 iframe 预览面板打开 */
   linkPreview?: boolean;
+  /** 开启文件路径点击：行内代码中的绝对路径点击后在右侧文件预览面板打开 */
+  filePreview?: boolean;
 }
 
 const MarkdownMessage = memo(function MarkdownMessage({
@@ -67,11 +73,12 @@ const MarkdownMessage = memo(function MarkdownMessage({
   isFresh = false,
   streaming = false,
   linkPreview = false,
+  filePreview = false,
 }: MarkdownMessageProps) {
   const renderedContent = useStreamingText(content, streaming);
   const context = useMemo(
-    () => ({ workspacePath, isFresh, streaming, linkPreview }),
-    [workspacePath, isFresh, streaming, linkPreview],
+    () => ({ workspacePath, isFresh, streaming, linkPreview, filePreview }),
+    [workspacePath, isFresh, streaming, linkPreview, filePreview],
   );
   const markdown = useMemo(() => renderedContent ? (
     <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={mdComponents}>
@@ -133,7 +140,33 @@ const runningSinks = new Set<OutputSink>();
 const mdComponents: Components = {
   pre: PreRenderer,
   a: ActionAnchor,
+  code: CodeSpan,
 };
+
+/**
+ * 行内代码：filePreview 开启且内容是绝对文件路径时变为可点击
+ * （点击在右侧文件预览面板打开）。代码块（pre 内）不受影响：
+ * 带 language-* 类或含换行的一律走原样式。
+ */
+function CodeSpan({ children, className }: { children?: ReactNode; className?: string }) {
+  const { filePreview } = useContext(MdContext);
+  const raw = nodeText(children);
+  if (filePreview && !className && !raw.includes('\n') && isAbsoluteFilePath(raw)) {
+    return (
+      <code
+        className="md-file-path"
+        title={`预览文件：${raw}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          openFilePath(raw);
+        }}
+      >
+        {children}
+      </code>
+    );
+  }
+  return <code>{children}</code>;
+}
 
 function PreRenderer({ children }: { children?: ReactNode }) {
   const codeEl = isValidElement(children) ? children : null;

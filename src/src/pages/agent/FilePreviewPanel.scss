@@ -1,0 +1,247 @@
+// 文件预览面板：位于 agent-root 右列（.agent-col）之后的独立栏，
+// 结构对齐 LinkPreviewPanel（左缘分隔条 + 工具条 + 内容区）
+// 实际宽度由 store 的 width 内联样式控制（拖拽分隔条调整）
+.file-preview {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 480px;
+  overflow: hidden;
+  background: var(--bg-body);
+  border-left: 1px solid var(--border-color);
+
+  // 左缘拖拽分隔条：跨越面板全高，向外探出一半以便命中
+  &__resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    z-index: 10;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 2px;
+      width: 2px;
+      background: transparent;
+      transition: background 0.12s ease;
+    }
+
+    &:hover::after,
+    body.is-file-preview-resizing &::after {
+      background: var(--brand-200, var(--border-strong, var(--border-color)));
+    }
+  }
+
+  &__bar {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  &__addr {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 8px;
+    background: var(--bg-body);
+    border-radius: 7px;
+
+    svg {
+      flex-shrink: 0;
+      color: var(--text-muted);
+    }
+  }
+
+  &__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  &__size {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  &__btns {
+    display: flex;
+    flex-shrink: 0;
+    gap: 2px;
+
+    button {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      color: var(--text-muted);
+      cursor: pointer;
+      background: none;
+      border: none;
+      border-radius: 6px;
+      transition: background 0.12s ease, color 0.12s ease;
+
+      &:hover {
+        color: var(--text-primary);
+        background: var(--bg-surface-soft, var(--bg-surface));
+      }
+    }
+  }
+
+  &__body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  &__loading {
+    display: grid;
+    flex: 1;
+    place-items: center;
+    color: var(--text-muted);
+    font-size: 12.5px;
+  }
+
+  // 纯文本直出
+  &__text {
+    flex: 1;
+    padding: 14px 16px;
+    overflow: auto;
+    color: var(--text-primary);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  // markdown / 代码高亮：留白后交给全局 .md-content 样式
+  &__md {
+    flex: 1;
+    padding: 14px 16px;
+    overflow: auto;
+    font-size: 13px;
+  }
+
+  // 图片 / 视频内嵌：居中，不放大超过容器
+  &__media {
+    display: grid;
+    flex: 1;
+    place-items: center;
+    padding: 12px;
+    overflow: auto;
+    background: var(--bg-surface);
+
+    img,
+    video {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+    }
+  }
+
+  // PDF iframe 占满内容区
+  &__frame {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: var(--bg-surface);
+  }
+
+  // 不支持内嵌 / 读取失败：居中引导卡片，「使用默认应用打开」
+  &__fallback {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+
+    svg {
+      color: var(--text-muted);
+    }
+
+    b {
+      color: var(--text-primary);
+      font-size: 13.5px;
+    }
+
+    span {
+      max-width: 320px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    button {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      margin-top: 6px;
+      padding: 6px 14px;
+      color: var(--text-primary);
+      font-size: 12.5px;
+      cursor: pointer;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      transition: background 0.12s ease, border-color 0.12s ease;
+
+      &:hover {
+        background: var(--bg-surface-soft, var(--bg-surface));
+        border-color: var(--border-strong, var(--border-color));
+      }
+    }
+  }
+
+  // PDF 兜底提示条
+  &__hint {
+    display: flex;
+    flex-shrink: 0;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    color: var(--text-muted);
+    font-size: 11px;
+    border-top: 1px solid var(--border-color);
+
+    button {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      padding: 2px 8px;
+      color: var(--text-secondary, var(--text-primary));
+      font-size: 11px;
+      cursor: pointer;
+      background: none;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+
+      &:hover {
+        color: var(--text-primary);
+        background: var(--bg-surface-soft, var(--bg-surface));
+      }
+    }
+  }
+}

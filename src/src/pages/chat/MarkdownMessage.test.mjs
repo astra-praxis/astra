@@ -38,6 +38,7 @@ const { default: MarkdownMessage } = await load('./MarkdownMessage.tsx', {
   '@tauri-apps/api/event': { listen: () => { throw Error('unexpected subscription in SSR'); } },
   '@tauri-apps/plugin-opener': { openUrl: () => { throw Error('unexpected openUrl'); } },
   '@/stores/linkPreview': { useLinkPreviewStore: { getState: () => { throw Error('unexpected link preview'); } } },
+'@/components/agent/FilePathText': { isAbsoluteFilePath: () => false, openFilePath: () => { throw Error('unexpected file path open'); } },
 });
 const render = (content, props = {}) => renderToStaticMarkup(React.createElement(MarkdownMessage, { content, ...props }));
 test('default Chat rendering remains immediate, with GFM and highlighted shell controls', () => {

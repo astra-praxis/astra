@@ -198,8 +198,12 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // 注册全局快捷键 Alt+Space 唤醒窗口
-            app.global_shortcut().register("Alt+Space")?;
+            // 注册全局快捷键 Alt+Space 唤醒窗口。冲突时只降级不阻断启动——
+            // Alt+Space 被 PowerToys Run / uTools / Listary 等启动器默认占用，
+            // setup 返回 Err 会导致应用直接退出（Windows 首发秒退的根因）。
+            if let Err(error) = app.global_shortcut().register("Alt+Space") {
+                eprintln!("[shortcut] Alt+Space register failed (likely in use): {error}");
+            }
 
             Ok(())
         })

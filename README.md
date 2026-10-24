@@ -84,13 +84,14 @@ astra/
 │       │   ├── tools/            # 内置工具页
 │       │   └── settings/         # 设置（编辑器 / 记忆 / 图像生成 / 搜索…）
 │       ├── stores/               # Zustand 全局状态（agent 事件流等）
-│       └── components/           # 通用组件
+│       └── components/           # 通用组件（含 agent/Mascot 吉祥物）
 ├── src-tauri/                    # Rust 后端（Tauri 2）
 │   └── src/
 │       ├── agent/                # Agent 桥接层（Run 启动 / 事件转发 / 记忆采集）
 │       ├── memory/               # CME 宿主集成（加密库 + Provider 注入）
 │       ├── skills/               # 技能库管理（内置技能安装）
 │       └── app/                  # 工作空间 / 设置 / 下载器 / 编辑器启动
+├── design/mascot/                # 吉祥物源图 + 切图脚本（不参与构建）
 └── .github/workflows/            # CI：tag 推送自动出 macOS dmg + Windows exe + Linux AppImage/deb
 ```
 

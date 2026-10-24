@@ -1,0 +1,309 @@
+/**
+ * 吉祥物黑猫：绝对定位于 agent 输入框（.agent-dock-wrap，已 relative）右上角，
+ * 蹲在框沿上。姿态图来自 public/mascot/actions（透明背景单猫）。
+ *
+ * 交互：单击摸头、双击跳跃唤起对话、悬停出现「说句话」按钮。
+ */
+.mascot {
+  position: absolute;
+  top: -72px;
+  right: 18px;
+  width: 62px;
+  height: 66px;
+  z-index: 5;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.25));
+
+  &:focus-visible {
+    outline: 2px solid var(--accent, #4f7cff);
+    outline-offset: 2px;
+    border-radius: 12px;
+  }
+
+  &__img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    transform-origin: 50% 100%;
+    animation: mascot-breathe 3.2s ease-in-out infinite;
+  }
+
+  // ===== 运行中/思考/工作形态 =====
+  &.is-focused &__img {
+    animation: mascot-work 1.1s ease-in-out infinite;
+  }
+
+  &.is-thinking &__img {
+    animation: mascot-sway 2.4s ease-in-out infinite;
+  }
+
+  &.is-typing &__img,
+  &.is-tools &__img {
+    animation: mascot-work 0.7s ease-in-out infinite;
+  }
+
+  &.is-search &__img {
+    animation: mascot-peek 2.2s ease-in-out infinite;
+  }
+
+  &.is-reading &__img {
+    animation: mascot-nod 2.8s ease-in-out infinite;
+  }
+
+  &.is-question &__img {
+    animation: mascot-tilt 1.6s ease-in-out infinite;
+  }
+
+  &.is-laptop &__img,
+  &.is-waiting &__img,
+  &.is-loading &__img {
+    animation: mascot-work 1.4s ease-in-out infinite;
+  }
+
+  &.is-idea &__img {
+    animation: mascot-lightbulb 2s ease-in-out infinite;
+  }
+
+  &.is-wink &__img {
+    animation: mascot-breathe 1.2s ease-in-out infinite;
+  }
+
+  &.is-tilt &__img {
+    animation: mascot-tilt 2s ease-in-out infinite;
+  }
+
+  &.is-backpack &__img {
+    animation: mascot-sway 2s ease-in-out infinite;
+  }
+
+  &.is-notice &__img {
+    animation: mascot-wave 2.4s ease-in-out infinite;
+  }
+
+  &.is-angry &__img {
+    animation: mascot-fume 0.9s ease-in-out infinite;
+  }
+
+  &.is-shake &__img {
+    animation: mascot-shake 0.6s ease-in-out infinite;
+  }
+
+  &.is-beckon &__img {
+    animation: mascot-wave 1.1s ease-in-out infinite;
+  }
+
+  &.is-play &__img {
+    animation: mascot-hop 1.6s ease-in-out infinite;
+  }
+
+  &.is-test &__img {
+    animation: mascot-peek 1.8s ease-in-out infinite;
+  }
+
+  // ===== 情绪形态 =====
+  &.is-happy &__img {
+    animation: mascot-breathe 1.4s ease-in-out infinite;
+  }
+
+  &.is-done &__img {
+    animation: mascot-celebrate 0.9s ease-in-out;
+  }
+
+  &.is-wronged &__img,
+  &.is-error &__img {
+    animation: mascot-shake 0.5s ease-in-out infinite;
+    opacity: 0.9;
+  }
+
+  &.is-surprised &__img {
+    animation: mascot-shake 0.45s ease-in-out;
+  }
+
+  &.is-wave &__img {
+    animation: mascot-wave 1.6s ease-in-out infinite;
+  }
+
+  &.is-jump &__img {
+    animation: mascot-hop 0.7s cubic-bezier(0.28, 0.8, 0.4, 1);
+  }
+
+  // ===== 睡觉 =====
+  &.is-sleeping &__img {
+    animation: mascot-breathe 5s ease-in-out infinite;
+    opacity: 0.82;
+  }
+
+  // ===== 一次性交互动画（覆盖基础动画） =====
+  &.is-pet &__img {
+    animation: mascot-pet 0.6s ease-in-out;
+  }
+
+  &__zzz {
+    position: absolute;
+    top: -4px;
+    right: -6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, #8a8f9d);
+    animation: mascot-zzz 2.4s ease-in-out infinite;
+  }
+
+  // 摸头时冒出的爱心
+  &__heart {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    font-size: 13px;
+    color: #ff6b81;
+    animation: mascot-heart 0.8s ease-out forwards;
+    pointer-events: none;
+  }
+
+  // 对话气泡（双击/点按钮后短暂展示）
+  &__bubble {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    max-width: 200px;
+    padding: 5px 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: nowrap;
+    color: var(--text-primary, #222);
+    background: var(--bg-elevated, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px 12px 4px 12px;
+    box-shadow: 0 4px 16px var(--shadow-md, rgba(0, 0, 0, 0.12));
+    animation: mascot-pop 0.25s ease-out;
+    pointer-events: none;
+  }
+
+  // 悬停出现的「说句话」按钮
+  &__talk {
+    position: absolute;
+    top: -34px;
+    right: -6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--text-primary, #222);
+    background: var(--bg-elevated, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 999px;
+    box-shadow: 0 4px 14px var(--shadow-md, rgba(0, 0, 0, 0.12));
+    cursor: pointer;
+    animation: mascot-pop 0.22s ease-out;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+    &:hover {
+      transform: scale(1.06);
+      box-shadow: 0 6px 18px var(--shadow-md, rgba(0, 0, 0, 0.18));
+    }
+  }
+}
+
+// ===== 关键帧 =====
+
+@keyframes mascot-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+@keyframes mascot-work {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes mascot-sway {
+  0%, 100% { transform: rotate(-2deg) translateY(0); }
+  50% { transform: rotate(2deg) translateY(-2px); }
+}
+
+@keyframes mascot-peek {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  25% { transform: translateX(-4px) rotate(-3deg); }
+  75% { transform: translateX(4px) rotate(3deg); }
+}
+
+@keyframes mascot-nod {
+  0%, 100% { transform: rotate(0); }
+  30% { transform: rotate(-4deg); }
+  60% { transform: rotate(3deg); }
+}
+
+@keyframes mascot-tilt {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(9deg); }
+}
+
+@keyframes mascot-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+
+@keyframes mascot-wave {
+  0%, 100% { transform: rotate(0); }
+  15% { transform: rotate(-8deg); }
+  30% { transform: rotate(8deg); }
+  45% { transform: rotate(-6deg); }
+  60% { transform: rotate(6deg); }
+}
+
+@keyframes mascot-hop {
+  0% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-18px) scale(1.06, 0.94); }
+  55% { transform: translateY(0) scale(0.94, 1.06); }
+  70% { transform: translateY(-6px) scale(1.02); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes mascot-pet {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.14, 0.9) translateY(2px); }
+  50% { transform: scale(0.94, 1.08) translateY(-4px); }
+  75% { transform: scale(1.06, 0.96); }
+  100% { transform: scale(1); }
+}
+
+@keyframes mascot-celebrate {
+  0% { transform: scale(1) rotate(0); }
+  25% { transform: scale(1.1, 0.92) rotate(-4deg); }
+  50% { transform: scale(0.95, 1.1) rotate(4deg); }
+  75% { transform: scale(1.08, 0.94) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes mascot-zzz {
+  0% { opacity: 0; transform: translate(0, 2px) scale(0.8); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(7px, -14px) scale(1.15); }
+}
+
+@keyframes mascot-heart {
+  0% { opacity: 0; transform: translate(0, 6px) scale(0.6); }
+  30% { opacity: 1; transform: translate(2px, 0) scale(1.1); }
+  100% { opacity: 0; transform: translate(8px, -18px) scale(1); }
+}
+
+@keyframes mascot-pop {
+  0% { opacity: 0; transform: scale(0.7); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes mascot-lightbulb {
+  0%, 100% { transform: scale(1) rotate(0); }
+  25% { transform: scale(1.06) rotate(-3deg); }
+  75% { transform: scale(1.06) rotate(3deg); }
+}
+
+@keyframes mascot-fume {
+  0%, 100% { transform: translateY(0); }
+  25% { transform: translateY(-2px); }
+  75% { transform: translateY(1px); }
+}

@@ -26,6 +26,7 @@ import { ThinkingButton, ContextUsage } from './StatusWidgets';
 const STATUS_ITEM = Symbol('statusline');
 type ListItem = Entry | typeof STATUS_ITEM;
 import ModelPicker from '@/components/agent/ModelPicker';
+import { Mascot } from '@/components/agent/Mascot';
 
 import MentionInput, { type MentionInputHandle } from '../chat/MentionInput';
 import SettingsSheet from '../chat/SettingsSheet';
@@ -847,6 +848,12 @@ export default function AgentPage() {
 
           {/* 输入区（@ 提及 / / 技能弹层内聚在 MentionInput 内，浮层绝对定位于输入框上方） */}
           <div className="agent-dock-wrap">
+            <Mascot
+              onTalk={(greeting) => {
+                setInput(greeting);
+                requestAnimationFrame(() => composerRef.current?.focusEnd());
+              }}
+            />
             <div className="agent-dock">
               {/* 错误提示：与编辑/排队/粘贴 chip 同层，展示在对话框最上方 */}
               {error && (

@@ -54,7 +54,8 @@ export default function ProjectDetailView({
       if (!projectPath) return;
       try {
         // 先检查项目本身是否以 casp-portal 开头
-        const folder = projectPath.split('/').pop() || '';
+        // Windows 路径分隔符是 \，macOS/Linux 是 /，两种都要兼容
+        const folder = projectPath.split(/[\\/]/).pop() || '';
         if (folder.startsWith('casp-portal')) {
           if (!cancelled) {
             setHasCaspPortal(true);

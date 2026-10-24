@@ -80,9 +80,24 @@ pub async fn run_command(
         cmd.current_dir(dir);
     }
 
+    app_log!(
+        info,
+        "command",
+        "run_command start: {} (cwd: {:?})",
+        command,
+        cwd
+    );
+
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
+            app_log!(
+                error,
+                "command",
+                "run_command spawn failed: {} ({})",
+                command,
+                e
+            );
             let _ = app.emit("command-error", format!("启动命令失败: {}", e));
             return Err(format!("启动命令失败: {}", e));
         }
@@ -140,12 +155,28 @@ pub async fn run_command(
                 };
 
                 let _ = app.emit("command-done", &result);
+                app_log!(
+                    info,
+                    "command",
+                    "run_command done: pid={} exit={} success={}",
+                    pid,
+                    exit_code,
+                    success
+                );
                 return Ok(format!("pid:{}", pid));
             }
             Ok(None) => {
                 // 还在运行，检查超时
                 if start.elapsed() > timeout {
                     let _ = child.kill();
+                    app_log!(
+                        error,
+                        "command",
+                        "run_command timeout ({}s): pid={} {}",
+                        timeout.as_secs(),
+                        pid,
+                        command
+                    );
                     let _ = app.emit(
                         "command-error",
                         format!("命令执行超时（{}秒）", timeout.as_secs()),
@@ -155,6 +186,13 @@ pub async fn run_command(
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(e) => {
+                app_log!(
+                    error,
+                    "command",
+                    "run_command wait failed: pid={} ({})",
+                    pid,
+                    e
+                );
                 let _ = app.emit("command-error", format!("等待命令失败: {}", e));
                 return Err(format!("等待命令失败: {}", e));
             }

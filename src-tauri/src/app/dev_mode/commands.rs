@@ -4,10 +4,10 @@ use std::process::{Command, Stdio};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
-use super::types::*;
+use super::history::*;
 use super::parse::*;
 use super::process::*;
-use super::history::*;
+use super::types::*;
 // ===== 命令 =====
 
 /// 扫描项目目录下的所有卡片子目录
@@ -252,6 +252,12 @@ pub fn start_dev_server(
 ) -> Result<String, String> {
     let work_dir_path = Path::new(&work_dir);
     if !work_dir_path.is_dir() {
+        app_log!(
+            error,
+            "dev_mode",
+            "start_dev_server: dir not found: {}",
+            work_dir
+        );
         return Err(format!("目录不存在: {}", work_dir));
     }
 
@@ -276,7 +282,19 @@ pub fn start_dev_server(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     setup_process_group(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| format!("启动服务器失败: {}", e))?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            app_log!(
+                error,
+                "dev_mode",
+                "start_dev_server spawn failed: {} ({})",
+                run_command,
+                e
+            );
+            return Err(format!("启动服务器失败: {}", e));
+        }
+    };
 
     let pid = child.id();
     let server_id = Uuid::new_v4().to_string();
@@ -323,6 +341,15 @@ pub fn start_dev_server(
         },
     );
     drop(servers); // 释放锁
+    app_log!(
+        info,
+        "dev_mode",
+        "start_dev_server ok: id={} pid={} {} (cwd: {})",
+        server_id,
+        pid,
+        run_command,
+        work_dir
+    );
 
     // 用 std::thread 读取输出（不依赖 Tokio 运行时）
     let app_bg = app.clone();
@@ -433,19 +460,32 @@ pub fn stop_dev_server(app: AppHandle, server_id: String) -> Result<bool, String
         let port = server.port;
         match server.child.try_wait() {
             Ok(Some(_)) => {
-                // 已终止，但可能遗留占用端口的 node 进程，兜底清理
+                // 已终止，但可能遗留占用端口的 node 进程，兑底清理
                 if let Some(p) = port {
                     kill_processes_on_port(p);
                 }
+                app_log!(
+                    info,
+                    "dev_mode",
+                    "stop_dev_server ok (already exited): id={}",
+                    server_id
+                );
                 Ok(true)
             }
             Ok(None) => {
                 // 仍在运行，终止整个进程树（含 pnpm/node 子孙进程）
                 terminate_process_tree(&mut server.child);
-                // 兜底：若端口仍被占用，按端口强杀，确保释放
+                // 兑底：若端口仍被占用，按端口强杀，确保释放
                 if let Some(p) = port {
                     kill_processes_on_port(p);
                 }
+                app_log!(
+                    info,
+                    "dev_mode",
+                    "stop_dev_server ok (terminated): id={} port={:?}",
+                    server_id,
+                    port
+                );
                 let _ = app.emit(
                     "dev-server-stopped",
                     serde_json::json!({
@@ -456,9 +496,24 @@ pub fn stop_dev_server(app: AppHandle, server_id: String) -> Result<bool, String
                 );
                 Ok(true)
             }
-            Err(_) => Ok(false),
+            Err(e) => {
+                app_log!(
+                    error,
+                    "dev_mode",
+                    "stop_dev_server wait failed: id={} ({})",
+                    server_id,
+                    e
+                );
+                Ok(false)
+            }
         }
     } else {
+        app_log!(
+            error,
+            "dev_mode",
+            "stop_dev_server: not found: id={}",
+            server_id
+        );
         Err("服务器未找到".to_string())
     }
 }

@@ -8,6 +8,7 @@ import ProjectCardView from '@/features/home/ProjectCard';
 import ProjectDetailView from '@/features/home/ProjectDetail';
 import CreateProjectModal from '@/features/home/CreateProjectModal';
 import type { ProjectCard, ProjectDetail as ProjectDetailData } from '@/features/home/types';
+import { reportError, reportInfo } from '@/lib/log';
 import { Folder, Plus, Search } from 'lucide-react';
 import './WorkspacePage.scss';
 
@@ -86,8 +87,10 @@ export default function WorkspacePage() {
   async function handleSwitchWorkspace(path: string) {
     try {
       await switchWorkspace(path);
+      reportInfo('workspace', `switch workspace ok: ${path}`);
       setSearchQuery('');
     } catch (e) {
+      reportError('workspace', `switch workspace failed: ${path} (${e})`);
       setError(`切换工作空间失败: ${e}`);
     }
   }
@@ -111,6 +114,7 @@ export default function WorkspacePage() {
       return;
     }
     invoke('open_in_editor', { path, editorCommand: editor.command }).catch((e) => {
+      reportError('workspace', `open_in_editor failed: ${path} via ${editor.command} (${e})`);
       setError(`打开编辑器失败: ${e}`);
     });
   }
@@ -131,6 +135,8 @@ export default function WorkspacePage() {
       const detail = await invoke<ProjectDetailData>('get_project_detail', { path: projectPath });
       setSelectedProject(detail);
     } catch (e) {
+      // 工作空间详情报错排查：横幅报错落盘（含路径与后端错误原文）
+      reportError('workspace', `get_project_detail failed: ${projectPath} (${e})`);
       setError(`加载详情失败: ${e}`);
     } finally {
       setDetailLoading(false);

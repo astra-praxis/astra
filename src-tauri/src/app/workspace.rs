@@ -29,10 +29,28 @@ pub(crate) async fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, Str
         let dir = Path::new(&path);
 
         if !dir.is_dir() {
+            app_log!(
+                error,
+                "workspace",
+                "scan_workspace: not a directory: {}",
+                path
+            );
             return Err(format!("路径不是有效的目录: {}", path));
         }
 
-        let entries = fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(e) => {
+                app_log!(
+                    error,
+                    "workspace",
+                    "scan_workspace: read_dir failed {}: {}",
+                    path,
+                    e
+                );
+                return Err(format!("读取目录失败: {}", e));
+            }
+        };
 
         let mut projects = Vec::new();
 
@@ -59,6 +77,7 @@ pub(crate) async fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, Str
             let readme_path = entry_path.join("README.md");
             let has_readme = readme_path.exists();
 
+            // 无 README 的项目会自动补建 README.md（首次扫描会写文件）
             let project_name = if has_readme {
                 match fs::read_to_string(&readme_path) {
                     Ok(content) => content
@@ -89,10 +108,25 @@ pub(crate) async fn scan_workspace(path: String) -> Result<Vec<ProjectCard>, Str
         }
 
         projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        app_log!(
+            info,
+            "workspace",
+            "scan_workspace ok: {} projects ({})",
+            projects.len(),
+            path
+        );
         Ok(projects)
     })
     .await
-    .map_err(|e| format!("扫描工作空间失败: {}", e))?
+    .map_err(|e| {
+        app_log!(
+            error,
+            "workspace",
+            "scan_workspace: task join failed: {}",
+            e
+        );
+        format!("扫描工作空间失败: {}", e)
+    })?
 }
 
 // ===== 命令：列出项目内文件（@ 文件引用候选） =====
@@ -103,6 +137,12 @@ pub(crate) async fn list_project_files(path: String) -> Result<Vec<String>, Stri
     tokio::task::spawn_blocking(move || {
         let root = Path::new(&path);
         if !root.is_dir() {
+            app_log!(
+                error,
+                "workspace",
+                "list_project_files: not a directory: {}",
+                path
+            );
             return Err(format!("路径不是有效的目录: {}", path));
         }
         Ok(collect_project_files(root))
@@ -334,13 +374,22 @@ pub(crate) fn scan_subdirectory(dir: &Path, current_depth: u32, max_depth: u32) 
 }
 
 #[tauri::command]
-pub(crate) fn get_project_detail(app: tauri::AppHandle, path: String) -> Result<ProjectDetail, String> {
+pub(crate) fn get_project_detail(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<ProjectDetail, String> {
     let settings = get_settings(app);
     let max_depth = settings.scan_depth;
 
     let dir = Path::new(&path);
     if !dir.is_dir() {
-        return Err("项目目录不存在".to_string());
+        app_log!(
+            error,
+            "workspace",
+            "get_project_detail: dir not found: {}",
+            path
+        );
+        return Err(format!("项目目录不存在: {}", path));
     }
 
     let folder_name = dir
@@ -384,6 +433,15 @@ pub(crate) fn get_project_detail(app: tauri::AppHandle, path: String) -> Result<
     } else {
         scan_subdirectory(&dir, 0, max_depth)
     };
+
+    app_log!(
+        info,
+        "workspace",
+        "get_project_detail ok: {} (sub_items: {}, depth: {})",
+        path,
+        sub_items.len(),
+        max_depth
+    );
 
     Ok(ProjectDetail {
         name: project_name,
@@ -449,11 +507,26 @@ pub(crate) fn create_project(
 
     // 检查目录是否已存在
     if project_dir.exists() {
+        app_log!(
+            warn,
+            "workspace",
+            "create_project: dir exists: {}",
+            project_dir.display()
+        );
         return Err(format!("文件夹 '{}' 已存在", folder_name));
     }
 
     // 创建目录
-    fs::create_dir_all(&project_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+    if let Err(e) = fs::create_dir_all(&project_dir) {
+        app_log!(
+            error,
+            "workspace",
+            "create_project: mkdir failed {}: {}",
+            project_dir.display(),
+            e
+        );
+        return Err(format!("创建目录失败: {}", e));
+    }
 
     let project_name = if project_name.trim().is_empty() {
         folder_name.to_string()
@@ -464,7 +537,21 @@ pub(crate) fn create_project(
     // 写入 README.md
     let readme_content = format!("# {}\n\nThis is the {} project.", project_name, folder_name);
     let readme_path = project_dir.join("README.md");
-    fs::write(&readme_path, &readme_content).map_err(|e| format!("创建 README.md 失败: {}", e))?;
+    if let Err(e) = fs::write(&readme_path, &readme_content) {
+        app_log!(
+            error,
+            "workspace",
+            "create_project: write README failed: {}",
+            e
+        );
+        return Err(format!("创建 README.md 失败: {}", e));
+    }
+    app_log!(
+        info,
+        "workspace",
+        "create_project ok: {}",
+        project_dir.display()
+    );
 
     Ok(ProjectCard {
         name: project_name,

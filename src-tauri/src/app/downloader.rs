@@ -188,6 +188,14 @@ pub async fn add_download(
     }
 
     // 开始下载
+    app_log!(
+        info,
+        "downloader",
+        "add_download ok: id={} file={} url={}",
+        id,
+        filename,
+        url
+    );
     start_download(app, id)?;
 
     Ok(task)
@@ -204,6 +212,14 @@ pub fn start_download(app: AppHandle, task_id: String) -> Result<(), String> {
         if task.status == DownloadStatus::Downloading {
             return Err("任务正在下载中".to_string());
         }
+
+        app_log!(
+            info,
+            "downloader",
+            "start_download ok: id={} file={}",
+            task_id,
+            task.filename
+        );
 
         // 更新状态
         if let Some(t) = tasks.get_mut(&task_id) {
@@ -240,6 +256,13 @@ pub fn start_download(app: AppHandle, task_id: String) -> Result<(), String> {
         if let Err(e) = download_file(app_handle.clone(), task_id_clone.clone(), task, cancel).await
         {
             eprintln!("下载失败: {}", e);
+            app_log!(
+                error,
+                "downloader",
+                "download failed: id={} ({})",
+                task_id_clone,
+                e
+            );
             // 更新任务状态为失败并发送最终事件（含失败时间）
             let manager = app_handle.state::<DownloadManager>();
             let mut tasks = manager.tasks.lock().unwrap();
@@ -305,6 +328,13 @@ pub fn delete_download(app: AppHandle, task_id: String, delete_file: bool) -> Re
     // 删除任务
     manager.tasks.lock().unwrap().remove(&task_id);
     manager.cancel_flags.lock().unwrap().remove(&task_id);
+    app_log!(
+        info,
+        "downloader",
+        "delete_download ok: id={} delete_file={}",
+        task_id,
+        delete_file
+    );
 
     // 保存记录
     {

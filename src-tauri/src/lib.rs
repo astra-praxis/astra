@@ -1,3 +1,6 @@
+// app_log! 宏需要 #[macro_use] 且必须声明在使用它的模块之前
+#[macro_use]
+mod logging;
 mod agent;
 mod agent_generation;
 mod app;
@@ -24,6 +27,7 @@ pub fn run() {
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("panicked: {info}\n");
         eprintln!("{msg}");
+        crate::logging::log("error", "panic", info.to_string().trim());
         let log = std::env::temp_dir().join("astra-panic.log");
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -79,6 +83,20 @@ pub fn run() {
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+            // 功能点落盘日志：Windows GUI 无控制台，关键事件写
+            // %APPDATA%\com.astra.app\astra.log，用户可直接反馈该文件。
+            if let Ok(dir) = app.path().app_data_dir() {
+                logging::init(&dir);
+                app_log!(
+                    info,
+                    "app",
+                    "astra start v{} ({} {})",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                );
+            }
+
             // 记忆宿主初始化（astra-memory CME）：加密 SQLite + 主密钥文件。
             // 失败降级为 memory-off：agent 照常运行（无 recall 注入）。
             // 摘要路径开关（memory_agent_summary）重启后生效；开启时用
@@ -88,6 +106,12 @@ pub fn run() {
             let agent_summary_client = if settings.memory_agent_summary {
                 eprintln!(
                     "[memory] agent summary enabled (provider: {})",
+                    provider_id.as_deref().unwrap_or("auto")
+                );
+                app_log!(
+                    info,
+                    "memory",
+                    "agent summary enabled (provider: {})",
                     provider_id.as_deref().unwrap_or("auto")
                 );
                 Some(Box::new(crate::memory::host::HostAgentSummaryClient::new(
@@ -133,14 +157,17 @@ pub fn run() {
                     ) {
                         Ok(host) => {
                             let _ = app.state::<agent::AgentState>().memory.set(host);
+                            app_log!(info, "memory", "host init ok");
                         }
                         Err(error) => {
                             eprintln!("[memory] init failed, memory disabled: {error}");
+                            app_log!(error, "memory", "init failed, memory disabled: {error}");
                         }
                     }
                 }
                 Err(error) => {
                     eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
+                    app_log!(error, "memory", "app_data_dir unavailable: {error}");
                 }
             }
 
@@ -148,6 +175,7 @@ pub fn run() {
             // 技能库中已有同名技能时不覆盖，用户修改优先。best-effort。
             if let Err(error) = skills::user::ensure_builtin_skills(app.handle()) {
                 eprintln!("[skills] builtin memory skill install failed: {error}");
+                app_log!(error, "skills", "builtin skills install failed: {error}");
             }
 
             let show_item = MenuItem::with_id(app, "show", "显示窗口", true, Some("Alt+Space"))?;
@@ -203,6 +231,7 @@ pub fn run() {
             // setup 返回 Err 会导致应用直接退出（Windows 首发秒退的根因）。
             if let Err(error) = app.global_shortcut().register("Alt+Space") {
                 eprintln!("[shortcut] Alt+Space register failed (likely in use): {error}");
+                app_log!(warn, "shortcut", "Alt+Space register failed: {error}");
             }
 
             Ok(())
@@ -216,6 +245,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            logging::frontend_log,
             app::workspace::scan_workspace,
             app::workspace::list_project_files,
             app::workspace::create_project,

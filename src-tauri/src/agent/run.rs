@@ -138,13 +138,19 @@ pub async fn agent_start_run(
         )
     } else if let Some(pid) = &req.provider_id {
         let p = providers::get_provider_inner(&app, pid)?;
-        let model = req
-            .model
-            .or(p.active_model)
-            .ok_or_else(|| format!("provider '{}' 没有设置活动模型", pid))?;
+        let model = req.model.or(p.active_model).ok_or_else(|| {
+            app_log!(
+                error,
+                "agent",
+                "agent_start_run: provider '{}' has no active model",
+                pid
+            );
+            format!("provider '{}' 没有设置活动模型", pid)
+        })?;
         let anthropic = p.kind == crate::providers::ProviderKind::Anthropic;
         (p.base_url, p.api_key, model, anthropic)
     } else {
+        app_log!(error, "agent", "agent_start_run rejected: no model source");
         return Err("请先选择模型来源".into());
     };
     // bind_image_config 的目的地键：协议类型参与变更判定（同一 endpoint+model
@@ -162,6 +168,12 @@ pub async fn agent_start_run(
         Some(p) => {
             let pb = PathBuf::from(p);
             if !pb.is_dir() {
+                app_log!(
+                    error,
+                    "agent",
+                    "agent_start_run rejected: project root not found: {}",
+                    p
+                );
                 return Err(format!("项目目录不存在: {p}"));
             }
             Some(pb)
@@ -272,10 +284,10 @@ pub async fn agent_start_run(
             // Anthropic 原生 Messages API 后端（vision/tool_call 为协议内建
             // 能力，无需 image_encoding 开关）；其余走 OpenAI 兼容 SSE。
             let backend: Arc<dyn ModelBackend> = if anthropic {
-                Arc::new(AnthropicBackend::new(base_url, api_key, model_name))
+                Arc::new(AnthropicBackend::new(base_url, api_key, model_name.clone()))
             } else {
                 Arc::new(
-                    RigBackend::new(base_url, api_key, model_name)
+                    RigBackend::new(base_url, api_key, model_name.clone())
                         .with_image_encoding(image_encoding(req.image_recognition)),
                 )
             };
@@ -380,6 +392,13 @@ pub async fn agent_start_run(
     let handle = match thread.try_send_content(content, tx) {
         Ok(handle) => handle,
         Err(error) => {
+            app_log!(
+                error,
+                "agent",
+                "agent_start_run send failed: session={} ({})",
+                session_id,
+                error
+            );
             if let Some(previous_error) = previous_error {
                 state
                     .persistence_errors
@@ -399,6 +418,13 @@ pub async fn agent_start_run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(session_id.clone(), ActiveRun { generation, handle });
+    app_log!(
+        info,
+        "agent",
+        "agent_start_run ok: session={} model={}",
+        session_id,
+        model_name
+    );
 
     // 4. 事件转发任务：Envelope → agent-event + JSONL 日志；Run 结束（tx 全部 drop）后自然退出
     let forward_app = app.clone();

@@ -83,11 +83,23 @@ pub fn list_providers(app: AppHandle) -> Result<Vec<ProviderConfig>, String> {
     let path = ensure_providers_file(&app)?;
 
     match fs::read_to_string(&path) {
-        Ok(content) => {
-            let providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
-            Ok(providers)
+        Ok(content) => match serde_json::from_str::<Vec<ProviderConfig>>(&content) {
+            Ok(providers) => Ok(providers),
+            Err(e) => {
+                // 解析失败降级为空列表（配置丢失盲点），只记日志不改行为
+                app_log!(
+                    error,
+                    "providers",
+                    "list_providers: parse failed, fallback to empty: {}",
+                    e
+                );
+                Ok(vec![])
+            }
+        },
+        Err(e) => {
+            app_log!(error, "providers", "list_providers: read failed: {}", e);
+            Err(format!("读取配置失败: {}", e))
         }
-        Err(e) => Err(format!("读取配置失败: {}", e)),
     }
 }
 
@@ -126,8 +138,22 @@ pub fn save_provider(
                 &path,
                 serde_json::to_string_pretty(&providers).unwrap_or_default(),
             );
+            app_log!(
+                info,
+                "providers",
+                "save_provider update ok: id={} name={} kind={:?}",
+                result.id,
+                result.name,
+                result.kind
+            );
             return Ok(result);
         }
+        app_log!(
+            error,
+            "providers",
+            "save_provider: update target not found: id={}",
+            existing_id
+        );
         return Err("找不到要更新的配置".to_string());
     } else {
         // 创建新配置
@@ -147,6 +173,14 @@ pub fn save_provider(
             &path,
             serde_json::to_string_pretty(&providers).unwrap_or_default(),
         );
+        app_log!(
+            info,
+            "providers",
+            "save_provider create ok: id={} name={} kind={:?}",
+            provider.id,
+            provider.name,
+            provider.kind
+        );
         Ok(provider)
     }
 }
@@ -162,6 +196,7 @@ pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
     providers.retain(|p| p.id != id);
 
     if providers.len() == len_before {
+        app_log!(error, "providers", "delete_provider: not found: id={}", id);
         return Err("找不到要删除的配置".to_string());
     }
 
@@ -169,6 +204,7 @@ pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
         &path,
         serde_json::to_string_pretty(&providers).unwrap_or_default(),
     );
+    app_log!(info, "providers", "delete_provider ok: id={}", id);
     Ok(())
 }
 
@@ -178,6 +214,15 @@ pub async fn fetch_provider_models(
     api_key: String,
     kind: Option<ProviderKind>,
 ) -> Result<Vec<ModelInfo>, String> {
+    // 日志只记 base_url 与 kind，严禁包含 api_key
+    let kind_val = kind.clone().unwrap_or_default();
+    app_log!(
+        info,
+        "providers",
+        "fetch_provider_models start: base_url={} kind={:?}",
+        base_url,
+        kind_val
+    );
     match kind.unwrap_or_default() {
         // Anthropic 原生 /models：x-api-key 认证，无 chat 探测回退
         // （chat/completions 探测对 Messages API 无意义，只会得到 404）
@@ -189,6 +234,13 @@ pub async fn fetch_provider_models(
             let step1 = try_get_models_list(&base_url, &api_key, ProviderKind::OpenAi).await;
             if let Ok(models) = &step1 {
                 if !models.is_empty() {
+                    app_log!(
+                        info,
+                        "providers",
+                        "fetch_provider_models ok via /models: {} models ({})",
+                        models.len(),
+                        base_url
+                    );
                     return Ok(models.clone());
                 }
             }
@@ -199,17 +251,38 @@ pub async fn fetch_provider_models(
             let step2 = try_probe_models_via_chat(&base_url, &api_key).await;
             if let Ok(models) = &step2 {
                 if !models.is_empty() {
+                    app_log!(
+                        info,
+                        "providers",
+                        "fetch_provider_models ok via chat probe: {} models ({})",
+                        models.len(),
+                        base_url
+                    );
                     return Ok(models.clone());
                 }
             }
 
             // 任一步成功但都没数据 → 返回空（让前端提示手动添加）
             if step1.is_ok() || step2.is_ok() {
+                app_log!(
+                    warn,
+                    "providers",
+                    "fetch_provider_models: requests ok but empty ({})",
+                    base_url
+                );
                 return Ok(vec![]);
             }
 
             // 两步都真正失败 → 返回错误信息（优先第一步的错误）
-            Err(step1.err().unwrap_or_else(|| "获取模型失败".to_string()))
+            let err = step1.err().unwrap_or_else(|| "获取模型失败".to_string());
+            app_log!(
+                error,
+                "providers",
+                "fetch_provider_models failed: base_url={} err={}",
+                base_url,
+                err
+            );
+            Err(err)
         }
     }
 }
@@ -396,14 +469,27 @@ pub fn set_active_model(
     let mut providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
 
     if let Some(provider) = providers.iter_mut().find(|p| p.id == provider_id) {
-        provider.active_model = Some(model_id);
+        provider.active_model = Some(model_id.clone());
         provider.updated_at = unix_timestamp();
         let _ = fs::write(
             &path,
             serde_json::to_string_pretty(&providers).unwrap_or_default(),
         );
+        app_log!(
+            info,
+            "providers",
+            "set_active_model ok: provider={} model={}",
+            provider_id,
+            model_id
+        );
         Ok(())
     } else {
+        app_log!(
+            error,
+            "providers",
+            "set_active_model: provider not found: {}",
+            provider_id
+        );
         Err("找不到配置".to_string())
     }
 }

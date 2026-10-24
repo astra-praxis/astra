@@ -99,8 +99,31 @@ pub(crate) fn get_settings(app: tauri::AppHandle) -> AppSettings {
     }
 
     match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => AppSettings::default(),
+        Ok(content) => match serde_json::from_str::<AppSettings>(&content) {
+            Ok(settings) => settings,
+            Err(e) => {
+                // 解析失败降级为默认值 = 用户此前配置全丢（数据丢失盲点），
+                // 这里只记日志不改行为，方便事后从日志发现。
+                app_log!(
+                    error,
+                    "settings",
+                    "get_settings: parse failed, fallback to default: {} ({})",
+                    path.display(),
+                    e
+                );
+                AppSettings::default()
+            }
+        },
+        Err(e) => {
+            app_log!(
+                error,
+                "settings",
+                "get_settings: read failed, fallback to default: {} ({})",
+                path.display(),
+                e
+            );
+            AppSettings::default()
+        }
     }
 }
 
@@ -119,7 +142,23 @@ pub(crate) fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Res
     let path = get_settings_path(&app)?;
     let json =
         serde_json::to_string_pretty(&settings).map_err(|e| format!("序列化设置失败: {}", e))?;
-    fs::write(&path, json).map_err(|e| format!("写入设置文件失败: {}", e))?;
+    fs::write(&path, json).map_err(|e| {
+        app_log!(
+            error,
+            "settings",
+            "save_settings: write failed {}: {}",
+            path.display(),
+            e
+        );
+        format!("写入设置文件失败: {}", e)
+    })?;
+    app_log!(
+        info,
+        "settings",
+        "save_settings ok: {} workspaces, active: {:?}",
+        settings.workspaces.len(),
+        settings.active_workspace
+    );
     Ok(())
 }
 
@@ -155,16 +194,17 @@ pub(crate) fn add_workspace(
         return Err("该路径已是工作空间".to_string());
     }
     settings.workspaces.push(WorkspaceConfig {
-        name,
+        name: name.clone(),
         path: path.clone(),
     });
     // 如果是第一个工作空间，自动设为活跃
     if settings.active_workspace.is_none() {
-        settings.active_workspace = Some(path);
+        settings.active_workspace = Some(path.clone());
     }
-    let path = get_settings_path(&app)?;
+    let save_path = get_settings_path(&app)?;
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())?;
+    fs::write(&save_path, json).map_err(|e| e.to_string())?;
+    app_log!(info, "settings", "add_workspace ok: {} ({})", name, path);
     Ok(settings)
 }
 
@@ -178,6 +218,7 @@ pub(crate) fn remove_workspace(app: tauri::AppHandle, path: String) -> Result<Ap
     let save_path = get_settings_path(&app)?;
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(&save_path, json).map_err(|e| e.to_string())?;
+    app_log!(info, "settings", "remove_workspace ok: {}", path);
     Ok(settings)
 }
 
@@ -188,12 +229,19 @@ pub(crate) fn set_active_workspace(
 ) -> Result<AppSettings, String> {
     let mut settings = get_settings(app.clone());
     if !settings.workspaces.iter().any(|w| w.path == path) {
+        app_log!(
+            error,
+            "settings",
+            "set_active_workspace: not found: {}",
+            path
+        );
         return Err("工作空间不存在".to_string());
     }
-    settings.active_workspace = Some(path);
+    settings.active_workspace = Some(path.clone());
     let save_path = get_settings_path(&app)?;
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(&save_path, json).map_err(|e| e.to_string())?;
+    app_log!(info, "settings", "set_active_workspace ok: {}", path);
     Ok(settings)
 }
 // ===== 命令：在编辑器中打开项目 =====
@@ -255,16 +303,31 @@ pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(),
     let full_path = std::env::join_paths(&dirs).unwrap_or_default();
 
     let editor = resolve_editor_command(&editor_command, &dirs);
-    Command::new(editor)
+    if let Err(e) = Command::new(editor)
         .arg(&path)
         .env("PATH", &full_path)
         .spawn()
-        .map_err(|e| {
-            format!(
-                "启动编辑器失败: {}（请确认 {} 已安装且在系统 PATH 中）",
-                e, editor_command
-            )
-        })?;
+    {
+        app_log!(
+            error,
+            "settings",
+            "open_in_editor failed: {} via {}: {}",
+            path,
+            editor_command,
+            e
+        );
+        return Err(format!(
+            "启动编辑器失败: {}（请确认 {} 已安装且在系统 PATH 中）",
+            e, editor_command
+        ));
+    }
+    app_log!(
+        info,
+        "settings",
+        "open_in_editor ok: {} via {}",
+        path,
+        editor_command
+    );
     Ok(())
 }
 

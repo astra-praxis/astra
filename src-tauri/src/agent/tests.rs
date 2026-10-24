@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use agent_core::{
-    Decision, Envelope, MessageContent, ModelBackend, PermissionBridge,
-    PermissionRequest, RigBackend, ThreadConfig, ToolPolicy,
-    DEFAULT_AUTO_COMPACT_TOKENS,
+    Decision, Envelope, MessageContent, ModelBackend, PermissionBridge, PermissionRequest,
+    RigBackend, ThreadConfig, ToolPolicy, DEFAULT_AUTO_COMPACT_TOKENS,
 };
 use base64::Engine as _;
 use serde_json::json;
 use std::path::Path;
-
 
 use super::events::*;
 use super::permissions::*;
@@ -887,7 +885,9 @@ fn load_real_provider() -> (String, String, String) {
 
 /// 一次真实 Run：与 observe spawn 同形状组装 Thread（真实 backend /
 /// registry / policy / ProjectBoundProvider 记忆），跑一轮并采集事件。
-/// 返回（助手最终回答，采集器）。权限桥全放行（等价 all 级放权）。
+/// 返回（助手最终回答，采集器，全部事件）。权限桥全放行（等价 all 级放权）。
+/// `max_tokens` 透传给模型（None = 网关默认；测试用它压低输出上限以
+/// 确定性触发 finish_reason=length 截断）。
 #[allow(clippy::too_many_arguments)]
 async fn real_turn(
     threads: &mut crate::agent::threads::AgentThreads,
@@ -898,16 +898,21 @@ async fn real_turn(
     api_key: &str,
     model_name: &str,
     user_text: &str,
-) -> (String, MemoryRunCollector) {
+    max_tokens: Option<u32>,
+) -> (String, MemoryRunCollector, Vec<agent_core::RunEvent>) {
     // 与 agent_start_run 相同的策略形状：本测试只需 read_file（默认
     // Allow）+ shell_execute（Confirm，经 AutoBridge 全放行）。
     let mut policy = ToolPolicy::default();
     policy.allowed_readonly.push("find_path".into());
     policy.confirm_tools.push("shell_execute".into());
 
-    let mut config = ThreadConfig::new(session.to_string(), crate::agent::prompts::agent_system_prompt());
+    let mut config = ThreadConfig::new(
+        session.to_string(),
+        crate::agent::prompts::agent_system_prompt(),
+    );
     config.project_root = Some(project_root.to_path_buf());
     config.max_turns = 6;
+    config.max_tokens = max_tokens;
     config.auto_compact_tokens = Some(DEFAULT_AUTO_COMPACT_TOKENS).filter(|&t| t > 0);
     config.policy = policy;
     config.memory = Some(memory);
@@ -947,11 +952,13 @@ async fn real_turn(
         .unwrap();
     let mut collector = MemoryRunCollector::new();
     let mut final_text = String::new();
+    let mut events: Vec<agent_core::RunEvent> = Vec::new();
     let wait = async {
         while let Some(env) = rx.recv().await {
             if let agent_core::RunEvent::RunCompleted { final_text: text } = &env.event {
                 final_text = text.clone();
             }
+            events.push(env.event.clone());
             collector.observe(&env);
         }
     };
@@ -962,7 +969,7 @@ async fn real_turn(
         handle.cancel();
         panic!("real run timed out after 300s");
     }
-    (final_text, collector)
+    (final_text, collector, events)
 }
 
 /// 真实模型 Run 验证宿主采集路径（唯一依赖外部模型 API 的测试，默认
@@ -1010,7 +1017,7 @@ async fn memory_collection_real_model_run() {
         Arc::new(CmeMemoryProvider::new(Arc::clone(&engine))),
         bound_project.clone(),
     ));
-    let (final1, collector1) = real_turn(
+    let (final1, collector1, _events1) = real_turn(
         &mut threads,
         "sess-real-run-1",
         project.path(),
@@ -1019,6 +1026,7 @@ async fn memory_collection_real_model_run() {
         &api_key,
         &model_name,
         prompt1,
+        None,
     )
     .await;
     eprintln!("[real-run] run1 final: {final1}");
@@ -1170,7 +1178,7 @@ async fn memory_collection_real_model_run() {
         Arc::new(CmeMemoryProvider::new(Arc::clone(&engine))),
         bound_project.clone(),
     ));
-    let (final2, collector2) = real_turn(
+    let (final2, collector2, _events2) = real_turn(
         &mut threads,
         "sess-real-run-2",
         project.path(),
@@ -1179,6 +1187,7 @@ async fn memory_collection_real_model_run() {
         &api_key,
         &model_name,
         prompt2,
+        None,
     )
     .await;
     eprintln!("[real-run] run2 final: {final2}");
@@ -1197,4 +1206,117 @@ async fn memory_collection_real_model_run() {
         None,
     )
     .await;
+}
+
+/// 真实模型大文件截断续跑验证（默认忽略）：
+/// `cargo test --lib truncation_real_model_large_file -- --ignored --nocapture`
+///
+/// 复现用户报告的场景：大文件 + 需要长输出的任务 → 模型响应被单次输出
+/// 上限截断（finish_reason=length）。修复前：截断发生在 tool-call 参数
+/// JSON 流到一半时，调用被静默丢弃 → Run 直接 RunCompleted（「任务完成」
+/// 但什么都没做）。修复后：Delta::Truncated → 保留已完整的调用继续执行 +
+/// 自动续跑（≤3 次）。
+///
+/// 确定性触发：max_tokens 压到 300，任何「把全部条目写入文件」的任务都
+/// 必然超出单次输出上限，不依赖网关的默认 max_tokens。
+#[tokio::test]
+#[ignore = "real model API + network; run with --ignored --nocapture"]
+async fn truncation_real_model_large_file() {
+    let (base_url, api_key, model_name) = load_real_provider();
+    eprintln!("[trunc-run] model: {model_name}");
+
+    // 临时项目：大文件（400 条编号记录，~24KB）+ 全放行权限
+    let project = tempfile::tempdir().unwrap();
+    let mut data = String::new();
+    for i in 1..=400 {
+        data.push_str(&format!(
+            "ITEM {:04} | token-{:04}-XK{:02} | status=active | weight={}\n",
+            i,
+            i,
+            i % 100,
+            (i * 7) % 997
+        ));
+    }
+    std::fs::write(project.path().join("data.txt"), &data).unwrap();
+
+    let mem_dir = tempfile::tempdir().unwrap();
+    let db = mem_dir.path().join("memory-cme.sqlite");
+    let key = [12u8; 32];
+    let engine = Arc::new(MemoryEngine::new(CmeSqliteStore::open(&db, &key).unwrap()));
+    let memory = Arc::new(ProjectBoundProvider::new(
+        Arc::new(CmeMemoryProvider::new(Arc::clone(&engine))),
+        Some("astra-trunc-run".to_string()),
+    ));
+
+    let mut threads = crate::agent::threads::AgentThreads::default();
+    let threads_dir = tempfile::tempdir().unwrap();
+    threads
+        .open(
+            threads_dir.path(),
+            Arc::new(std::sync::Mutex::new(HashMap::new())),
+        )
+        .await
+        .unwrap();
+    let prompt = "请读取项目根目录的 data.txt，把其中全部 400 条记录按原样逐行写入项目根目录的 output.md（一行一条，不许省略、不许截断）。写完文件后回复「已写入 N 条」。";
+    let (final_text, _collector, events) = real_turn(
+        &mut threads,
+        "sess-trunc-run",
+        project.path(),
+        memory,
+        &base_url,
+        &api_key,
+        &model_name,
+        prompt,
+        Some(300), // 确定性触发 finish_reason=length
+    )
+    .await;
+
+    eprintln!("[trunc-run] final: {final_text:?}");
+    for ev in &events {
+        let brief = match ev {
+            agent_core::RunEvent::StatusChanged { status } => format!("status={status:?}"),
+            agent_core::RunEvent::ToolCallStarted { tool_name, .. } => {
+                format!("tool_start={tool_name}")
+            }
+            agent_core::RunEvent::ToolCallCompleted {
+                tool_name,
+                result_summary,
+                ..
+            } => format!("tool_end={tool_name} summary={:.80}", result_summary),
+            agent_core::RunEvent::ToolCallFailed {
+                tool_name, error, ..
+            } => format!("tool_fail={tool_name} err={error}"),
+            agent_core::RunEvent::MessageDelta { .. } => "delta".to_string(),
+            agent_core::RunEvent::UsageUpdated {
+                input_tokens,
+                output_tokens,
+                ..
+            } => format!("usage in={input_tokens:?} out={output_tokens:?}"),
+            agent_core::RunEvent::RunCompleted { final_text } => {
+                format!("COMPLETED final={:.120}", final_text)
+            }
+            agent_core::RunEvent::RunFailed { error } => format!("FAILED error={error}"),
+            other => format!("{other:?}"),
+        };
+        eprintln!("[trunc-run] event: {brief}");
+    }
+
+    // ===== 断言 1：Run 必须完成且有实质回复（不能静默空答） =====
+    assert!(
+        !final_text.trim().is_empty(),
+        "run must end with a non-empty final answer (silent empty completion was the bug)"
+    );
+
+    // ===== 断言 2：截断后续跑必须实际执行了工具（写文件发生） =====
+    // 修复前：截断把未完成的 tool-call 静默丢弃 → 没有任何工具执行就「完成」。
+    let output_path = project.path().join("output.md");
+    let output = std::fs::read_to_string(&output_path).unwrap_or_default();
+    eprintln!("[trunc-run] output.md bytes: {}", output.len());
+    assert!(
+        !output.trim().is_empty(),
+        "write_file must have executed at least once (dropped tool calls were the bug)"
+    );
+    let written_lines = output.lines().filter(|l| l.contains("ITEM")).count();
+    eprintln!("[trunc-run] output.md ITEM lines: {written_lines}/400");
+    eprintln!("[trunc-run] OK: no silent completion; tool work was done");
 }

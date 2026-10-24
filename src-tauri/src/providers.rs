@@ -11,6 +11,9 @@ use tauri::{AppHandle, Manager};
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     #[default]
+    // 序列化为 "openai"（与前端 ProviderKind 类型一致）；alias 兼容历史
+    // providers.json 中由 rename_all 生成的 "open_ai"，避免存量配置读取失败
+    #[serde(rename = "openai", alias = "open_ai")]
     OpenAi,
     Anthropic,
 }
@@ -426,6 +429,32 @@ pub fn get_provider_inner(app: &AppHandle, id: &str) -> Result<ProviderConfig, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_provider_kind_wire_format() {
+        // 序列化为前端期望的 "openai"（而非 rename_all 生成的 "open_ai"）
+        assert_eq!(
+            serde_json::to_string(&ProviderKind::OpenAi).unwrap(),
+            "\"openai\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderKind::Anthropic).unwrap(),
+            "\"anthropic\""
+        );
+        // 反序列化同时接受新值与存量 providers.json 里的旧值
+        assert_eq!(
+            serde_json::from_str::<ProviderKind>("\"openai\"").unwrap(),
+            ProviderKind::OpenAi
+        );
+        assert_eq!(
+            serde_json::from_str::<ProviderKind>("\"open_ai\"").unwrap(),
+            ProviderKind::OpenAi
+        );
+        assert_eq!(
+            serde_json::from_str::<ProviderKind>("\"anthropic\"").unwrap(),
+            ProviderKind::Anthropic
+        );
+    }
 
     #[test]
     fn test_anthropic_version_segment_detection() {

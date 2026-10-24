@@ -164,8 +164,10 @@ pub(crate) fn update_skill(path: String) -> Result<String, String> {
     }
 
     // 执行 npx skills add <skill-name> -g -y 来更新
-    let output = Command::new("npx")
-        .args(["skills", "add", &skill_name, "-g", "-y"])
+    let mut cmd = Command::new("npx");
+    cmd.args(["skills", "add", &skill_name, "-g", "-y"]);
+    crate::proc_util::hide_window(&mut cmd);
+    let output = cmd
         .output()
         .map_err(|e| format!("执行 npx skills add 失败: {}", e))?;
 
@@ -190,8 +192,10 @@ pub(crate) fn update_all_skills() -> Result<Vec<(String, Result<String, String>)
     }
 
     // 执行 npx skills update -g 命令
-    let output = Command::new("npx")
-        .args(["skills", "update", "-g"])
+    let mut cmd = Command::new("npx");
+    cmd.args(["skills", "update", "-g"]);
+    crate::proc_util::hide_window(&mut cmd);
+    let output = cmd
         .output()
         .map_err(|e| format!("执行 npx skills update 失败: {}", e))?;
 

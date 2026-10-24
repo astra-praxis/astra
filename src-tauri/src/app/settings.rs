@@ -303,11 +303,12 @@ pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(),
     let full_path = std::env::join_paths(&dirs).unwrap_or_default();
 
     let editor = resolve_editor_command(&editor_command, &dirs);
-    if let Err(e) = Command::new(editor)
-        .arg(&path)
-        .env("PATH", &full_path)
-        .spawn()
-    {
+    let mut spawn_cmd = Command::new(editor);
+    spawn_cmd.arg(&path).env("PATH", &full_path);
+    // .cmd 包装入口（code.cmd）会先弹 cmd 黑框，统一抑制；
+    // 编辑器自身 GUI 窗口不受影响
+    crate::proc_util::hide_window(&mut spawn_cmd);
+    if let Err(e) = spawn_cmd.spawn() {
         app_log!(
             error,
             "settings",

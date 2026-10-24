@@ -52,10 +52,11 @@ pub fn open_login_url(url: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &url])
-            .spawn()
-            .map_err(|e| format!("打开浏览器失败: {}", e))?;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/c", "start", "", &url]);
+        // 中间层 cmd 黑框抑制；浏览器自身窗口不受影响
+        crate::proc_util::hide_window(&mut cmd);
+        cmd.spawn().map_err(|e| format!("打开浏览器失败: {}", e))?;
     }
     Ok(())
 }

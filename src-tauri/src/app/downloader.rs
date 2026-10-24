@@ -421,10 +421,11 @@ pub fn open_download_file(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", &path])
-            .spawn()
-            .map_err(|e| format!("打开文件失败: {}", e))?;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", &path]);
+        // 中间层 cmd 黑框抑制
+        crate::proc_util::hide_window(&mut cmd);
+        cmd.spawn().map_err(|e| format!("打开文件失败: {}", e))?;
     }
 
     #[cfg(target_os = "linux")]

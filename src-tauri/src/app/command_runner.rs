@@ -75,6 +75,7 @@ pub async fn run_command(
     cmd.env("PATH", full_command_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    crate::proc_util::hide_window(&mut cmd);
 
     if let Some(ref dir) = cwd {
         cmd.current_dir(dir);

@@ -122,6 +122,7 @@ pub(crate) fn start_llama_server(
         .env("PATH", &full_path)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    crate::proc_util::hide_window(&mut cmd);
 
     let child = cmd
         .spawn()

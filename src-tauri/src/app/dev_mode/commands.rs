@@ -153,6 +153,7 @@ pub async fn run_card_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     setup_process_group(&mut cmd);
+    crate::proc_util::hide_window(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("启动命令失败: {}", e))?;
 
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
@@ -282,6 +283,7 @@ pub fn start_dev_server(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     setup_process_group(&mut cmd);
+    crate::proc_util::hide_window(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {

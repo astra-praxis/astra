@@ -6,6 +6,7 @@ mod agent_generation;
 mod app;
 mod extensions;
 mod memory;
+mod proc_util;
 mod providers;
 mod skills;
 

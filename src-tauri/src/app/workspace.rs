@@ -256,16 +256,16 @@ pub(crate) fn scan_sub_projects(project_dir: &Path) -> Vec<SubProject> {
 // ===== 获取 Git 远程地址 =====
 
 pub(crate) fn get_git_remote_url(repo_path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &repo_path.to_string_lossy(),
-            "remote",
-            "get-url",
-            "origin",
-        ])
-        .output()
-        .ok()?;
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "-C",
+        &repo_path.to_string_lossy(),
+        "remote",
+        "get-url",
+        "origin",
+    ]);
+    crate::proc_util::hide_window(&mut cmd);
+    let output = cmd.output().ok()?;
     if output.status.success() {
         let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !url.is_empty() {

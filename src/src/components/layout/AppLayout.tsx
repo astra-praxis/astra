@@ -90,9 +90,16 @@ export default function AppLayout() {
   const isAgent = location.pathname.startsWith('/agent');
   const pageTitlebarId = isAgent ? 'agent' : null;
 
+  // macOS 用 Overlay 标题栏（原生栏透明融入、红绿灯叠在自定义标题栏上，
+  // 自定义栏必须保留：拖拽区 + 红绿灯留白）；Windows/Linux 下 titleBarStyle
+  // 不生效、原生标题栏照常显示，自定义栏只会在其上方多出一条重复 header
+  // → 隐藏自定义栏，拖拽与窗口控制全部交给原生栏
+  const isMac = navigator.userAgent.includes('Macintosh');
+
   return (
     <div className={`app-layout${sidebarCollapsed ? ' collapsed' : ''}`}>
       {/* 顶部标题栏（可拖拽）：左 chat 工具 ｜ 中 标题 ｜ 右 状态+快捷入口 */}
+      {isMac && (
       <header className="title-bar" onMouseDown={onTitlebarMouseDown}>
         {pageTitlebarId ? (
           // 左侧 padding 留出 macOS 红绿灯区域
@@ -137,6 +144,7 @@ export default function AppLayout() {
           </div>
         </div>
       </header>
+      )}
 
       <div className="app-body">
         {/* 移动端遮罩 */}

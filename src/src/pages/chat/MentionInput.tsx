@@ -23,8 +23,10 @@ import {
 } from 'react';
 import { MENTION_DETECT_RE } from '@/hooks/useMention';
 import { SLASH_DETECT_RE, type UserSkillLite } from '@/hooks/useSlash';
+import { CAT_DETECT_RE, filterCatCommands, type CatCommand } from '@/hooks/useCatCommand';
 import FileMentionPopup from './FileMentionPopup';
 import SlashPopup from './SlashPopup';
+import CatCommandPopup from './CatCommandPopup';
 import './MentionInput.scss';
 
 export interface MentionInputHandle {
@@ -328,9 +330,11 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
 
   const [mentionPop, setMentionPop] = useState({ active: false, query: '', sel: 0 });
   const [slashPop, setSlashPop] = useState({ active: false, query: '', sel: 0 });
+  const [catPop, setCatPop] = useState({ active: false, query: '', sel: 0 });
   const closePops = useCallback(() => {
     setMentionPop((p) => (p.active ? { ...p, active: false } : p));
     setSlashPop((p) => (p.active ? { ...p, active: false } : p));
+    setCatPop((p) => (p.active ? { ...p, active: false } : p));
   }, []);
 
   // 弹层候选列表（与原 useMention/useSlash 过滤规则一致）
@@ -349,18 +353,28 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
         : skills.slice(0, 10),
     [skills, sq],
   );
+  // & 猫猫命令候选（& 空串时展示全部动作）
+  const cq = catPop.query;
+  const catHits = useMemo(() => filterCatCommands(cq), [cq]);
 
-  /** @/ 检测：光标前缀命中哪种 token 就开哪个弹层（两者符号不同，天然互斥） */
+  /** @/&/ 检测：光标前缀命中哪种 token 就开哪个弹层（三者符号不同，互斥，每分支显式关另两个） */
   const runDetect = useCallback((value: string, offset: number) => {
     const before = value.slice(0, offset);
     const mm = before.match(MENTION_DETECT_RE);
     const sm = before.match(SLASH_DETECT_RE);
+    const cm = before.match(CAT_DETECT_RE);
     if (mm) {
       setSlashPop((p) => (p.active ? { ...p, active: false } : p));
+      setCatPop((p) => (p.active ? { ...p, active: false } : p));
       setMentionPop({ active: true, query: mm[1], sel: 0 });
     } else if (sm) {
       setMentionPop((p) => (p.active ? { ...p, active: false } : p));
+      setCatPop((p) => (p.active ? { ...p, active: false } : p));
       setSlashPop({ active: true, query: sm[1], sel: 0 });
+    } else if (cm) {
+      setMentionPop((p) => (p.active ? { ...p, active: false } : p));
+      setSlashPop((p) => (p.active ? { ...p, active: false } : p));
+      setCatPop({ active: true, query: cm[1], sel: 0 });
     } else {
       closePops();
     }
@@ -380,6 +394,26 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
         : offset;
       const next = val.slice(0, startIdx) + token + val.slice(offset);
       pendingCaretRef.current = startIdx + token.length;
+      closePops();
+      onChangeRef.current(next);
+    },
+    [closePops],
+  );
+
+  /** & 命令 pick：把光标前的 &query 替换为 &命令id 纯文本并补空格（非 chip，发送时由页面解析拦截） */
+  const pickCatCommand = useCallback(
+    (command: CatCommand) => {
+      const el = editorRef.current;
+      if (!el) return;
+      const val = serializeEl(el);
+      const offset = caretRef.current;
+      const before = val.slice(0, offset);
+      const m = before.match(CAT_DETECT_RE);
+      // 匹配串可能带前导空白（(?:^|\s)&），定位 & 的真实起点
+      const ampIdx = m ? offset - m[0].length + m[0].indexOf('&') : offset;
+      const token = `&${command.id} `;
+      const next = val.slice(0, ampIdx) + token + val.slice(offset);
+      pendingCaretRef.current = ampIdx + token.length;
       closePops();
       onChangeRef.current(next);
     },
@@ -449,14 +483,17 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
       caretRef.current = computeCaret(el);
 
       // 1) 弹层导航（↑↓ / Enter·Tab 选中 / Esc 关闭；列表为空时吞掉避免误发送）
-      if (mentionPop.active || slashPop.active) {
-        const isMention = mentionPop.active;
-        const list = isMention ? fileHits : skillHits;
-        const sel = isMention ? mentionPop.sel : slashPop.sel;
+      if (mentionPop.active || slashPop.active || catPop.active) {
+        const isCat = catPop.active;
+        const isMention = !isCat && mentionPop.active;
+        const list = isCat ? catHits : isMention ? fileHits : skillHits;
+        const sel = isCat ? catPop.sel : isMention ? mentionPop.sel : slashPop.sel;
         const setSel = (f: (i: number) => number) =>
-          isMention
-            ? setMentionPop((p) => ({ ...p, sel: f(p.sel) }))
-            : setSlashPop((p) => ({ ...p, sel: f(p.sel) }));
+          isCat
+            ? setCatPop((p) => ({ ...p, sel: f(p.sel) }))
+            : isMention
+              ? setMentionPop((p) => ({ ...p, sel: f(p.sel) }))
+              : setSlashPop((p) => ({ ...p, sel: f(p.sel) }));
         if (list.length === 0 && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(e.key)) {
           e.preventDefault();
           return;
@@ -475,7 +512,11 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
           e.preventDefault();
           if (list.length > 0 && sel >= 0) {
             const item = list[sel];
-            pickToken(isMention ? `@${item} ` : `/${(item as UserSkillLite).name} `);
+            if (isCat) {
+              pickCatCommand(item as CatCommand);
+            } else {
+              pickToken(isMention ? `@${item} ` : `/${(item as UserSkillLite).name} `);
+            }
           }
           return;
         }
@@ -597,7 +638,7 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
       // 4) 页面逻辑（发送 / 排队 / 打断 / 队列拉回）
       onKeyDown(e);
     },
-    [closePops, fileHits, mentionPop, onKeyDown, pickToken, skillHits, slashPop],
+    [closePops, fileHits, mentionPop, onKeyDown, pickCatCommand, pickToken, skillHits, slashPop, catHits, catPop],
   );
 
   // chip × 点击删除（事件委托：chip 由 DOM 直建，无法逐个挂 React 事件）
@@ -687,6 +728,14 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
             skills={skillHits}
             selectedIndex={slashPop.sel}
             onSelect={(s) => pickToken(`/${s.name} `)}
+          />
+        )}
+        {catPop.active && !mentionPop.active && !slashPop.active && (
+          <CatCommandPopup
+            query={catPop.query}
+            commands={catHits}
+            selectedIndex={catPop.sel}
+            onSelect={(c) => pickCatCommand(c)}
           />
         )}
       </div>

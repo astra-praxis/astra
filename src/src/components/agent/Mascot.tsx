@@ -29,11 +29,13 @@
  *
  * 交互：
  *   单击 = 摸头（弹跳 + 爱心，纯动画）
- *   双击 = 跳起来 + 预填一句问候语并聚焦输入框（唤起 agent 对话）
- *   悬停 = 开心 + 出现「说句话」按钮，点击同双击（预填问候 + 聚焦）
+ *   双击 = 跳起来 + 气泡提示「输入 & 跟我互动」（不再预填输入框文本）
+ *   悬停 = 开心 + 「& 跟我玩」按钮，点击只聚焦输入框
+ *   外部互动（输入框 & 命令）经 useMascotStore.interact() 短暂接管姿态 + 气泡
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAgentStore } from '@/stores/agent';
+import { useAgentStore, type Entry } from '@/stores/agent';
+import { useMascotStore } from '@/stores/mascot';
 import './Mascot.scss';
 
 type Pose =
@@ -45,6 +47,8 @@ type Pose =
   | 'play' | 'crash' | 'test'
   | 'walk' | 'run' | 'stretch' | 'lie-down' | 'stand' | 'tail'
   | 'crouch' | 'lie-flat' | 'nod' | 'fade' | 'vanish';
+
+export type { Pose };
 
 /** 全部 42 张切图，按语义映射到 Pose */
 const IMG: Record<Pose, string> = {
@@ -142,23 +146,25 @@ const TIP: Record<Pose, string> = {
  * 每个 basePose → 一组语义相近的图，按 tick 轮换。
  */
 const VARIATIONS: Partial<Record<Pose, Pose[]>> = {
-  typing: ['typing', 'laptop', 'focused'],
+  typing: ['typing', 'laptop', 'focused', 'walk'],
   laptop: ['laptop', 'typing', 'focused'],
-  search: ['search', 'thinking', 'reading'],
-  reading: ['reading', 'thinking', 'curious'],
-  tools: ['tools', 'idea', 'focused'],
-  focused: ['focused', 'laptop', 'thinking'],
-  thinking: ['thinking', 'focused', 'idea'],
+  search: ['search', 'thinking', 'reading', 'walk'],
+  reading: ['reading', 'thinking', 'curious', 'nod'],
+  tools: ['tools', 'idea', 'focused', 'run'],
+  focused: ['focused', 'laptop', 'thinking', 'stretch'],
+  thinking: ['thinking', 'focused', 'idea', 'walk'],
   question: ['question', 'beckon', 'tilt'],
-  waiting: ['waiting', 'loading', 'curious'],
-  loading: ['loading', 'waiting', 'test'],
+  waiting: ['waiting', 'loading', 'crouch', 'lie-flat'],
+  loading: ['loading', 'waiting', 'test', 'run'],
   backpack: ['backpack', 'tools', 'done'],
-  done: ['done', 'happy', 'wink'],
-  happy: ['happy', 'wink', 'curious'],
-  notice: ['notice', 'wave', 'happy'],
+  done: ['done', 'happy', 'wink', 'tail'],
+  happy: ['happy', 'wink', 'tail', 'stand'],
+  notice: ['notice', 'wave', 'nod', 'happy'],
   test: ['test', 'loading', 'focused'],
-  error: ['error', 'crash', 'wronged'],
-  wronged: ['wronged', 'shake', 'error'],
+  error: ['error', 'crash', 'wronged', 'fade'],
+  wronged: ['wronged', 'shake', 'fade', 'vanish'],
+  sleeping: ['sleeping', 'lie-down'],
+  curious: ['curious', 'stand', 'tail', 'nod'],
 };
 
 /** 工具名 → 形态（精确匹配优先，keyword 兜底覆盖 MCP 动态工具） */
@@ -227,32 +233,50 @@ function analyzeText(text: string): Pose {
   return 'happy';
 }
 
-/** 点击「说句话」时预填的问候语（唤起对话） */
-const GREETINGS = [
-  '喵，想聊点什么？',
-  '嘿，需要我帮忙吗？',
-  '今天想让我做点什么？',
-  '我在呢，有事尽管说～',
-];
-
 const IDLE_SLEEP_MS = 90_000;
 const HAPPY_MS = 4000;
 const FLASH_MS = 900;
 const VARIATION_MS = 2500;
+const INTERACT_HOLD_MS = 3000;
+/** 输入感知：持续输入 notice→typing 的升级时间 / 停止输入后退出关注态的时间 */
+const TYPING_TYPE_MS = 2500;
+const TYPING_STOP_MS = 4000;
 
-interface Props {
-  /** 唤起对话：预填问候语到输入框并聚焦（由 AgentPage 注入 setInput + focusEnd） */
-  onTalk?: (greeting: string) => void;
+/** 夜间时段（23 点～次日 6 点）：部分气泡台词切换为夜间版 */
+function isNight(): boolean {
+  const h = new Date().getHours();
+  return h >= 23 || h < 6;
 }
 
-export function Mascot({ onTalk }: Props) {
+interface Props {
+  /** 只聚焦输入框（不预填任何文本）；互动内容统一由用户以 & 前缀输入 */
+  onFocusInput?: () => void;
+}
+
+export function Mascot({ onFocusInput }: Props) {
   const running = useAgentStore((s) => s.running || s.sessionBusy);
   const error = useAgentStore((s) => s.error);
   const entries = useAgentStore((s) => s.entries);
+  const input = useAgentStore((s) => s.input);
+  const queueRaw = useAgentStore((s) => s.queue);
+  const sessionId = useAgentStore((s) => s.sessionId);
+  /** 当前会话排队条数（排队提示气泡用） */
+  const queuedCount = useMemo(
+    () => queueRaw.filter((q) => q.sessionId === sessionId).length,
+    [queueRaw, sessionId],
+  );
 
   const [hover, setHover] = useState(false);
   const [justFinished, setJustFinished] = useState(false);
   const [idle, setIdle] = useState(false);
+  // 用户输入感知：off → notice（抬头看你）→ typing（跟着敲键盘）；运行中不打扰
+  const [typingPhase, setTypingPhase] = useState<'off' | 'notice' | 'typing'>('off');
+  // 当前待回答的提问卡 id（无则 null）
+  const [pendingQuestionId, setPendingQuestionId] = useState<string | null>(null);
+  // 隐藏彩蛋：vanish 演出后藏起来，可从占位按钮叫回
+  const [hidden, setHidden] = useState(false);
+  const [vanishing, setVanishing] = useState(false);
+  const vanishTimerRef = useRef<number | null>(null);
   // 一次性动画（单击摸头 / 双击跳跃）；jump 同时把形态切成跳跃姿态
   const [fx, setFx] = useState<'pet' | 'jump' | null>(null);
   // 双击惊吓闪态：短暂切成惊讶表情
@@ -261,10 +285,21 @@ export function Mascot({ onTalk }: Props) {
   const [bubble, setBubble] = useState<string | null>(null);
   // 活跃期相似图轮换 tick
   const [tick, setTick] = useState(0);
+  // 外部互动（& 猫猫命令等）：短暂接管姿态 + 一次性动画 + 气泡
+  const event = useMascotStore((s) => s.event);
+  const [interactPose, setInteractPose] = useState<Pose | null>(null);
+  const interactTimerRef = useRef<number | null>(null);
 
   const prevRunningRef = useRef(running);
   const lastActiveRef = useRef(Date.now());
   const bubbleTimerRef = useRef<number | null>(null);
+  // 事件处理读最新 running，避免把它放进 deps 重复处理同一事件
+  const runningRef = useRef(running);
+  runningRef.current = running;
+  // 连点计数（连点生气彩蛋）
+  const pokeTimesRef = useRef<number[]>([]);
+  // 工具失败 → 后续工具重跑的检测标记
+  const sawFailedToolRef = useRef(false);
 
   // 完成 → 刚完成态：running 由 true 变 false 且无错误时，按内容展示 4 秒
   useEffect(() => {
@@ -287,6 +322,127 @@ export function Mascot({ onTalk }: Props) {
     return () => window.clearInterval(timer);
   }, [running]);
 
+  // 输入感知：Agent 空闲且有输入时先关注后陪打；停笔或清空后回到常规推导。
+  // 每次按键重置 toOff（停笔 4s 才退出），但升级计时器独立于按键（见下个 effect）
+  useEffect(() => {
+    if (running || input.trim().length === 0) {
+      setTypingPhase('off');
+      return;
+    }
+    lastActiveRef.current = Date.now();
+    setTypingPhase((p) => (p === 'off' ? 'notice' : p));
+    const toOff = window.setTimeout(() => setTypingPhase('off'), TYPING_STOP_MS);
+    return () => window.clearTimeout(toOff);
+  }, [input, running]);
+
+  // 持续输入 TYPING_TYPE_MS 后升级为「一起打字」（计时器不因后续按键重置）
+  useEffect(() => {
+    if (typingPhase !== 'notice') return;
+    const t = window.setTimeout(() => setTypingPhase('typing'), TYPING_TYPE_MS);
+    return () => window.clearTimeout(t);
+  }, [typingPhase]);
+
+  // 进入关注态时轻声搭一句（冷却防打扰；运行中不会进入该态；夜间换台词）
+  useEffect(() => {
+    if (typingPhase !== 'notice') return;
+    useMascotStore.getState().say(isNight() ? '喵…这么晚还在想什么呢，早点睡哦' : '喵？在想什么呢～', {
+      priority: 'ambient',
+      key: 'typing-notice',
+      cooldownMs: 30_000,
+    });
+  }, [typingPhase]);
+
+  // 排队提示：新消息入队时播报一次（Agent 忙时只出气泡，空闲时切 waiting 姿态）
+  const prevQueueCountRef = useRef(queuedCount);
+  useEffect(() => {
+    const prev = prevQueueCountRef.current;
+    prevQueueCountRef.current = queuedCount;
+    if (queuedCount <= prev) return;
+    useMascotStore.getState().interact(runningRef.current ? null : 'waiting', {
+      priority: 'work',
+      key: 'queue-notice',
+      cooldownMs: 15_000,
+      bubble: `有 ${queuedCount} 条消息在排队喵`,
+      holdMs: 3500,
+    });
+  }, [queuedCount]);
+
+  // 工具失败后又有工具开跑：播报「再试一次」（工作级，只出气泡不抢姿态）
+  useEffect(() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e.kind !== 'tool') continue;
+      if (e.status === 'running') {
+        if (sawFailedToolRef.current) {
+          sawFailedToolRef.current = false;
+          useMascotStore.getState().say('喵！再试一次！', { priority: 'work', key: 'tool-retry', cooldownMs: 8000 });
+        }
+      } else if (e.status === 'failed') {
+        sawFailedToolRef.current = true;
+      } else {
+        sawFailedToolRef.current = false;
+      }
+      return; // 只看最新的工具卡
+    }
+  }, [entries]);
+
+  // ask_user 提问卡：追踪当前待回答的提问 id
+  useEffect(() => {
+    const pending = entries.find(
+      (e): e is Extract<Entry, { kind: 'question' }> =>
+        e.kind === 'question' && e.answer === undefined && !e.declined,
+    );
+    setPendingQuestionId(pending?.questionId ?? null);
+  }, [entries]);
+
+  // 提问出现：猫猫招手把话筒递给用户；15s 未答轻催一次
+  useEffect(() => {
+    if (!pendingQuestionId) return;
+    useMascotStore.getState().interact('beckon', {
+      priority: 'work',
+      key: 'ask-user',
+      bubble: '轮到你啦喵！',
+      holdMs: 3000,
+    });
+    const t = window.setTimeout(() => {
+      const still = useAgentStore
+        .getState()
+        .entries.some(
+          (e) =>
+            e.kind === 'question' &&
+            e.questionId === pendingQuestionId &&
+            e.answer === undefined &&
+            !e.declined,
+        );
+      if (still) {
+        useMascotStore.getState().interact('beckon', {
+          priority: 'work',
+          key: 'ask-user-nudge',
+          bubble: '喵…还在等你的回答哦',
+          holdMs: 2500,
+        });
+      }
+    }, 15_000);
+    return () => window.clearTimeout(t);
+  }, [pendingQuestionId]);
+
+  // 目光跟随：切回窗口时抬头欢迎一次（冷却防打扰）；切走保持当前姿势，不反复呼唤
+  useEffect(() => {
+    const onFocus = () => {
+      lastActiveRef.current = Date.now();
+      if (runningRef.current) return; // 工作演出不打扰
+      useMascotStore.getState().interact('notice', {
+        priority: 'ambient',
+        key: 'window-focus',
+        cooldownMs: 90_000,
+        bubble: isNight() ? '这么晚还在忙喵…早点睡哦' : '喵呜～回来啦',
+        holdMs: 2500,
+      });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   // 活跃期（运行中 / 刚完成）相似图轮换：每 VARIATION_MS 前进一格
   useEffect(() => {
     if (!running && !justFinished) return;
@@ -304,8 +460,35 @@ export function Mascot({ onTalk }: Props) {
     };
   }, [bubble]);
 
+  // 外部互动事件：按优先级演出。ambient（氛围彩蛋）在 Agent 忙时不接管姿态、
+  // 只出气泡；其余优先级接管姿态 + fx + 气泡，holdMs 后恢复常规推导（读真实状态）
+  const lastEventSeqRef = useRef(0);
+  useEffect(() => {
+    if (!event || event.seq === lastEventSeqRef.current) return;
+    lastEventSeqRef.current = event.seq;
+    lastActiveRef.current = Date.now();
+    if (event.pose && !(event.priority === 'ambient' && runningRef.current)) {
+      if (interactTimerRef.current !== null) window.clearTimeout(interactTimerRef.current);
+      setInteractPose(event.pose as Pose);
+      if (event.fx) setFx(event.fx);
+      interactTimerRef.current = window.setTimeout(() => {
+        setInteractPose(null);
+        setFx(null);
+      }, event.holdMs ?? INTERACT_HOLD_MS);
+    }
+    if (event.bubble) {
+      const text = event.bubble;
+      setBubble(null); // 重触发定时器
+      requestAnimationFrame(() => setBubble(text));
+    }
+    return () => {
+      if (interactTimerRef.current !== null) window.clearTimeout(interactTimerRef.current);
+    };
+  }, [event]);
+
   // ===== 基础形态推导 =====
   const base = useMemo<Pose>(() => {
+    if (interactPose) return interactPose;
     if (error) return 'error';
     if (fx === 'jump') return 'jump';
     if (flash) return 'surprised';
@@ -323,6 +506,8 @@ export function Mascot({ onTalk }: Props) {
       }
       return 'focused';
     }
+    // 用户输入感知：优先级在 hover / idle 之上，也盖过刚完成的庆祝窗口
+    if (typingPhase !== 'off') return typingPhase === 'typing' ? 'typing' : 'notice';
     if (justFinished) {
       // 最后一条助手/终态文本 → 关键词形态
       for (let i = entries.length - 1; i >= 0; i--) {
@@ -335,7 +520,7 @@ export function Mascot({ onTalk }: Props) {
     if (hover) return 'happy';
     if (idle) return 'sleeping';
     return 'curious';
-  }, [entries, running, error, justFinished, hover, idle, fx, flash]);
+  }, [entries, running, error, justFinished, hover, idle, fx, flash, interactPose, typingPhase]);
 
   // ===== 活跃期相似图轮换 =====
   const active = running || justFinished;
@@ -354,16 +539,30 @@ export function Mascot({ onTalk }: Props) {
     requestAnimationFrame(() => setBubble(text));
   };
 
-  /** 唤起对话：预填随机问候 + 聚焦输入框 + 气泡提示 */
+  /** 提示互动方式：不预填文本，用户自己在输入框输入 & 命令 */
   const talk = () => {
-    if (!onTalk) return;
-    const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
-    onTalk(greeting);
-    showBubble('想聊就按回车发送喵～');
+    showBubble('喵～在输入框输入 & 跟我互动');
+    onFocusInput?.();
   };
 
   const handleClick = () => {
     lastActiveRef.current = Date.now();
+    // 连点彩蛋：2.5s 内戳 4 次猫猫会生气（冷却防止一直气呼呼）
+    const now = Date.now();
+    const pokes = pokeTimesRef.current.filter((t) => now - t < 2500);
+    pokes.push(now);
+    pokeTimesRef.current = pokes;
+    if (pokes.length >= 4) {
+      pokeTimesRef.current = [];
+      useMascotStore.getState().interact('angry', {
+        priority: 'interact',
+        key: 'poke-angry',
+        cooldownMs: 8000,
+        holdMs: 2000,
+        bubble: '别戳啦！！喵！',
+      });
+      return;
+    }
     setFx('pet'); // 单击 = 摸头动画（纯展示）
   };
 
@@ -386,9 +585,58 @@ export function Mascot({ onTalk }: Props) {
     }
   };
 
+  /** 隐藏彩蛋：vanish 演出后真正藏起，占位按钮可叫回 */
+  const handleHide = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (vanishTimerRef.current !== null) window.clearTimeout(vanishTimerRef.current);
+    setVanishing(true);
+    useMascotStore.getState().interact('vanish', {
+      priority: 'interact',
+      bubble: '我先去休息啦，想我了就点我的位置喵',
+      holdMs: 900,
+    });
+    vanishTimerRef.current = window.setTimeout(() => {
+      setVanishing(false);
+      setHidden(true);
+    }, 900);
+  };
+
+  const handleRestore = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setHidden(false);
+    useMascotStore.getState().interact('wave', {
+      priority: 'interact',
+      bubble: '喵～我回来啦',
+      holdMs: 2000,
+    });
+  };
+
+  // 卸载时清掉隐藏演出定时器
+  useEffect(
+    () => () => {
+      if (vanishTimerRef.current !== null) window.clearTimeout(vanishTimerRef.current);
+    },
+    [],
+  );
+
+  // 隐藏态：只留一个「叫回来」的小占位
+  if (hidden) {
+    return (
+      <button
+        type="button"
+        className="mascot mascot--restore"
+        onClick={handleRestore}
+        title="把猫猫叫回来"
+        aria-label="把猫猫叫回来"
+      >
+        🐱
+      </button>
+    );
+  }
+
   return (
     <div
-      className={`mascot is-${pose}${fx ? ` is-${fx}` : ''}${bubble ? ' has-bubble' : ''}`}
+      className={`mascot is-${pose}${fx ? ` is-${fx}` : ''}${bubble ? ' has-bubble' : ''}${vanishing ? ' mascot--vanishing' : ''}`}
       role="button"
       tabIndex={0}
       onClick={handleClick}
@@ -421,9 +669,21 @@ export function Mascot({ onTalk }: Props) {
             e.stopPropagation();
             talk();
           }}
-          aria-label="说句话"
+          aria-label="用 & 跟猫猫互动"
         >
-          💬 说句话
+          & 跟我玩
+        </button>
+      )}
+      {/* 悬停出现的「去休息」按钮：vanish 演出后藏起，可从占位叫回 */}
+      {hover && !vanishing && (
+        <button
+          type="button"
+          className="mascot__hide"
+          onClick={handleHide}
+          aria-label="让猫猫去休息"
+          title="让猫猫去休息"
+        >
+          ×
         </button>
       )}
     </div>

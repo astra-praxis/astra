@@ -27,6 +27,8 @@ const STATUS_ITEM = Symbol('statusline');
 type ListItem = Entry | typeof STATUS_ITEM;
 import ModelPicker from '@/components/agent/ModelPicker';
 import { Mascot } from '@/components/agent/Mascot';
+import { useMascotStore } from '@/stores/mascot';
+import { parseCatCommandInput } from '@/hooks/useCatCommand';
 
 import MentionInput, { type MentionInputHandle } from '../chat/MentionInput';
 import SettingsSheet from '../chat/SettingsSheet';
@@ -102,6 +104,7 @@ export default function AgentPage() {
   const imageRecognition = useAgentStore((s) => s.imageRecognition);
 
   const pushUser = useAgentStore((s) => s.pushUser);
+  const pushCat = useAgentStore((s) => s.pushCat);
   const pushTerminal = useAgentStore((s) => s.pushTerminal);
   const setRunState = useAgentStore((s) => s.setRunState);
   const queue = useAgentStore((s) => s.queue);
@@ -411,6 +414,10 @@ export default function AgentPage() {
       onAdmitted?.();
       pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
       setRunState(true, 'analyzing');
+      // 发送冲刺：猫猫先把消息「送出去」（工作级，冷却防连发），随后进入工作姿态
+      useMascotStore
+        .getState()
+        .interact('run', { priority: 'work', key: 'send-sprint', cooldownMs: 5000, holdMs: 1200 });
 
       try {
         await invoke('agent_start_run', {
@@ -442,15 +449,33 @@ export default function AgentPage() {
     [projectPath, selectedProvider, systemPrompt, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, setFollow, editing, rewindToUserTurn],
   );
 
+  /** `&猫猫命令` 拦截：本地脚本回应 + 触发吉祥物动画，不经 agent 后端。
+   *  返回 true 表示已消费（发送流程终止）；未命中已知命令的 & 文本照常发给 agent */
+  const fireCatInteraction = useCallback(
+    (raw: string): boolean => {
+      const catCmd = parseCatCommandInput(raw);
+      if (!catCmd) return false;
+      setInput('');
+      setError('');
+      useMascotStore.getState().interact(catCmd.command.pose, { fx: catCmd.command.fx, bubble: catCmd.command.reply });
+      pushUser(raw);
+      pushCat(catCmd.command.reply);
+      return true;
+    },
+    [pushUser, pushCat, setInput, setError],
+  );
+
   const handleSend = useCallback(async () => {
     const raw = input.trim();
-    if (!raw || running) return;
+    if (!raw) return;
+    if (fireCatInteraction(raw)) return;
+    if (running) return;
     // 有文本时照常走 /技能名 解析
     const parsed = parseSendInput(raw);
     if (!parsed) return;
     const spilled = takeSpill(parsed.text);
     await doSend(raw + spilled.displaySuffix, parsed.skill, spilled.text);
-  }, [input, running, parseSendInput, doSend, takeSpill]);
+  }, [input, running, fireCatInteraction, parseSendInput, doSend, takeSpill]);
 
   /** 失败卡片「重试 / 编辑后重发」：回退到出错前（含工作区还原）后重发或回填。
    *  找不到快照时降级为仅回退对话（非 git 项目 / 本功能上线前的会话） */
@@ -523,19 +548,21 @@ export default function AgentPage() {
   const handleQueueSend = useCallback(() => {
     const raw = input.trim();
     if (!raw) return;
+    if (fireCatInteraction(raw)) return; // 猫猫互动运行中也允许（纯前端，不打扰 Run）
     const parsed = parseSendInput(raw);
     if (!parsed) return;
     setEditing(null); // 排队新消息 = 放弃挂起的编辑意图（不回退）
     const spilled = takeSpill(parsed.text);
     enqueueMessage(raw + spilled.displaySuffix, spilled.text, parsed.skill);
     setInput('');
-  }, [input, parseSendInput, enqueueMessage, setInput, takeSpill]);
+  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, takeSpill]);
 
   /** 打断并优先发送：当前 Run 取消 + 本条插到会话队首，settle 后立即续发。
    *  别的会话占用后端时不能打断（cancel 是全局单活动 Run），退化为普通排队 */
   const handleInterruptSend = useCallback(async () => {
     const raw = input.trim();
     if (!raw) return;
+    if (fireCatInteraction(raw)) return; // 猫猫互动不需要打断 Run
     const parsed = parseSendInput(raw);
     if (!parsed) return;
     setEditing(null); // 插队新消息 = 放弃挂起的编辑意图（不回退）
@@ -551,7 +578,7 @@ export default function AgentPage() {
         setError(`停止失败：${String(error)}`);
       }
     }
-  }, [input, parseSendInput, enqueueMessage, setInput, setError, sessionId, takeSpill]);
+  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, setError, sessionId, takeSpill]);
 
   /** 编辑排队消息（Zed move_queued_message_to_main_editor 语义）：
    *  从队列移除，原文回填主输入框并聚焦到末尾，改完再自行发送 */
@@ -848,12 +875,7 @@ export default function AgentPage() {
 
           {/* 输入区（@ 提及 / / 技能弹层内聚在 MentionInput 内，浮层绝对定位于输入框上方） */}
           <div className="agent-dock-wrap">
-            <Mascot
-              onTalk={(greeting) => {
-                setInput(greeting);
-                requestAnimationFrame(() => composerRef.current?.focusEnd());
-              }}
-            />
+            <Mascot onFocusInput={() => composerRef.current?.focusEnd()} />
             <div className="agent-dock">
               {/* 错误提示：与编辑/排队/粘贴 chip 同层，展示在对话框最上方 */}
               {error && (

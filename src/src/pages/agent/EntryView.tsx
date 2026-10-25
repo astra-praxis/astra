@@ -28,6 +28,7 @@ import { StreamBlock } from '@/components/agent/StreamBlock';
 import { ArtifactList } from '@/components/agent/ArtifactList';
 import FilePathText from '@/components/agent/FilePathText';
 import { useAgentStore, userImageUrl, type Entry } from '@/stores/agent';
+import { useMascotStore } from '@/stores/mascot';
 import type { UserSkillLite } from '@/hooks/useSlash';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -118,6 +119,7 @@ function MessageCopyButton({ text, className = '' }: { text: string; className?:
           await navigator.clipboard.writeText(text);
           setCopied(true);
           setTimeout(() => setCopied(false), 1600);
+          useMascotStore.getState().say('收好啦！', { key: 'copy-result', cooldownMs: 5000 });
         } catch {
           // 剪贴板不可用时忽略
         }
@@ -142,6 +144,7 @@ function AssistantCopyFooter({ text }: { text: string }) {
             await navigator.clipboard.writeText(text);
             setCopied(true);
             setTimeout(() => setCopied(false), 1600);
+            useMascotStore.getState().say('收好啦！', { key: 'copy-result', cooldownMs: 5000 });
           } catch {
             // 剪贴板不可用时忽略
           }
@@ -296,6 +299,17 @@ export const EntryView = memo(function EntryView({
       );
     case 'thinking':
       return <StreamBlock text={entry.text} done={entry.done} title="思考过程" icon={<Brain size={13} strokeWidth={1.8} />} />;
+    case 'cat':
+      // 猫猫互动消息：以「猫猫」前缀展示，与会话里的 agent 消息明确区分
+      return (
+        <div className="aentry aentry--cat" data-idx={index}>
+          <div className="aentry__cat-head">
+            <span className="aentry__cat-avatar" aria-hidden>🐱</span>
+            <span className="aentry__cat-name">猫猫</span>
+          </div>
+          <div className="aentry__cat-bubble">{entry.text}</div>
+        </div>
+      );
     case 'tool':
       return <ToolEntry entry={entry} onDecide={onDecide} />;
     case 'question':

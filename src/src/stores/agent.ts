@@ -86,6 +86,8 @@ export type Entry =
   | ({ kind: 'notice'; text: string } & EntryIdent)
   | ({ kind: 'user'; text: string; images?: UserImage[] } & EntryIdent)
   | ({ kind: 'assistant'; text: string; streaming: boolean } & EntryIdent)
+  /** 猫猫互动消息（& 命令触发，本地脚本台词，不经 agent 后端） */
+  | ({ kind: 'cat'; text: string } & EntryIdent)
   | ({
       /** 模型思考过程（reasoning），流式追加；参考 Zed 的 thinking 块 */
       kind: 'thinking';
@@ -528,6 +530,8 @@ interface AgentState extends RunWindow {
   /** checkpoint 恢复后用后端回传的历史重建条目（仅当会话一致且无运行中任务） */
   restoreEntries: (sessionId: string, entries: Entry[]) => void;
   pushTerminal: (outcome: 'completed' | 'failed', text?: string) => void;
+  /** 猫猫互动台词：本地脚本，只追加会话条目，不动运行状态 */
+  pushCat: (text: string) => void;
   /** 收到 ask_user 提问事件（追加问题卡条目） */
   pushQuestion: (q: AgentQuestionPayload) => void;
   /** 回答问题卡：answer 为 null 表示取消（本地立即置态，后端 oneshot 解析） */
@@ -696,6 +700,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     ),
   pushTerminal: (outcome, text) =>
     set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), withId({ kind: 'terminal' as const, outcome, text })] })),
+  /** 猫猫互动台词：本地脚本，只追加会话条目，不动运行状态 */
+  pushCat: (text) =>
+    set((s) => ({ entries: [...s.entries, withId({ kind: 'cat' as const, text })] })),
   pushQuestion: (q) =>
     set((s) => {
       // 幂等防御：同一 questionId 只入列一次（防事件层重复投递）

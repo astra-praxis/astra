@@ -103,6 +103,46 @@
     animation: mascot-peek 1.8s ease-in-out infinite;
   }
 
+  // ===== 基础动作（走路/跑步/伸展/趴下/站立/甩尾/蹲下/趴平/点头/透明/消失） =====
+  &.is-walk &__img {
+    animation: mascot-walk 1.6s ease-in-out infinite;
+  }
+
+  &.is-run &__img {
+    animation: mascot-run 0.7s ease-in-out infinite;
+  }
+
+  &.is-stretch &__img {
+    animation: mascot-stretch 2.4s ease-in-out infinite;
+  }
+
+  &.is-lie-down &__img,
+  &.is-lie-flat &__img {
+    animation: mascot-breathe 3.4s ease-in-out infinite;
+  }
+
+  &.is-stand &__img {
+    animation: mascot-breathe 2.4s ease-in-out infinite;
+  }
+
+  &.is-tail &__img {
+    animation: mascot-tail 1.2s ease-in-out infinite;
+  }
+
+  &.is-crouch &__img {
+    animation: mascot-crouch 2.2s ease-in-out infinite;
+  }
+
+  &.is-nod &__img {
+    animation: mascot-nod 1.2s ease-in-out infinite;
+  }
+
+  &.is-fade &__img,
+  &.is-vanish &__img {
+    animation: mascot-fade 2.4s ease-in-out infinite;
+    opacity: 0.55;
+  }
+
   // ===== 情绪形态 =====
   &.is-happy &__img {
     animation: mascot-breathe 1.4s ease-in-out infinite;
@@ -202,6 +242,62 @@
       transform: scale(1.06);
       box-shadow: 0 6px 18px var(--shadow-md, rgba(0, 0, 0, 0.18));
     }
+  }
+
+  // 悬停出现的「去休息」小圆钮（隐藏彩蛋）
+  &__hide {
+    position: absolute;
+    top: -6px;
+    left: -10px;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--text-secondary, #8a8f9d);
+    background: var(--bg-elevated, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 50%;
+    cursor: pointer;
+    animation: mascot-pop 0.22s ease-out;
+    transition: transform 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      color: var(--text-primary, #222);
+      transform: scale(1.15);
+    }
+  }
+
+  // 猫猫隐藏后的「叫回来」占位（复用 .mascot 定位，缩小为圆钮）
+  &--restore {
+    top: -60px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    background: var(--bg-elevated, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 50%;
+    opacity: 0.55;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+
+    &:hover {
+      opacity: 1;
+      transform: scale(1.1);
+    }
+  }
+
+  // 消失演出：淡出后真正隐藏（后置覆盖 is-vanish 的循环 fade）
+  &.mascot--vanishing &__img {
+    animation: none;
+    opacity: 0;
+    transition: opacity 0.85s ease;
   }
 }
 
@@ -306,4 +402,38 @@
   0%, 100% { transform: translateY(0); }
   25% { transform: translateY(-2px); }
   75% { transform: translateY(1px); }
+}
+
+@keyframes mascot-walk {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  25% { transform: translateX(-4px) rotate(-2deg); }
+  75% { transform: translateX(4px) rotate(2deg); }
+}
+
+@keyframes mascot-run {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px) translateY(-1px); }
+  75% { transform: translateX(5px) translateY(-1px); }
+}
+
+@keyframes mascot-stretch {
+  0%, 100% { transform: scale(1); }
+  30% { transform: scale(1.06, 0.92) translateY(2px); }
+  60% { transform: scale(0.98, 1.05); }
+}
+
+@keyframes mascot-tail {
+  0%, 100% { transform: rotate(0); }
+  30% { transform: rotate(-6deg); }
+  70% { transform: rotate(6deg); }
+}
+
+@keyframes mascot-crouch {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(2px) scale(0.98, 0.95); }
+}
+
+@keyframes mascot-fade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }

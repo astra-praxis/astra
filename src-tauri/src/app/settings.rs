@@ -275,6 +275,19 @@ fn resolve_editor_command(command: &str, dirs: &[std::path::PathBuf]) -> std::pa
     std::path::PathBuf::from(command)
 }
 
+/// Windows 批处理入口（code.cmd / zed.cmd 等）不能被 CreateProcess 直接执行
+/// （Rust std 自 CVE-2024-24576 修复后拒绝 spawn .bat/.cmd，报错 193：
+/// 「%1 不是有效的 Win32 应用程序」），必须经 cmd.exe 解释执行。
+/// 唯一调用点在 cfg(windows) 分支内，非 Windows 平台仅由单测使用。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn needs_cmd_interpreter(editor: &std::path::Path) -> bool {
+    editor
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(), String> {
     // 候选目录（打包后 GUI 应用继承的 PATH 只有 /usr/bin:/bin 等系统目录）
@@ -303,8 +316,28 @@ pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(),
     let full_path = std::env::join_paths(&dirs).unwrap_or_default();
 
     let editor = resolve_editor_command(&editor_command, &dirs);
-    let mut spawn_cmd = Command::new(editor);
-    spawn_cmd.arg(&path).env("PATH", &full_path);
+    #[cfg(windows)]
+    let mut spawn_cmd: Command = if needs_cmd_interpreter(&editor) {
+        use std::os::windows::process::CommandExt;
+        // cmd /C 包裹批处理执行。整行参数带外层引号用 raw_arg 原样传入：
+        // cmd 规则是「多组引号时剥掉最外层一对」，外层包裹后内层引号原样保留，
+        // 路径含空格也能正确解析（Rust 默认逐参数引号在此场景会解析错误）
+        let mut cmd = Command::new("cmd");
+        cmd.raw_arg("/C")
+            .raw_arg(format!("\"\"{}\" \"{}\"\"", editor.display(), path))
+            .env("PATH", &full_path);
+        cmd
+    } else {
+        let mut cmd = Command::new(&editor);
+        cmd.arg(&path).env("PATH", &full_path);
+        cmd
+    };
+    #[cfg(not(windows))]
+    let mut spawn_cmd: Command = {
+        let mut cmd = Command::new(&editor);
+        cmd.arg(&path).env("PATH", &full_path);
+        cmd
+    };
     // .cmd 包装入口（code.cmd）会先弹 cmd 黑框，统一抑制；
     // 编辑器自身 GUI 窗口不受影响
     crate::proc_util::hide_window(&mut spawn_cmd);
@@ -373,6 +406,26 @@ pub(crate) fn get_preset_editors() -> Vec<EditorSetting> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn needs_cmd_interpreter_matches_windows_batch_extensions() {
+        // Windows 批处理入口需要经 cmd 解释器执行
+        assert!(needs_cmd_interpreter(std::path::Path::new("code.cmd")));
+        assert!(needs_cmd_interpreter(std::path::Path::new("code.CMD")));
+        assert!(needs_cmd_interpreter(std::path::Path::new("zed.BAT")));
+        assert!(needs_cmd_interpreter(std::path::Path::new("tool.bat")));
+        assert!(needs_cmd_interpreter(std::path::Path::new(
+            "C:\\Program Files\\...\\code.cmd"
+        )));
+        // 可执行文件与无扩展名命令不需要
+        assert!(!needs_cmd_interpreter(std::path::Path::new("Code.exe")));
+        assert!(!needs_cmd_interpreter(std::path::Path::new("zed")));
+        assert!(!needs_cmd_interpreter(std::path::Path::new("/usr/bin/zed")));
+        assert!(!needs_cmd_interpreter(std::path::Path::new("")));
+        // 同名但非批处理扩展
+        assert!(!needs_cmd_interpreter(std::path::Path::new("code.bat.exe")));
+        assert!(!needs_cmd_interpreter(std::path::Path::new("cmder")));
+    }
 
     #[cfg(not(windows))]
     #[test]

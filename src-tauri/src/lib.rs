@@ -254,6 +254,7 @@ pub fn run() {
             app::settings::save_settings,
             app::settings::open_in_editor,
             app::file_preview::preview_read_file,
+            app::file_preview::path_exists,
             app::command_runner::run_command,
             app::settings::get_preset_editors,
             skills::registry::list_skills,

@@ -27,7 +27,7 @@ import { Copy, Play, Link2 } from 'lucide-react';
 import { openInBrowser } from '@/lib/openService';
 import { parseActionHref, executeAction } from './action-links';
 import { useLinkPreviewStore } from '@/stores/linkPreview';
-import { isAbsoluteFilePath, openFilePath } from '@/components/agent/FilePathText';
+import { isAbsoluteFilePath, openFilePath, verifyPathExists } from '@/components/agent/FilePathText';
 import MermaidBlock from './MermaidBlock';
 import { useStreamingText } from '@/hooks/useStreamingText';
 import './MarkdownMessage.scss';
@@ -144,28 +144,42 @@ const mdComponents: Components = {
 };
 
 /**
- * 行内代码：filePreview 开启且内容是绝对文件路径时变为可点击
- * （点击在右侧文件预览面板打开）。代码块（pre 内）不受影响：
+ * 行内代码：filePreview 开启且内容是绝对文件路径、且磁盘上真实存在时变为可点击
+ * （点击在右侧文件预览面板打开）。存在性验证避免正则猜测的误报；验证完成前
+ * 渲染普通 code，不闪烁可点击态。代码块（pre 内）不受影响：
  * 带 language-* 类或含换行的一律走原样式。
  */
 function CodeSpan({ children, className }: { children?: ReactNode; className?: string }) {
   const { filePreview } = useContext(MdContext);
   const raw = nodeText(children);
-  if (filePreview && !className && !raw.includes('\n') && isAbsoluteFilePath(raw)) {
-    return (
-      <code
-        className="md-file-path"
-        title={`预览文件：${raw}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          openFilePath(raw);
-        }}
-      >
-        {children}
-      </code>
-    );
-  }
-  return <code>{children}</code>;
+  const candidate =
+    filePreview && !className && !raw.includes('\n') && isAbsoluteFilePath(raw) ? raw : null;
+  const [exists, setExists] = useState(false);
+
+  useEffect(() => {
+    if (!candidate) return;
+    let cancelled = false;
+    verifyPathExists(candidate).then((ok) => {
+      if (!cancelled) setExists(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [candidate]);
+
+  if (!candidate || !exists) return <code>{children}</code>;
+  return (
+    <code
+      className="md-file-path"
+      title={`预览文件：${raw}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        openFilePath(raw);
+      }}
+    >
+      {children}
+    </code>
+  );
 }
 
 function PreRenderer({ children }: { children?: ReactNode }) {

@@ -300,7 +300,7 @@ fn powershell_quote(arg: &str) -> String {
 /// 规范化（处理 . 与 ..，不触碰文件系统，目标不存在也返回预期绝对路径）。
 /// 无 base_dir 的相对路径拒绝解析——静默落在进程/编辑器 cwd 的行为不可预测，
 /// 由调用方传入明确基准（当前工作空间根目录等）。
-fn resolve_open_path(path: &str, base_dir: Option<&str>) -> Result<String, String> {
+pub(crate) fn resolve_open_path(path: &str, base_dir: Option<&str>) -> Result<String, String> {
     // Windows 盘符 C:\、UNC \\server\share、POSIX / 开头都由 std 判定，不手写字符串判断
     if std::path::Path::new(path).is_absolute() {
         return Ok(path.to_string());

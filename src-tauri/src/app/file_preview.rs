@@ -106,6 +106,19 @@ fn fmt_size(size: u64) -> String {
     }
 }
 
+/// 检查路径在磁盘上是否存在（文件或目录均可），供前端把文本中的路径
+/// 升级为可点击链接前做存在性验证，避免纯正则猜测的误报。
+/// 绝对路径直接校验；相对路径以 base_dir 解析后校验；
+/// 解析失败（无基准相对路径 / 含协议前缀）或不存在一律返回 false。
+#[tauri::command]
+pub async fn path_exists(path: String, base_dir: Option<String>) -> bool {
+    let resolved = match crate::app::settings::resolve_open_path(&path, base_dir.as_deref()) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    tokio::fs::metadata(&resolved).await.is_ok()
+}
+
 /// 读取本地文件并按类型打包为预览载荷。
 /// Err 时前端回退到「使用默认应用打开」卡片。
 #[tauri::command]
@@ -180,4 +193,44 @@ pub async fn preview_read_file(path: String) -> Result<PreviewFile, String> {
         mime: "text/plain".into(),
         size,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn path_exists_reports_existing_file_and_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        assert!(path_exists(file.to_string_lossy().into_owned(), None).await);
+        // 目录也算存在（点击后由预览面板决定如何展示）
+        assert!(path_exists(dir.path().to_string_lossy().into_owned(), None).await);
+    }
+
+    #[tokio::test]
+    async fn path_exists_missing_path_is_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope.txt");
+        assert!(!path_exists(missing.to_string_lossy().into_owned(), None).await);
+    }
+
+    #[tokio::test]
+    async fn path_exists_relative_resolves_against_base_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "x").unwrap();
+        let base = dir.path().to_string_lossy().into_owned();
+        assert!(path_exists("src/main.rs".into(), Some(base.clone())).await);
+        assert!(path_exists("./src/main.rs".into(), Some(base)).await);
+        // 无基准的相对路径解析失败 → false，而不是静默落在进程 cwd
+        assert!(!path_exists("src/main.rs".into(), None).await);
+    }
+
+    #[tokio::test]
+    async fn path_exists_rejects_url_and_missing_base() {
+        assert!(!path_exists("file:///tmp/a.txt".into(), None).await);
+        assert!(!path_exists("https://example.com/a.txt".into(), Some("/tmp".into())).await);
+    }
 }

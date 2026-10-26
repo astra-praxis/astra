@@ -536,6 +536,31 @@ mod tests {
 
     #[cfg(not(windows))]
     #[test]
+    fn resolve_open_path_clamps_above_root() {
+        // .. 超出基准根：词法 pop 在根处钳制（不会拼出越界路径，也不会报错）
+        let got = resolve_open_path("../../../../etc/passwd", Some("/tmp")).unwrap();
+        assert_eq!(got, "/etc/passwd");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_open_path_windows_drive_and_unc() {
+        // 盘符 / UNC 都是绝对路径，无 base_dir 原样透传
+        assert_eq!(
+            resolve_open_path("C:\\a\\b.txt", None).unwrap(),
+            "C:\\a\\b.txt"
+        );
+        assert_eq!(
+            resolve_open_path("\\\\server\\share\\f.txt", None).unwrap(),
+            "\\\\server\\share\\f.txt"
+        );
+        // 相对路径 + Windows 基准：反斜杠分隔正确 join
+        let got = resolve_open_path("src\\main.rs", Some("C:\\proj")).unwrap();
+        assert_eq!(got, "C:\\proj\\src\\main.rs");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
     fn resolve_editor_finds_binary_in_candidate_dirs() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("zed");

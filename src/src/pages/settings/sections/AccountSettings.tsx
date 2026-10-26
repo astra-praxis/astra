@@ -27,6 +27,8 @@ interface AccountStatus {
   account_id: string | null;
   display_name: string | null;
   accounts: Account[];
+  password_protected: boolean;
+  locked: boolean;
 }
 
 export default function AccountSettings() {
@@ -124,8 +126,124 @@ export default function AccountSettings() {
         onSubmit={createAccount}
       />
 
+      <PasswordRow
+        status={status}
+        onChanged={() => invoke<AccountStatus>('account_status').then(setStatus).catch(() => {})}
+      />
+
       {error && <p className="acct-error">{error}</p>}
     </SettingsSection>
+  );
+}
+
+/**
+ * 访问密码（可选）：默认文件密钥零弹窗；设密码后启动需解锁。
+ * 设置/更换共用一个输入框（有密码时即更换，无需旧密码——
+ * 已解锁状态才允许操作）；移除需验证当前密码。
+ */
+function PasswordRow({
+  status,
+  onChanged,
+}: {
+  status: AccountStatus | null;
+  onChanged: () => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [removePassword, setRemovePassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const locked = !!status?.locked;
+  const protectedAccount = !!status?.password_protected;
+
+  async function run(action: () => Promise<unknown>, done: string) {
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      await action();
+      setMsg(done);
+      setPassword('');
+      setRemovePassword('');
+      onChanged();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SettingsRow
+      stacked
+      title="访问密码（可选）"
+      desc={
+        protectedAccount
+          ? '已启用：启动时需输入密码解锁本机数据（仅本地验证，不同步到云端）'
+          : '未启用：数据用本机随机密钥保护，无需密码、无弹窗。设置后启动需解锁'
+      }
+    >
+      {locked ? (
+        <p className="acct-password__hint">账户处于锁定状态，请先在启动界面解锁</p>
+      ) : (
+        <>
+          <form
+            className="acct-create"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(
+                () => invoke('account_password_set', { password }),
+                protectedAccount ? '密码已更换' : '密码已启用，下次启动需解锁',
+              );
+            }}
+          >
+            <input
+              className="acct-create__input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={protectedAccount ? '新密码（更换）' : '设置访问密码（6-128 位）'}
+              maxLength={128}
+              disabled={busy}
+            />
+            <button type="submit" className="btn-save acct-create__btn" disabled={busy || !password}>
+              {protectedAccount ? '更换密码' : '启用密码'}
+            </button>
+          </form>
+          {protectedAccount && (
+            <form
+              className="acct-create"
+              onSubmit={(e) => {
+                e.preventDefault();
+                run(
+                  () => invoke('account_password_remove', { password: removePassword }),
+                  '密码已移除，回到免密码模式',
+                );
+              }}
+            >
+              <input
+                className="acct-create__input"
+                type="password"
+                value={removePassword}
+                onChange={(e) => setRemovePassword(e.target.value)}
+                placeholder="当前密码（移除需验证）"
+                maxLength={128}
+                disabled={busy}
+              />
+              <button
+                type="submit"
+                className="btn-discard acct-create__btn"
+                disabled={busy || !removePassword}
+              >
+                移除密码
+              </button>
+            </form>
+          )}
+          {msg && <p className="acct-password__hint acct-password__hint--ok">{msg}</p>}
+          {err && <p className="acct-error">{err}</p>}
+        </>
+      )}
+    </SettingsRow>
   );
 }
 

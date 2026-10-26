@@ -26,12 +26,12 @@ interface AccountStatus {
   account_id: string | null;
   display_name: string | null;
   accounts: Account[];
+  password_protected: boolean;
+  locked: boolean;
 }
 
 export default function AccountGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AccountStatus | null>(null);
-  const [launching, setLaunching] = useState<string | null>(null);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     invoke<AccountStatus>('account_status')
@@ -39,64 +39,76 @@ export default function AccountGate({ children }: { children: ReactNode }) {
       .catch((e) => {
         // 状态查询失败不阻断应用（向后兼容：命令不存在等异常场景）
         console.error('account_status failed', e);
-        setStatus({ mode: 'legacy', account_id: null, display_name: null, accounts: [] });
+        setStatus({
+          mode: 'legacy',
+          account_id: null,
+          display_name: null,
+          accounts: [],
+          password_protected: false,
+          locked: false,
+        });
       });
   }, []);
-
-  async function launch(accountId: string) {
-    setError('');
-    setLaunching(accountId);
-    try {
-      // 成功时后端 spawn 新进程并 exit(0)，Promise 不会 resolve
-      await invoke('account_launch', { accountId });
-      setLaunching(null);
-    } catch (e) {
-      setError(String(e));
-      setLaunching(null);
-    }
-  }
 
   // 未加载完成前不渲染任何内容，避免主应用闪现
   if (!status) return <div className="account-gate account-gate--loading" />;
 
-  // 已绑定账户或 legacy 启动：直接放行
-  if (status.mode === 'account' || status.mode === 'legacy') return <>{children}</>;
+  // 已绑定账户或 legacy 启动且未锁定：直接放行
+  if (!status.locked && (status.mode === 'account' || status.mode === 'legacy')) {
+    return <>{children}</>;
+  }
 
+  // 锁定态：设了访问密码且本进程尚未解锁，输密码后刷新进入
   return (
     <div className="account-gate">
       <div className="account-gate__panel">
         <h1 className="account-gate__title">Astra</h1>
         <p className="account-gate__hint">
-          {status.accounts.length === 0
-            ? '创建你的第一个本地账户。账户数据彼此独立，仅保存在本机。'
-            : '选择要启动的账户，或创建新账户。'}
+          {status.display_name ? `「${status.display_name}」已启用访问密码` : '本机数据已启用访问密码'}
+          ，输入密码解锁后使用。
         </p>
-
-        {status.accounts.length > 0 && (
-          <ul className="account-gate__list">
-            {status.accounts.map((a) => (
-              <li key={a.account_id}>
-                <button
-                  type="button"
-                  className="account-gate__item"
-                  disabled={launching !== null}
-                  onClick={() => launch(a.account_id)}
-                >
-                  <span className="account-gate__avatar">{a.display_name.slice(0, 1)}</span>
-                  <span className="account-gate__name">{a.display_name}</span>
-                  <span className="account-gate__action">
-                    {launching === a.account_id ? '启动中…' : '启动'}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <CreateAccountForm disabled={launching !== null} onCreated={launch} />
-        {error && <p className="account-gate__error">{error}</p>}
+        <UnlockForm />
       </div>
     </div>
+  );
+}
+
+function UnlockForm() {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!password) return;
+    setBusy(true);
+    setError('');
+    try {
+      await invoke('account_unlock', { password });
+      // 解锁后后端已补做记忆初始化，刷新前端以正常加载数据
+      window.location.reload();
+    } catch (err) {
+      setError(String(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="account-gate__create" onSubmit={submit}>
+      <input
+        className="account-gate__input"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="访问密码"
+        autoFocus
+        disabled={busy}
+      />
+      <button type="submit" className="account-gate__submit" disabled={busy || !password}>
+        {busy ? '解锁中…' : '解锁'}
+      </button>
+      {error && <p className="account-gate__error">{error}</p>}
+    </form>
   );
 }
 

@@ -131,3 +131,20 @@
   font-size: 12px;
   color: var(--error-text);
 }
+
+.acct-password {
+  &__hint {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--text-muted);
+
+    &--ok {
+      color: var(--text-secondary);
+    }
+  }
+}
+
+.acct-create + .acct-create,
+.acct-create + .acct-password__hint {
+  margin-top: 8px;
+}

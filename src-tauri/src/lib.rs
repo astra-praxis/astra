@@ -20,6 +20,87 @@ use app::settings::{get_settings, get_settings_path, workspace_roots};
 
 // ===== 应用入口 =====
 
+/// 记忆宿主初始化（CME）：加密 SQLite + 主密钥，失败降级 memory-off。
+/// setup 与 account_unlock（解锁后补做）共用；OnceLock 幂等，重复调用安全。
+fn init_memory_host(app: &tauri::AppHandle) {
+    // 访问密码锁定：跳过初始化（密钥不可用），解锁后再补做
+    if let Ok(dir) = app::accounts::data_dir(app) {
+        if app::secret::is_locked(&dir) {
+            eprintln!("[memory] account locked, init deferred until unlock");
+            app_log!(info, "memory", "account locked, init deferred until unlock");
+            return;
+        }
+    }
+    let settings = get_settings(app.clone());
+    let provider_id = settings.memory_summary_provider_id.clone();
+    let agent_summary_client = if settings.memory_agent_summary {
+        eprintln!(
+            "[memory] agent summary enabled (provider: {})",
+            provider_id.as_deref().unwrap_or("auto")
+        );
+        app_log!(
+            info,
+            "memory",
+            "agent summary enabled (provider: {})",
+            provider_id.as_deref().unwrap_or("auto")
+        );
+        Some(Box::new(crate::memory::host::HostAgentSummaryClient::new(
+            app.clone(),
+            provider_id.clone(),
+        ))
+            as Box<dyn astra_memory::cme::compactor::AgentSummaryClient>)
+    } else {
+        None
+    };
+    // 同一开关（memory_agent_summary）同时控制提炼路径（W1）与
+    // supersedes 语义确认（W2）：都复用宿主 agent LLM 通道，失败
+    // 各自降级（提炼回规则、确认不建链）。
+    let agent_extraction_client = if settings.memory_agent_summary {
+        Some(
+            Box::new(crate::memory::host::HostAgentExtractionClient::new(
+                app.clone(),
+                provider_id.clone(),
+            )) as Box<dyn astra_memory::cme::extract::AgentExtractionClient>,
+        )
+    } else {
+        None
+    };
+    let supersede_reviewer = if settings.memory_agent_summary {
+        Some(Box::new(crate::memory::host::HostSupersedeReviewer::new(
+            app.clone(),
+            provider_id,
+        ))
+            as Box<dyn astra_memory::cme::consolidate::SupersedeReviewer>)
+    } else {
+        None
+    };
+    match app::accounts::data_dir(app) {
+        Ok(dir) => {
+            match crate::memory::host::MemoryHost::init(
+                &dir,
+                crate::memory::host::MemoryInitOptions {
+                    agent_summary_client,
+                    agent_extraction_client,
+                    supersede_reviewer,
+                },
+            ) {
+                Ok(host) => {
+                    let _ = app.state::<agent::AgentState>().memory.set(host);
+                    app_log!(info, "memory", "host init ok");
+                }
+                Err(error) => {
+                    eprintln!("[memory] init failed, memory disabled: {error}");
+                    app_log!(error, "memory", "init failed, memory disabled: {error}");
+                }
+            }
+        }
+        Err(error) => {
+            eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
+            app_log!(error, "memory", "app_data_dir unavailable: {error}");
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Panic 落盘：Windows GUI 子系统无控制台，panic 信息默认无人可见，
@@ -141,75 +222,8 @@ pub fn run() {
             // 失败降级为 memory-off：agent 照常运行（无 recall 注入）。
             // 摘要路径开关（memory_agent_summary）重启后生效；开启时用
             // settings 里指定的 provider（或自动选第一个可用的）做总结。
-            let settings = get_settings(app.handle().clone());
-            let provider_id = settings.memory_summary_provider_id.clone();
-            let agent_summary_client = if settings.memory_agent_summary {
-                eprintln!(
-                    "[memory] agent summary enabled (provider: {})",
-                    provider_id.as_deref().unwrap_or("auto")
-                );
-                app_log!(
-                    info,
-                    "memory",
-                    "agent summary enabled (provider: {})",
-                    provider_id.as_deref().unwrap_or("auto")
-                );
-                Some(Box::new(crate::memory::host::HostAgentSummaryClient::new(
-                    app.handle().clone(),
-                    provider_id.clone(),
-                ))
-                    as Box<dyn astra_memory::cme::compactor::AgentSummaryClient>)
-            } else {
-                None
-            };
-            // 同一开关（memory_agent_summary）同时控制提炼路径（W1）与
-            // supersedes 语义确认（W2）：都复用宿主 agent LLM 通道，失败
-            // 各自降级（提炼回规则、确认不建链）。
-            let agent_extraction_client = if settings.memory_agent_summary {
-                Some(
-                    Box::new(crate::memory::host::HostAgentExtractionClient::new(
-                        app.handle().clone(),
-                        provider_id.clone(),
-                    ))
-                        as Box<dyn astra_memory::cme::extract::AgentExtractionClient>,
-                )
-            } else {
-                None
-            };
-            let supersede_reviewer = if settings.memory_agent_summary {
-                Some(Box::new(crate::memory::host::HostSupersedeReviewer::new(
-                    app.handle().clone(),
-                    provider_id,
-                ))
-                    as Box<dyn astra_memory::cme::consolidate::SupersedeReviewer>)
-            } else {
-                None
-            };
-            match app::accounts::data_dir(&*app) {
-                Ok(dir) => {
-                    match crate::memory::host::MemoryHost::init(
-                        &dir,
-                        crate::memory::host::MemoryInitOptions {
-                            agent_summary_client,
-                            agent_extraction_client,
-                            supersede_reviewer,
-                        },
-                    ) {
-                        Ok(host) => {
-                            let _ = app.state::<agent::AgentState>().memory.set(host);
-                            app_log!(info, "memory", "host init ok");
-                        }
-                        Err(error) => {
-                            eprintln!("[memory] init failed, memory disabled: {error}");
-                            app_log!(error, "memory", "init failed, memory disabled: {error}");
-                        }
-                    }
-                }
-                Err(error) => {
-                    eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
-                    app_log!(error, "memory", "app_data_dir unavailable: {error}");
-                }
-            }
+            // 访问密码锁定时跳过，解锁命令会再调 init_memory_host 补做。
+            init_memory_host(app.handle());
 
             // 内置技能（astra-memory 记忆指南 + astra-find-skills 找装技能）：
             // 技能库中已有同名技能时不覆盖，用户修改优先。best-effort。
@@ -379,6 +393,9 @@ pub fn run() {
             app::accounts::account_list,
             app::accounts::account_create,
             app::accounts::account_launch,
+            app::accounts::account_password_set,
+            app::accounts::account_unlock,
+            app::accounts::account_password_remove,
             // Extensions 市场（状态展示；安装走 Agent 对话）
             extensions::market::market_status,
             // Extensions 管理（MCP / ACP 启停、编辑、删除）

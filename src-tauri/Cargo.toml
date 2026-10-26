@@ -52,8 +52,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 # P0-3 敏感数据加密：providers.json 信封加密 + memory.key 密钥包装
 chacha20poly1305 = "0.10"
-# 机器级 KEK：优先 OS keychain（macOS Keychain / Windows Credential Manager /
-# Linux Secret Service），失败回退本地文件
+# 可选访问密码：Argon2id 派生 KEK（默认文件密钥，零弹窗）
+argon2 = "0.5"
+# KEK 遗产迁移：旧版本曾把 KEK 存在 OS keychain（会反复弹授权框，已弃用），
+# 仅在首次启动时一次性读出迁移到本地文件，之后不再触碰
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [dev-dependencies]

@@ -268,6 +268,10 @@ pub struct AccountStatus {
     pub account_id: Option<String>,
     pub display_name: Option<String>,
     pub accounts: Vec<Account>,
+    /// 当前数据目录是否设置了访问密码
+    pub password_protected: bool,
+    /// 设了密码且本进程尚未解锁（前端渲染解锁界面）
+    pub locked: bool,
 }
 
 #[tauri::command]
@@ -277,6 +281,14 @@ pub fn account_status(app: tauri::AppHandle) -> Result<AccountStatus, String> {
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
     let accounts = read_accounts(&root)?;
+    let dir = crate::app::accounts::data_dir(&app).ok();
+    let (password_protected, locked) = match &dir {
+        Some(dir) => (
+            crate::app::secret::password_is_set(dir),
+            crate::app::secret::is_locked(dir),
+        ),
+        None => (false, false),
+    };
     match active() {
         Some(rt) => {
             let display_name = accounts
@@ -288,6 +300,8 @@ pub fn account_status(app: tauri::AppHandle) -> Result<AccountStatus, String> {
                 account_id: Some(rt.account_id.clone()),
                 display_name,
                 accounts,
+                password_protected,
+                locked,
             })
         }
         None => Ok(AccountStatus {
@@ -295,6 +309,8 @@ pub fn account_status(app: tauri::AppHandle) -> Result<AccountStatus, String> {
             account_id: None,
             display_name: None,
             accounts,
+            password_protected,
+            locked,
         }),
     }
 }
@@ -405,6 +421,39 @@ pub fn account_launch(
 /// InstanceLock 的 Tauri State 包装（setup 阶段 acquire 后 manage）。
 /// Mutex 允许冷切换命令在 &self 上释放锁。
 pub(crate) struct InstanceLockState(pub(crate) std::sync::Mutex<InstanceLock>);
+
+// ===== 访问密码（可选；默认文件密钥零弹窗，设密码后启动需解锁） =====
+
+/// 设置/更换当前数据目录的访问密码（6-128 字符）。
+/// 设置后：providers.json / memory.key 由密码派生密钥保护，明文 KEK 删除；
+/// 下次启动处于锁定态，需 account_unlock 解锁。
+#[tauri::command]
+pub fn account_password_set(app: tauri::AppHandle, password: String) -> Result<(), String> {
+    let dir = crate::app::accounts::data_dir(&app)?;
+    crate::app::secret::password_set(&dir, &password)?;
+    app_log!(info, "accounts", "access password set");
+    Ok(())
+}
+
+/// 解锁：验证密码，KEK 进程内缓存；随后补做被锁定跳过的初始化
+/// （记忆宿主）。前端解锁成功后刷新页面即可正常使用。
+#[tauri::command]
+pub fn account_unlock(app: tauri::AppHandle, password: String) -> Result<(), String> {
+    let dir = crate::app::accounts::data_dir(&app)?;
+    crate::app::secret::account_unlock(&dir, &password)?;
+    app_log!(info, "accounts", "account unlocked");
+    crate::init_memory_host(&app);
+    Ok(())
+}
+
+/// 移除访问密码（需验证当前密码）：回到默认文件密钥方案（零弹窗）。
+#[tauri::command]
+pub fn account_password_remove(app: tauri::AppHandle, password: String) -> Result<(), String> {
+    let dir = crate::app::accounts::data_dir(&app)?;
+    crate::app::secret::password_remove(&dir, &password)?;
+    app_log!(info, "accounts", "access password removed");
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {

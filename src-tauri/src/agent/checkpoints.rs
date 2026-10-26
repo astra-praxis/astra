@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
-use agent_core::{
-    ChatMessage, Role,
-};
+use agent_core::{ChatMessage, Role};
 use serde::Serialize;
 use serde_json::json;
-use tauri::{AppHandle, Emitter, Manager, State};
-
+use tauri::{AppHandle, Emitter, State};
 
 use super::*;
 // ===== Checkpoint（Phase 11.6，CHECKPOINT_SPEC §7/§8）=====
@@ -51,7 +48,7 @@ pub async fn agent_checkpoint_list(
     session_id: String,
 ) -> Result<Vec<AgentCheckpointInfo>, String> {
     let mut threads = state.threads.lock().await;
-    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let directory = crate::app::accounts::data_dir(&app)?;
     threads
         .open(&directory, Arc::clone(&state.persistence_errors))
         .await?;
@@ -74,7 +71,7 @@ pub async fn agent_checkpoint_create(
     kind: Option<String>,
 ) -> Result<AgentCheckpointInfo, String> {
     let mut threads = state.threads.lock().await;
-    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let directory = crate::app::accounts::data_dir(&app)?;
     threads
         .open(&directory, Arc::clone(&state.persistence_errors))
         .await?;
@@ -128,7 +125,7 @@ pub async fn agent_checkpoint_restore(
         }
     }
     let mut threads = state.threads.lock().await;
-    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let directory = crate::app::accounts::data_dir(&app)?;
     threads
         .open(&directory, Arc::clone(&state.persistence_errors))
         .await?;
@@ -195,7 +192,7 @@ pub async fn agent_rewind_to_user_message(
         }
     }
     let mut threads = state.threads.lock().await;
-    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let directory = crate::app::accounts::data_dir(&app)?;
     threads
         .open(&directory, Arc::clone(&state.persistence_errors))
         .await?;

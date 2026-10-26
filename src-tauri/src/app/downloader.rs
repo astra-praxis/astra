@@ -58,10 +58,7 @@ impl DownloadManager {
 
 /// 下载记录文件路径（应用数据目录下的 download_history.json）
 fn get_history_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    let app_data_dir = crate::app::accounts::data_dir(app)?;
     Ok(app_data_dir.join("download_history.json"))
 }
 

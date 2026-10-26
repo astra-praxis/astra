@@ -362,8 +362,14 @@ pub fn delete_skill_dir(dir: &Path, name: &str) -> Result<(), String> {
 /// 用户技能是用户自持内容，放 ~/.config 便于用户在访达中直接查看与编辑；
 /// 与 ~/.agents/skills（全局 Git 技能）心智模型一致。agent.rs 也用它注册技能工具。
 pub fn app_skills_dir(_app: &AppHandle) -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
-    let dir = home.join(".config").join("astra").join("skills");
+    // 账户模式下为 accounts/<id>/astra-home/skills（用户技能随账户隔离）；
+    // legacy 模式保持 ~/.config/astra/skills 旧位置不变
+    let dir = if let Some(rt) = crate::app::accounts::active() {
+        rt.astra_home.join("skills")
+    } else {
+        let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
+        home.join(".config").join("astra").join("skills")
+    };
     fs::create_dir_all(&dir).map_err(|e| format!("创建技能库目录失败: {e}"))?;
     Ok(dir)
 }

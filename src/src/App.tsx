@@ -1,4 +1,5 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router';
+import AccountGate from './components/account/AccountGate';
 import AppLayout from './components/layout/AppLayout';
 import WorkspacePage from './pages/workspace/WorkspacePage';
 import AgentPage from './pages/agent/AgentPage';
@@ -19,7 +20,8 @@ import DevModePage from './pages/dev-mode/DevModePage';
 
 export default function App() {
   return (
-    <HashRouter>
+    <AccountGate>
+      <HashRouter>
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Navigate to="/agent" replace />} />
@@ -43,6 +45,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/agent" replace />} />
         </Route>
       </Routes>
-    </HashRouter>
+      </HashRouter>
+    </AccountGate>
   );
 }

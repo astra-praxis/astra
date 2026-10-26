@@ -36,9 +36,9 @@ pub fn market_status() -> MarketStatus {
 // ===== 配置文件定位与解析（extensions.rs 共用） =====
 
 pub(crate) fn astra_config_path() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
-    let dir = home.join(".astra");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 ~/.astra 失败: {e}"))?;
+    // 账户模式下为 accounts/<id>/astra-home/config.toml；legacy 回退 ~/.astra
+    let dir = crate::app::accounts::astra_home();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 astra home 失败: {e}"))?;
     Ok(dir.join("config.toml"))
 }
 

@@ -1,5 +1,6 @@
 //! 桌面应用外壳：工作空间、设置、窗口、本地服务与开发模式
 
+pub(crate) mod accounts;
 pub(crate) mod command_runner;
 pub(crate) mod dev_mode;
 pub(crate) mod downloader;

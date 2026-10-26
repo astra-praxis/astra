@@ -156,6 +156,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "which",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// 确保 app_data_dir 存在且目标 JSON 文件已初始化（不存在则写入 `[]`），返回文件路径。
 ///
@@ -17,10 +17,7 @@ pub fn ensure_json_file(
     filename: &str,
     create_err_label: &str,
 ) -> Result<PathBuf, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    let app_data_dir = crate::app::accounts::data_dir(app)?;
     fs::create_dir_all(&app_data_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
     let path = app_data_dir.join(filename);
     if !path.exists() {

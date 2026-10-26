@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Manager, State};
-
+use tauri::{AppHandle, State};
 
 use super::*;
 // ===== Artifacts（Phase 4，ARTIFACT_SPEC：location-based 元数据登记）=====
@@ -27,7 +26,9 @@ pub struct AgentArtifactInfo {
     pub status: String,
 }
 
-pub(crate) fn artifact_info(record: agent_core::artifact_registry::ArtifactRecord) -> AgentArtifactInfo {
+pub(crate) fn artifact_info(
+    record: agent_core::artifact_registry::ArtifactRecord,
+) -> AgentArtifactInfo {
     AgentArtifactInfo {
         id: record.id,
         thread_id: record.thread_id,
@@ -72,10 +73,9 @@ pub fn agent_spill_paste(
     }
     let dir = match project_root.filter(|p| std::path::Path::new(p).is_dir()) {
         Some(root) => std::path::Path::new(&root).join(".astra").join("pastes"),
-        None => dirs::home_dir()
-            .ok_or_else(|| "无法定位用户主目录".to_string())?
-            .join(".astra")
-            .join("pastes"),
+        // 纯聊天：账户私有 astra home（legacy 模式回退 ~/.astra），
+        // agent 的 read_file 以主目录为 root，需给绝对路径
+        None => crate::app::accounts::astra_home().join("pastes"),
     };
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建粘贴目录失败：{e}"))?;
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");
@@ -97,7 +97,7 @@ pub async fn agent_artifact_list(
     session_id: String,
 ) -> Result<Vec<AgentArtifactInfo>, String> {
     let mut threads = state.threads.lock().await;
-    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let directory = crate::app::accounts::data_dir(&app)?;
     threads
         .open(&directory, Arc::clone(&state.persistence_errors))
         .await?;

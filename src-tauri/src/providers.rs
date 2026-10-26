@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 // ===== 类型定义 =====
 
@@ -49,10 +49,7 @@ pub struct ModelsResponse {
 // ===== 辅助函数 =====
 
 fn get_providers_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    let app_data_dir = crate::app::accounts::data_dir(app)?;
     fs::create_dir_all(&app_data_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
     Ok(app_data_dir.join("providers.json"))
 }

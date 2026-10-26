@@ -1,0 +1,501 @@
+//! 本地账户（多账户 P0，冷切换架构）。
+//!
+//! 三层边界中的「本地账户 = 数据归属边界」：每个账户拥有独立的数据目录与
+//! astra-home（MCP/ACP 配置），账户身份由**进程启动参数**决定
+//! （`--account=<account_id>`），不由前端在 IPC 中任意指定。
+//!
+//! 目录布局（P0，迁移见 P0-4）：
+//!
+//! ```text
+//! APPDATA/
+//! ├── accounts.json              # 账户元数据（公共，不含任何敏感内容）
+//! ├── .astra-instance.lock       # 全局单实例锁（pid + 存活检测）
+//! └── accounts/<account_id>/
+//!     ├── data/                  # 账户私有数据（原 app_data_dir 的全部落盘）
+//!     └── astra-home/            # 账户私有 astra home（config.toml / pastes）
+//! ```
+//!
+//! 未带 `--account` 启动时保持 legacy 模式：所有落盘仍走原 app_data_dir /
+//! `resolve_astra_home()`，旧版本行为完全不变（P0-4 再做数据迁移与强制选户）。
+//!
+//! 冷切换（账户切换 = 换数据目录 + 重启进程）：`account_launch` 释放实例锁 →
+//! spawn 自身带 `--account=<id>` → 退出当前进程。进程内所有全局态
+//! （AgentState / store / 事件监听）随进程消亡，不存在热切换的清理问题。
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use tauri::Manager;
+
+/// 账户元数据（公共库内容，禁止放入任何敏感信息——设计文档 §3.2）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Account {
+    /// 不可变随机 ID，账户主键（显示名称不是身份凭证）
+    pub account_id: String,
+    pub display_name: String,
+    /// Unix 毫秒时间戳
+    pub created_at: i64,
+    /// active | locked（锁定语义随 P0-3 加密上线，P0 仅占位）
+    pub status: String,
+}
+
+/// 进程绑定的活动账户上下文（setup 阶段初始化一次，之后只读）
+#[derive(Debug, Clone)]
+pub(crate) struct AccountRuntime {
+    pub account_id: String,
+    /// 账户私有数据目录（替代 app_data_dir 的全部落盘）
+    pub data_dir: PathBuf,
+    /// 账户私有 astra home（config.toml / pastes）
+    pub astra_home: PathBuf,
+}
+
+static ACTIVE: OnceLock<Option<AccountRuntime>> = OnceLock::new();
+
+/// 从启动参数解析 `--account=<account_id>` 并绑定活动账户。
+/// 无参数 → legacy 模式（Ok(None)），保持旧版本行为。
+pub(crate) fn init_from_args(
+    app_data_root: &std::path::Path,
+) -> Result<Option<AccountRuntime>, String> {
+    let arg = std::env::args()
+        .find(|a| a.starts_with("--account="))
+        .map(|a| a["--account=".len()..].to_string());
+    resolve_account(app_data_root, arg)
+}
+
+/// 按 account_id 解析账户运行时（从 init_from_args 拆出以便单测）。
+/// 指定 ID 但账户不存在 / ID 非法 → Err（拒绝启动，不静默回退 legacy——
+/// 带着明确账户意图启动却落到别的数据目录比失败更危险）。
+fn resolve_account(
+    app_data_root: &std::path::Path,
+    account_id: Option<String>,
+) -> Result<Option<AccountRuntime>, String> {
+    let Some(account_id) = account_id else {
+        return Ok(None);
+    };
+    if account_id.is_empty()
+        || !account_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(format!("非法的账户 ID: {account_id}"));
+    }
+    let accounts = read_accounts(app_data_root)?;
+    if !accounts.iter().any(|a| a.account_id == account_id) {
+        return Err(format!("账户不存在: {account_id}"));
+    }
+    Ok(Some(AccountRuntime {
+        data_dir: account_dir(app_data_root, &account_id).join("data"),
+        astra_home: account_dir(app_data_root, &account_id).join("astra-home"),
+        account_id,
+    }))
+}
+
+/// setup 阶段调用：绑定活动账户到进程级全局（之后只读）。
+/// 返回活动账户信息供日志使用。
+pub(crate) fn bind(runtime: Option<AccountRuntime>) {
+    let _ = ACTIVE.set(runtime);
+}
+
+/// 当前进程绑定的账户（legacy 模式为 None）
+pub(crate) fn active() -> Option<&'static AccountRuntime> {
+    ACTIVE.get().and_then(|o| o.as_ref())
+}
+
+/// 账户私有数据目录。**这是全部账户私有落盘的唯一入口**——
+/// 新增存储必须经此函数取路径，禁止直接调用 `app_data_dir()`
+/// （见 docs/MULTI_ACCOUNT_INVENTORY.md §2 白名单规则）。
+/// legacy 模式（无账户启动）返回原 app_data_dir，行为与旧版本一致。
+pub(crate) fn data_dir(manager: &impl tauri::Manager<tauri::Wry>) -> Result<PathBuf, String> {
+    if let Some(rt) = active() {
+        std::fs::create_dir_all(&rt.data_dir).map_err(|e| format!("创建账户数据目录失败: {e}"))?;
+        return Ok(rt.data_dir.clone());
+    }
+    manager
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {e}"))
+}
+
+/// 账户私有 astra home（config.toml / pastes）。
+/// legacy 模式回退到 astra-core 的 resolve_astra_home()（~/.astra，ASTRA_HOME 可覆盖）。
+pub(crate) fn astra_home() -> PathBuf {
+    if let Some(rt) = active() {
+        let _ = std::fs::create_dir_all(&rt.astra_home);
+        return rt.astra_home.clone();
+    }
+    agent_core::astra_config::resolve_astra_home()
+}
+
+/// 账户目录：APPDATA/accounts/<account_id>/
+fn account_dir(app_data_root: &std::path::Path, account_id: &str) -> PathBuf {
+    app_data_root.join("accounts").join(account_id)
+}
+
+// ===== 账户元数据存储（APPDATA/accounts.json） =====
+
+fn accounts_file(app_data_root: &std::path::Path) -> PathBuf {
+    app_data_root.join("accounts.json")
+}
+
+fn read_accounts(app_data_root: &std::path::Path) -> Result<Vec<Account>, String> {
+    let path = accounts_file(app_data_root);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取账户列表失败: {e}"))?;
+    serde_json::from_str(&raw).map_err(|e| format!("解析账户列表失败: {e}"))
+}
+
+fn write_accounts(app_data_root: &std::path::Path, accounts: &[Account]) -> Result<(), String> {
+    std::fs::create_dir_all(app_data_root).map_err(|e| format!("创建数据目录失败: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(accounts).map_err(|e| format!("序列化账户失败: {e}"))?;
+    std::fs::write(accounts_file(app_data_root), json).map_err(|e| format!("写入账户列表失败: {e}"))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 生成不可变随机账户 ID（uuid v4 去连字符；uuid 已在依赖树中）
+fn generate_account_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+// ===== 全局单实例锁 =====
+
+/// 单实例锁守卫：持有时进程独占实例；Drop 时释放。
+/// 锁文件写 pid，持锁进程崩溃后由 pid 存活检测判定锁失效（可抢回）。
+#[derive(Debug)]
+pub(crate) struct InstanceLock {
+    path: PathBuf,
+    held: bool,
+}
+
+impl InstanceLock {
+    /// 尝试获取全局实例锁。已有存活实例持锁 → Err（含持有者 pid 提示）。
+    /// 锁文件存在但 pid 已死 → 判定陈旧锁，抢回。
+    pub(crate) fn acquire(app_data_root: &std::path::Path) -> Result<Self, String> {
+        std::fs::create_dir_all(app_data_root).map_err(|e| format!("创建数据目录失败: {e}"))?;
+        let path = app_data_root.join(".astra-instance.lock");
+        if path.exists() {
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                if let Ok(pid) = raw.trim().parse::<i32>() {
+                    if pid != std::process::id() as i32 && pid_alive(pid) {
+                        return Err(format!(
+                            "Astra 已在运行（pid {pid}）。同一安装同时只允许一个实例。"
+                        ));
+                    }
+                }
+            }
+            // 陈旧锁（持锁进程已死或内容损坏）：覆盖抢回
+        }
+        std::fs::write(&path, std::process::id().to_string())
+            .map_err(|e| format!("写入实例锁失败: {e}"))?;
+        Ok(InstanceLock { path, held: true })
+    }
+
+    /// 主动释放（冷切换 spawn 新进程前调用，避免新进程撞锁）。
+    /// 非测试构建经 InstanceLockState::release 间接使用（State 内 Mutex 包装）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn release(&mut self) {
+        self.held = false;
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+impl InstanceLockState {
+    pub(crate) fn release(&self) {
+        // State 内部可变性：锁释放是一次性终态操作，用锁内标志保证幂等安全
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.held {
+            guard.held = false;
+            let _ = std::fs::remove_file(&guard.path);
+        }
+    }
+}
+
+impl Drop for InstanceLock {
+    fn drop(&mut self) {
+        if self.held {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// pid 存活检测（不杀进程，只探测）
+fn pid_alive(pid: i32) -> bool {
+    #[cfg(unix)]
+    {
+        // kill(pid, 0)：权限不足返回 EPERM 也说明进程存在
+        unsafe {
+            libc::kill(pid, 0) == 0
+                || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+        }
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+            if handle.is_null() {
+                return false;
+            }
+            let mut exit_code: u32 = 0;
+            let alive =
+                windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut exit_code)
+                    != 0
+                    && exit_code == STILL_ACTIVE;
+            CloseHandle(handle);
+            alive
+        }
+    }
+}
+
+// ===== Tauri 命令 =====
+
+#[derive(Serialize)]
+pub struct AccountStatus {
+    /// account：已绑定账户启动；legacy：无账户启动（旧数据目录）；
+    /// 账户选择由前端依据 accounts 是否为空决定渲染创建页还是选择页。
+    pub mode: String,
+    pub account_id: Option<String>,
+    pub display_name: Option<String>,
+    pub accounts: Vec<Account>,
+}
+
+#[tauri::command]
+pub fn account_status(app: tauri::AppHandle) -> Result<AccountStatus, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
+    let accounts = read_accounts(&root)?;
+    match active() {
+        Some(rt) => {
+            let display_name = accounts
+                .iter()
+                .find(|a| a.account_id == rt.account_id)
+                .map(|a| a.display_name.clone());
+            Ok(AccountStatus {
+                mode: "account".into(),
+                account_id: Some(rt.account_id.clone()),
+                display_name,
+                accounts,
+            })
+        }
+        None => Ok(AccountStatus {
+            mode: "legacy".into(),
+            account_id: None,
+            display_name: None,
+            accounts,
+        }),
+    }
+}
+
+#[tauri::command]
+pub fn account_list(app: tauri::AppHandle) -> Result<Vec<Account>, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
+    read_accounts(&root)
+}
+
+#[tauri::command]
+pub fn account_create(app: tauri::AppHandle, display_name: String) -> Result<Account, String> {
+    let name = display_name.trim();
+    if name.is_empty() || name.chars().count() > 32 {
+        return Err("账户名称需为 1-32 个字符".into());
+    }
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
+    let mut accounts = read_accounts(&root)?;
+    if accounts.len() >= 16 {
+        return Err("账户数量已达上限（16）".into());
+    }
+    let account = Account {
+        account_id: generate_account_id(),
+        display_name: name.to_string(),
+        created_at: now_ms(),
+        status: "active".into(),
+    };
+    accounts.push(account.clone());
+    write_accounts(&root, &accounts)?;
+    // 预建账户目录结构（data / astra-home），保证 create 即可启动
+    let dir = account_dir(&root, &account.account_id);
+    std::fs::create_dir_all(dir.join("data")).map_err(|e| format!("创建账户数据目录失败: {e}"))?;
+    std::fs::create_dir_all(dir.join("astra-home"))
+        .map_err(|e| format!("创建账户 astra-home 失败: {e}"))?;
+    Ok(account)
+}
+
+/// 冷切换：以目标账户重启进程。释放实例锁 → spawn 自身（--account=<id>）→
+/// 当前进程退出。dev 模式下 current_exe 是调试二进制，行为依赖 devUrl 可达，
+/// 正式验证以打包产物为准。
+#[tauri::command]
+pub fn account_launch(
+    app: tauri::AppHandle,
+    account_id: String,
+    lock: tauri::State<'_, InstanceLockState>,
+) -> Result<(), String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
+    let accounts = read_accounts(&root)?;
+    if !accounts.iter().any(|a| a.account_id == account_id) {
+        return Err(format!("账户不存在: {account_id}"));
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
+    // 先释放锁再 spawn：新进程启动时会尝试获取同一把锁
+    lock.release();
+    std::process::Command::new(exe)
+        .arg(format!("--account={account_id}"))
+        .spawn()
+        .map_err(|e| format!("启动新账户进程失败: {e}"))?;
+    app.exit(0);
+    Ok(())
+}
+
+/// InstanceLock 的 Tauri State 包装（setup 阶段 acquire 后 manage）。
+/// Mutex 允许冷切换命令在 &self 上释放锁。
+pub(crate) struct InstanceLockState(pub(crate) std::sync::Mutex<InstanceLock>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_root(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("astra-accounts-test-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn create_and_read_accounts_roundtrip() {
+        let root = tmp_root("roundtrip");
+        let mut accounts = read_accounts(&root).unwrap();
+        assert!(accounts.is_empty());
+        accounts.push(Account {
+            account_id: "abc123".into(),
+            display_name: "工作".into(),
+            created_at: 1,
+            status: "active".into(),
+        });
+        write_accounts(&root, &accounts).unwrap();
+        let got = read_accounts(&root).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].display_name, "工作");
+        assert_eq!(got[0].account_id, "abc123");
+    }
+
+    #[test]
+    fn resolve_account_none_is_legacy() {
+        let root = tmp_root("legacy");
+        assert!(resolve_account(&root, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_account_rejects_invalid_and_missing() {
+        let root = tmp_root("reject");
+        assert!(resolve_account(&root, Some("../evil".into())).is_err());
+        assert!(resolve_account(&root, Some("".into())).is_err());
+        assert!(resolve_account(&root, Some("nope".into())).is_err());
+        // 合法格式但不存在 → 也拒绝
+        assert!(resolve_account(&root, Some("abc123def456".into())).is_err());
+    }
+
+    #[test]
+    fn resolve_account_resolves_created_account_dirs() {
+        let root = tmp_root("resolve");
+        let mut accounts = read_accounts(&root).unwrap();
+        accounts.push(Account {
+            account_id: "abc123".into(),
+            display_name: "工作".into(),
+            created_at: 1,
+            status: "active".into(),
+        });
+        write_accounts(&root, &accounts).unwrap();
+        let rt = resolve_account(&root, Some("abc123".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(rt.account_id, "abc123");
+        assert_eq!(
+            rt.data_dir,
+            root.join("accounts").join("abc123").join("data")
+        );
+        assert_eq!(
+            rt.astra_home,
+            root.join("accounts").join("abc123").join("astra-home")
+        );
+    }
+
+    #[test]
+    fn account_id_is_random_and_unique() {
+        let a = generate_account_id();
+        let b = generate_account_id();
+        assert_eq!(a.len(), 32);
+        assert_ne!(a, b);
+        assert!(a.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn instance_lock_excludes_second_holder() {
+        let root = tmp_root("lock");
+        let mut lock = InstanceLock::acquire(&root).unwrap();
+        assert!(root.join(".astra-instance.lock").exists());
+        lock.release();
+        assert!(!root.join(".astra-instance.lock").exists());
+        // 释放后可重新获取
+        let again = InstanceLock::acquire(&root);
+        assert!(again.is_ok());
+        again.unwrap().release();
+    }
+
+    #[test]
+    fn instance_lock_stale_pid_is_reclaimed() {
+        let root = tmp_root("stale");
+        // 写入一个几乎不可能存活的 pid（Linux pid 上限 4M+ / macOS 同理；
+        // 用 u32::MAX 溢出截断后仍判死）。更稳妥：写当前 pid 的文件再手动
+        // 模拟陈旧 —— 直接写无效 pid 内容。
+        std::fs::write(root.join(".astra-instance.lock"), "999999999").unwrap();
+        let mut lock = InstanceLock::acquire(&root).unwrap();
+        assert!(root.join(".astra-instance.lock").exists());
+        lock.release();
+    }
+
+    #[test]
+    fn instance_lock_live_foreign_pid_is_rejected() {
+        let root = tmp_root("live");
+        // spawn 一个真实存活短命进程，其 pid 一定存活
+        let mut child = std::process::Command::new(
+            #[cfg(unix)]
+            "/bin/sleep",
+            #[cfg(not(unix))]
+            "cmd",
+        )
+        .args(
+            #[cfg(unix)]
+            ["0.3"],
+            #[cfg(not(unix))]
+            ["/c", "ping", "-n", "1", "127.0.0.1"],
+        )
+        .spawn()
+        .unwrap();
+        std::fs::write(root.join(".astra-instance.lock"), child.id().to_string()).unwrap();
+        let err = InstanceLock::acquire(&root).unwrap_err();
+        assert!(err.contains("已在运行"));
+        let _ = child.wait();
+    }
+}

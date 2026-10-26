@@ -84,9 +84,48 @@ pub fn run() {
             };
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+            // ===== 本地账户绑定与单实例锁（多账户 P0，冷切换架构） =====
+            // 账户身份由启动参数 --account=<id> 决定；无参数 → legacy 模式
+            // （落盘仍走原 app_data_dir，旧版本行为不变）。账户数据目录
+            // 与实例锁的说明见 docs/MULTI_ACCOUNT_INVENTORY.md。
+            let app_root = match app.path().app_data_dir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    eprintln!("[account] app_data_dir unavailable: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match app::accounts::init_from_args(&app_root) {
+                Ok(runtime) => {
+                    // 账户模式：ASTRA_HOME 指向账户私有 astra-home，
+                    // astra-core 的 astra_config::load()（MCP/ACP 装配）
+                    // 经 resolve_astra_home() 自动跟随，无需改动 runtime。
+                    if let Some(rt) = &runtime {
+                        std::env::set_var("ASTRA_HOME", &rt.astra_home);
+                    }
+                    app::accounts::bind(runtime);
+                }
+                Err(e) => {
+                    eprintln!("[account] {e}");
+                    std::process::exit(1);
+                }
+            }
+            match app::accounts::InstanceLock::acquire(&app_root) {
+                Ok(lock) => {
+                    app.manage(app::accounts::InstanceLockState(std::sync::Mutex::new(
+                        lock,
+                    )));
+                }
+                Err(e) => {
+                    eprintln!("[account] {e}");
+                    std::process::exit(1);
+                }
+            }
+
             // 功能点落盘日志：Windows GUI 无控制台，关键事件写
             // %APPDATA%\com.astra.app\astra.log，用户可直接反馈该文件。
-            if let Ok(dir) = app.path().app_data_dir() {
+            // 账户模式下写账户私有数据目录。
+            if let Ok(dir) = app::accounts::data_dir(&*app) {
                 logging::init(&dir);
                 app_log!(
                     info,
@@ -146,7 +185,7 @@ pub fn run() {
             } else {
                 None
             };
-            match app.path().app_data_dir() {
+            match app::accounts::data_dir(&*app) {
                 Ok(dir) => {
                     match crate::memory::host::MemoryHost::init(
                         &dir,
@@ -335,6 +374,11 @@ pub fn run() {
             skills::user::write_user_skill_file,
             skills::user::delete_user_skill_file,
             skills::user::delete_user_skill,
+            // 本地账户（多账户 P0）
+            app::accounts::account_status,
+            app::accounts::account_list,
+            app::accounts::account_create,
+            app::accounts::account_launch,
             // Extensions 市场（状态展示；安装走 Agent 对话）
             extensions::market::market_status,
             // Extensions 管理（MCP / ACP 启停、编辑、删除）

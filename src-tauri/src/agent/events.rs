@@ -1,8 +1,6 @@
-
 use agent_core::Envelope;
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
-
+use tauri::AppHandle;
 
 // ===== 事件日志（JSONL，一行一个 Envelope，供排查对话问题） =====
 
@@ -174,7 +172,7 @@ pub(crate) async fn commit_collected_memory(
 /// 把事件追加写入 app_data_dir/agent_events.log（JSONL）。
 /// 失败只忽略——日志不能影响对话本身。
 pub(crate) fn log_event(app: &AppHandle, env: &Envelope) {
-    let Ok(dir) = app.path().app_data_dir() else {
+    let Some(dir) = crate::app::accounts::data_dir(app).ok() else {
         return;
     };
     let path = dir.join("agent_events.log");
@@ -198,10 +196,8 @@ pub(crate) fn log_event(app: &AppHandle, env: &Envelope) {
 /// 读取最近 N 条事件日志（最新在后），供 /logs 页或前端排查
 #[tauri::command]
 pub fn agent_recent_events(app: AppHandle, limit: Option<u32>) -> Result<Vec<Value>, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法定位应用数据目录: {e}"))?;
+    let dir =
+        crate::app::accounts::data_dir(&app).map_err(|e| format!("无法定位应用数据目录: {e}"))?;
     let path = dir.join("agent_events.log");
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     let lines: Vec<&str> = content.lines().collect();

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::process::Command;
-use tauri::Manager;
+// AppHandle 以完全限定路径使用（tauri::AppHandle），无需 use 导入
 
 use crate::app::llama_server::ModelConfig;
 
@@ -78,10 +78,7 @@ impl Default for AppSettings {
 // ===== 设置文件路径 =====
 
 pub(crate) fn get_settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let config_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    let config_dir = crate::app::accounts::data_dir(app)?;
     fs::create_dir_all(&config_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
     Ok(config_dir.join("settings.json"))
 }

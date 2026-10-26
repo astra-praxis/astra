@@ -1,7 +1,7 @@
 use crate::agent::AgentState;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use super::session_store;
 
@@ -135,7 +135,7 @@ pub async fn delete_agent_session(
     let mut deleted = state.session_files.lock().await;
     let path = ensure_sessions_file(&app)?;
     let mut sessions = session_store::read_json_vec::<AgentSession>(&path);
-    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let directory = crate::app::accounts::data_dir(&app)?;
     threads
         .open(&directory, std::sync::Arc::clone(&state.persistence_errors))
         .await?;

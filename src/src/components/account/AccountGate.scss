@@ -1,0 +1,155 @@
+// 本地账户门（AccountGate）样式：全屏阻断层，BEM + var(--...) 主题变量
+.account-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-page, #0d1120);
+  padding: 24px;
+
+  &--loading {
+    // 状态查询期间：纯占位，不闪现主应用
+    background: var(--bg-page, #0d1120);
+  }
+
+  &__panel {
+    width: 100%;
+    max-width: 420px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 32px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--bg-card-hover, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+
+    &:hover:not(:disabled) {
+      border-color: var(--brand-400);
+      background: var(--brand-50);
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+  }
+
+  &__avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--brand-100);
+    color: var(--brand-700);
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  &__name {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__action {
+    font-size: 12px;
+    color: var(--brand-500);
+    flex-shrink: 0;
+  }
+
+  &__create {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 4px;
+  }
+
+  &__input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+
+    &:focus {
+      border-color: var(--brand-400);
+    }
+  }
+
+  &__submit {
+    padding: 10px 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--brand-500);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover:not(:disabled) {
+      background: var(--brand-600);
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+  }
+
+  &__error {
+    margin: 0;
+    font-size: 12px;
+    color: var(--error-500, #ef4444);
+    word-break: break-all;
+  }
+}

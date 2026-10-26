@@ -11,7 +11,7 @@ use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::providers;
 
@@ -122,7 +122,7 @@ pub async fn agent_start_run(
     // serializes its own Runs via its execution lock, so different sessions
     // stream in parallel and only two simultaneous admissions queue here.
     let mut threads = Arc::clone(&state.threads).lock_owned().await;
-    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let directory = crate::app::accounts::data_dir(&app)?;
     threads
         .open(&directory, Arc::clone(&state.persistence_errors))
         .await?;

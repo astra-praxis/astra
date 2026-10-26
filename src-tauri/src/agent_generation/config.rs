@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 
 // ===== 配置（generation.json）=====
@@ -48,10 +48,7 @@ pub(crate) fn write_config_file(path: &Path, config: &GenerationConfig) -> Resul
 }
 
 fn generation_config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
+    let dir = crate::app::accounts::data_dir(app)?;
     Ok(dir.join("generation.json"))
 }
 

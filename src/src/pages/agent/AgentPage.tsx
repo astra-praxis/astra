@@ -275,16 +275,23 @@ export default function AgentPage() {
    * 每条助手消息对应的「本轮完整回复」：一个 Run 里助手输出会被工具调用/思考块
    * 切成多段 assistant 条目，复制时按 Run（相邻两条用户消息之间）聚合所有段。
    * 仅多段时写入 map；单段直接用 entry.text 即可。
+   * lastAssistantOfRun：每个 Run 的最后一条 assistant 条目索引（只有它展示底部「复制全文」）。
    */
-  const fullRunTexts = useMemo(() => {
+  const { fullRunTexts, lastAssistantOfRun } = useMemo(() => {
     const map = new Map<number, string>();
+    const lastAssistantOfRun = new Set<number>();
     let runStart = 0;
     const flush = (end: number) => {
       const texts: string[] = [];
+      let lastIdx = -1;
       for (let i = runStart; i < end; i++) {
         const e = entries[i];
-        if (e.kind === 'assistant' && e.text.trim()) texts.push(e.text);
+        if (e.kind === 'assistant' && e.text.trim()) {
+          texts.push(e.text);
+          lastIdx = i;
+        }
       }
+      if (lastIdx >= 0) lastAssistantOfRun.add(lastIdx);
       if (texts.length > 1) {
         const joined = texts.join('\n\n');
         for (let i = runStart; i < end; i++) {
@@ -297,7 +304,7 @@ export default function AgentPage() {
       if (entries[i].kind === 'user') flush(i);
     }
     flush(entries.length);
-    return map;
+    return { fullRunTexts: map, lastAssistantOfRun };
   }, [entries]);
   const [activeDot, setActiveDot] = useState(-1);
 
@@ -833,6 +840,7 @@ export default function AgentPage() {
                     index={i}
                     isLast={i === entries.length - 1}
                     fullText={fullRunTexts.get(i)}
+                    isRunFinalAssistant={lastAssistantOfRun.has(i)}
                     onDecide={handleDecide}
                     onAnswer={handleAnswer}
                     onEdit={handleEditUserMessage}

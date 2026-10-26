@@ -197,6 +197,7 @@ export const EntryView = memo(function EntryView({
   index,
   isLast,
   fullText,
+  isRunFinalAssistant = false,
   onDecide,
   onAnswer,
   onEdit,
@@ -213,6 +214,8 @@ export const EntryView = memo(function EntryView({
   isLast?: boolean;
   /** 本轮 Run 聚合后的完整回复（多段 assistant 时存在）；复制用 */
   fullText?: string;
+  /** 是否为该 Run 的最后一条 assistant 条目：只有它展示底部「复制全文」，避免一段回答出现多个复制按钮 */
+  isRunFinalAssistant?: boolean;
   onDecide: (callId: string, allow: boolean) => Promise<void>;
   onAnswer: (questionId: string, answer: string | null) => void;
   /** hover 编辑重发（仅用户消息） */
@@ -286,7 +289,7 @@ export const EntryView = memo(function EntryView({
               <div className="aentry__md">
                 <MarkdownMessage content={entry.text} streaming={entry.streaming} linkPreview={linkPreview} filePreview={linkPreview} />
               </div>
-              {!entry.streaming && <AssistantCopyFooter text={fullText ?? entry.text} />}
+              {!entry.streaming && isRunFinalAssistant && <AssistantCopyFooter text={fullText ?? entry.text} />}
             </>
           ) : (
             <div className="aentry__typing">

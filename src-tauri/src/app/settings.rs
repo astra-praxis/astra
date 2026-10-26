@@ -277,7 +277,7 @@ fn resolve_editor_command(command: &str, dirs: &[std::path::PathBuf]) -> std::pa
 
 /// Windows 批处理入口（code.cmd / zed.cmd 等）不能被 CreateProcess 直接执行
 /// （Rust std 自 CVE-2024-24576 修复后拒绝 spawn .bat/.cmd，报错 193：
-/// 「%1 不是有效的 Win32 应用程序」），必须经 cmd.exe 解释执行。
+/// 「%1 不是有效的 Win32 应用程序」），必须经 PowerShell 调用解释执行。
 /// 唯一调用点在 cfg(windows) 分支内，非 Windows 平台仅由单测使用。
 #[cfg_attr(not(windows), allow(dead_code))]
 fn needs_cmd_interpreter(editor: &std::path::Path) -> bool {
@@ -286,6 +286,14 @@ fn needs_cmd_interpreter(editor: &std::path::Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
         .unwrap_or(false)
+}
+
+/// 构造 PowerShell 单引号参数：内部字符全部字面（& % ^ ! 空格不再特殊），
+/// 唯一的转义是 `'` 翻倍为 `''`。
+/// 唯一调用点在 cfg(windows) 分支内，非 Windows 平台仅由单测使用。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn powershell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "''"))
 }
 
 #[tauri::command]
@@ -318,13 +326,16 @@ pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(),
     let editor = resolve_editor_command(&editor_command, &dirs);
     #[cfg(windows)]
     let mut spawn_cmd: Command = if needs_cmd_interpreter(&editor) {
-        use std::os::windows::process::CommandExt;
-        // cmd /C 包裹批处理执行。整行参数带外层引号用 raw_arg 原样传入：
-        // cmd 规则是「多组引号时剥掉最外层一对」，外层包裹后内层引号原样保留，
-        // 路径含空格也能正确解析（Rust 默认逐参数引号在此场景会解析错误）
-        let mut cmd = Command::new("cmd");
-        cmd.raw_arg("/C")
-            .raw_arg(format!("\"\"{}\" \"{}\"\"", editor.display(), path))
+        // 批处理入口（code.cmd 等）不能直接 CreateProcess（错误 193），
+        // 经 cmd /C 时路径里的 & % ^ ! 会被 cmd 二次解析（%VAR% 引号内也展开），
+        // 所以改用 PowerShell：单引号参数内全部字面，只需把 ' 翻倍转义。
+        let script = format!(
+            "& {} {}",
+            powershell_quote(&editor.display().to_string()),
+            powershell_quote(&path)
+        );
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .env("PATH", &full_path);
         cmd
     } else {
@@ -425,6 +436,21 @@ mod tests {
         // 同名但非批处理扩展
         assert!(!needs_cmd_interpreter(std::path::Path::new("code.bat.exe")));
         assert!(!needs_cmd_interpreter(std::path::Path::new("cmder")));
+    }
+
+    #[test]
+    fn powershell_quote_wraps_and_escapes_literals() {
+        // 普通路径：单引号包裹，内部字符全部字面
+        assert_eq!(
+            powershell_quote(r"C:\foo & bar\100%\proj"),
+            "'C:\\foo & bar\\100%\\proj'"
+        );
+        // 引号翻倍：路径里的单引号 -> 两个单引号
+        assert_eq!(powershell_quote("a'b"), "'a''b'");
+        // 空参数
+        assert_eq!(powershell_quote(""), "''");
+        // cmd 特殊字符（& % ^ ! 空格）都不需要额外转义
+        assert_eq!(powershell_quote("x&y%z^w!q "), "'x&y%z^w!q '");
     }
 
     #[cfg(not(windows))]

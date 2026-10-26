@@ -15,12 +15,18 @@
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use std::path::Path;
+use std::sync::OnceLock;
 
 const ENVELOPE_VERSION: u32 = 1;
 const ENVELOPE_ALG: &str = "xchacha20poly1305";
 const KEK_SERVICE: &str = "com.astra.app";
 const KEK_USER: &str = "astra-machine-kek";
 const KEK_FILE: &str = ".astra-kek";
+
+/// 进程内 KEK 缓存：keychain 访问在 macOS 上可能弹授权框，
+/// 必须每进程最多访问一次（冷切换架构下一进程只服务一个账户，
+/// KEK 是机器级而非账户级，缓存不跨进程、不破坏隔离）。
+static KEK_CACHE: OnceLock<[u8; 32]> = OnceLock::new();
 
 fn b64_encode(data: &[u8]) -> String {
     use base64::Engine;
@@ -51,10 +57,19 @@ fn random_nonce_24() -> [u8; 24] {
     n
 }
 
-/// 取机器级 KEK：优先 OS keychain；keychain 不可用时回退
-/// `<fallback_dir>/.astra-kek` 文件（0600）。回退文件已存在但长度异常时
-/// 拒绝静默轮换（旧数据会全部不可读）。
+/// 取机器级 KEK（进程内缓存，最多触碰一次 keychain）：优先 OS keychain；
+/// keychain 不可用时回退 `<fallback_dir>/.astra-kek` 文件（0600）。
+/// 回退文件已存在但长度异常时拒绝静默轮换（旧数据会全部不可读）。
 pub fn machine_kek(fallback_dir: &Path) -> Result<[u8; 32], String> {
+    if let Some(kek) = KEK_CACHE.get() {
+        return Ok(*kek);
+    }
+    let kek = machine_kek_uncached(fallback_dir)?;
+    let _ = KEK_CACHE.set(kek);
+    Ok(kek)
+}
+
+fn machine_kek_uncached(fallback_dir: &Path) -> Result<[u8; 32], String> {
     match try_kek_from_keychain() {
         Ok(kek) => Ok(kek),
         Err(e) => {

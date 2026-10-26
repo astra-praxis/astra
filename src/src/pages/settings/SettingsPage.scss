@@ -518,6 +518,16 @@
   color: var(--accent);
 }
 
+/* Agent 对话主题选择卡：预览 SVG 铺满卡宽，保持 16:10 比例 */
+.agent-theme-option {
+  .agent-theme-preview {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-bottom: 1px solid var(--border-light);
+  }
+}
+
 /* 开关（Agent 行为 / 记忆 / 图片生成共用） */
 .agent-perm-switch {
   flex-shrink: 0;

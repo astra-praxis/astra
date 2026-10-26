@@ -1,0 +1,973 @@
+/* ============================================================
+   Agent 对话页专属主题（作用域覆盖层）
+   - 选择器：.agent-root[data-agent-theme='xxx']，只在 .agent-root
+     子树内覆盖 CSS 变量 → 其他页面完全不受影响
+   - 每个主题必须同时定义亮/暗两档（漏一档就是暗色模式 bug）
+   - 背景纹理用内联 SVG data-URI（低透明度装饰层，不参与交互）
+   - 变量名与 styles/_variables.scss 保持一致
+   ============================================================ */
+
+/* ===== 主题变量表：主题名 → { light: {...}, dark: {...} } ===== */
+$agent-themes: (
+  /* ---- A 星轨（深空星野） ---- */
+  'starfield': (
+    light: (
+      'bg-body': #eef1fa,
+      'bg-surface': #ffffff,
+      'bg-surface-soft': #f2f4fc,
+      'bg-elevated': #ffffff,
+      'bg-glass': rgba(255, 255, 255, 0.76),
+      'bg-input': #ffffff,
+      'text-primary': #1c2233,
+      'text-secondary': #4f5a75,
+      'text-muted': #8891a8,
+      'text-placeholder': #c3c9d9,
+      'border-color': #e0e4f0,
+      'border-strong': #c8cede,
+      'divider': #eef0f6,
+      'brand-50': #eef1fe,
+      'brand-100': #e0e5fd,
+      'brand-200': #c5cdfb,
+      'brand-300': #9aa5f6,
+      'brand-400': #7c83f2,
+      'brand-500': #6366f1,
+      'brand-600': #4f46e5,
+      'brand-700': #4338ca,
+      'user-bubble-bg': #0d1120,
+      'user-bubble-text': #dfe3f0,
+      'user-bubble-border': rgba(255, 255, 255, 0.08),
+      'code-bg': #10131f,
+      'code-bg-deep': #0a0d17,
+      'code-text': #dfe3f0,
+      'code-border': rgba(255, 255, 255, 0.08),
+      'accent': #6366f1,
+      'accent-hover': #4f46e5,
+      'accent-bg': #eef1fe,
+      'accent-bg-hover': #e0e5fd,
+      'accent-shadow': rgba(99, 102, 241, 0.32),
+      'accent-light': rgba(99, 102, 241, 0.1),
+      'accent-ring': rgba(99, 102, 241, 0.28),
+      'gradient-brand': linear-gradient(135deg, #6366f1, #a78bfa),
+      'scrollbar-thumb': #c8cede,
+      'scrollbar-thumb-hover': #8891a8,
+      'link': #4f46e5,
+      'link-hover': #4338ca,
+    ),
+    dark: (
+      'bg-body': #0b0e1f,
+      'bg-surface': #141a33,
+      'bg-surface-soft': #1a2142,
+      'bg-elevated': #20274f,
+      'bg-glass': rgba(11, 14, 31, 0.72),
+      'bg-input': #171e3c,
+      'text-primary': #e6e9f5,
+      'text-secondary': #a5acc9,
+      'text-muted': #7c84a8,
+      'text-placeholder': #4a5174,
+      'border-color': rgba(255, 255, 255, 0.12),
+      'border-strong': rgba(255, 255, 255, 0.2),
+      'divider': rgba(255, 255, 255, 0.07),
+      'brand-50': #1c2350,
+      'brand-100': #242d5e,
+      'brand-200': #333f75,
+      'brand-300': #7b84dd,
+      'brand-400': #98a2f2,
+      'brand-500': #a5abee,
+      'brand-600': #c1c6f4,
+      'brand-700': #dcdff9,
+      'user-bubble-bg': #10152c,
+      'user-bubble-text': #dfe3f0,
+      'user-bubble-border': rgba(152, 162, 242, 0.35),
+      'code-bg': #0d1226,
+      'code-bg-deep': #090d1c,
+      'code-text': #dfe3f0,
+      'code-border': rgba(255, 255, 255, 0.09),
+      'accent': #a5abee,
+      'accent-hover': #c1c6f4,
+      'accent-bg': #1c2350,
+      'accent-bg-hover': #242d5e,
+      'accent-shadow': rgba(152, 162, 242, 0.35),
+      'accent-light': rgba(152, 162, 242, 0.14),
+      'accent-ring': rgba(152, 162, 242, 0.3),
+      'gradient-brand': linear-gradient(135deg, #6366f1, #8b5cf6),
+      'scrollbar-thumb': #333b63,
+      'scrollbar-thumb-hover': #47507c,
+      'link': #98a2f2,
+      'link-hover': #c1c6f4,
+    ),
+  ),
+
+  /* ---- B 纸墨（信笺阅读） ---- */
+  'paper': (
+    light: (
+      'bg-body': #f6f5f1,
+      'bg-surface': #fdfcf9,
+      'bg-surface-soft': #efede7,
+      'bg-elevated': #ffffff,
+      'bg-glass': rgba(253, 252, 249, 0.78),
+      'bg-input': #ffffff,
+      'text-primary': #26303f,
+      'text-secondary': #4f5a68,
+      'text-muted': #8a90a0,
+      'text-placeholder': #b9bec9,
+      'border-color': #dfe3e8,
+      'border-strong': #c4cad4,
+      'divider': #e9e9e3,
+      'brand-50': #eef1f5,
+      'brand-100': #dfe5ec,
+      'brand-200': #c3cfdb,
+      'brand-300': #8fa7c0,
+      'brand-400': #5c7d9f,
+      'brand-500': #3d5a80,
+      'brand-600': #334c6d,
+      'brand-700': #2a3f5a,
+      'user-bubble-bg': #26303f,
+      'user-bubble-text': #f6f5f1,
+      'user-bubble-border': rgba(38, 48, 63, 0.45),
+      'code-bg': #222b38,
+      'code-bg-deep': #1a2230,
+      'code-text': #dfe3e8,
+      'code-border': rgba(255, 255, 255, 0.1),
+      'accent': #3d5a80,
+      'accent-hover': #334c6d,
+      'accent-bg': #eef1f5,
+      'accent-bg-hover': #dfe5ec,
+      'accent-shadow': rgba(61, 90, 128, 0.32),
+      'accent-light': rgba(61, 90, 128, 0.1),
+      'accent-ring': rgba(61, 90, 128, 0.28),
+      'gradient-brand': linear-gradient(135deg, #3d5a80, #8fa7c0),
+      'scrollbar-thumb': #c4cad4,
+      'scrollbar-thumb-hover': #8a90a0,
+      'link': #3d5a80,
+      'link-hover': #334c6d,
+    ),
+    dark: (
+      'bg-body': #1d2029,
+      'bg-surface': #262a36,
+      'bg-surface-soft': #2e3340,
+      'bg-elevated': #343a49,
+      'bg-glass': rgba(29, 32, 41, 0.74),
+      'bg-input': #2b303d,
+      'text-primary': #e2e0d8,
+      'text-secondary': #a5a8b4,
+      'text-muted': #7c8190,
+      'text-placeholder': #4a4f5c,
+      'border-color': rgba(255, 255, 255, 0.11),
+      'border-strong': rgba(255, 255, 255, 0.19),
+      'divider': rgba(255, 255, 255, 0.07),
+      'brand-50': #2b3345,
+      'brand-100': #35405a,
+      'brand-200': #44516d,
+      'brand-300': #7f9cc0,
+      'brand-400': #9db8d8,
+      'brand-500': #b0c6e2,
+      'brand-600': #c6d7ec,
+      'brand-700': #dde7f5,
+      'user-bubble-bg': #3a4050,
+      'user-bubble-text': #e2e0d8,
+      'user-bubble-border': rgba(157, 184, 216, 0.35),
+      'code-bg': #1b1f29,
+      'code-bg-deep': #151922,
+      'code-text': #dfe3e8,
+      'code-border': rgba(255, 255, 255, 0.08),
+      'accent': #b0c6e2,
+      'accent-hover': #c6d7ec,
+      'accent-bg': #2b3345,
+      'accent-bg-hover': #35405a,
+      'accent-shadow': rgba(157, 184, 216, 0.35),
+      'accent-light': rgba(157, 184, 216, 0.14),
+      'accent-ring': rgba(157, 184, 216, 0.3),
+      'gradient-brand': linear-gradient(135deg, #5c7d9f, #9db8d8),
+      'scrollbar-thumb': #3d4352,
+      'scrollbar-thumb-hover': #535a6e,
+      'link': #9db8d8,
+      'link-hover': #c6d7ec,
+    ),
+  ),
+
+  /* ---- C 全息（霓虹双色） ---- */
+  'holo': (
+    light: (
+      'bg-body': #f4f4fb,
+      'bg-surface': #ffffff,
+      'bg-surface-soft': #f1f1fa,
+      'bg-elevated': #ffffff,
+      'bg-glass': rgba(255, 255, 255, 0.76),
+      'bg-input': #ffffff,
+      'text-primary': #1b1f33,
+      'text-secondary': #51568a,
+      'text-muted': #868ba8,
+      'text-placeholder': #c0c3d8,
+      'border-color': #e2e2f0,
+      'border-strong': #c6c7e4,
+      'divider': #ededf7,
+      'brand-50': #f0edfd,
+      'brand-100': #e3defb,
+      'brand-200': #cabef7,
+      'brand-300': #a58ff0,
+      'brand-400': #8a6ce8,
+      'brand-500': #7a54e2,
+      'brand-600': #6538d6,
+      'brand-700': #5429b8,
+      'user-bubble-bg': #1a1040,
+      'user-bubble-text': #e8e6f8,
+      'user-bubble-border': rgba(122, 84, 226, 0.45),
+      'code-bg': #10131f,
+      'code-bg-deep': #0a0d17,
+      'code-text': #dfe3f0,
+      'code-border': rgba(255, 255, 255, 0.08),
+      'accent': #7a54e2,
+      'accent-hover': #6538d6,
+      'accent-bg': #f0edfd,
+      'accent-bg-hover': #e3defb,
+      'accent-shadow': rgba(122, 84, 226, 0.32),
+      'accent-light': rgba(122, 84, 226, 0.1),
+      'accent-ring': rgba(122, 84, 226, 0.28),
+      'gradient-brand': linear-gradient(135deg, #a78bfa, #22d3ee),
+      'scrollbar-thumb': #c6c7e4,
+      'scrollbar-thumb-hover': #868ba8,
+      'link': #0e7490,
+      'link-hover': #155e75,
+    ),
+    dark: (
+      'bg-body': #080a14,
+      'bg-surface': #10131f,
+      'bg-surface-soft': #161a2b,
+      'bg-elevated': #1d2236,
+      'bg-glass': rgba(8, 10, 20, 0.74),
+      'bg-input': #141828,
+      'text-primary': #e6e8f5,
+      'text-secondary': #a3a9c9,
+      'text-muted': #787f9f,
+      'text-placeholder': #454b6e,
+      'border-color': rgba(167, 139, 250, 0.18),
+      'border-strong': rgba(34, 211, 238, 0.22),
+      'divider': rgba(255, 255, 255, 0.07),
+      'brand-50': #221b44,
+      'brand-100': #2b214f,
+      'brand-200': #392c6b,
+      'brand-300': #9a86f2,
+      'brand-400': #b09cf6,
+      'brand-500': #bda9f8,
+      'brand-600': #d0c0fa,
+      'brand-700': #e2d8fc,
+      'user-bubble-bg': #171b31,
+      'user-bubble-text': #e6e8f5,
+      'user-bubble-border': rgba(34, 211, 238, 0.4),
+      'code-bg': #0c0f1e,
+      'code-bg-deep': #070a16,
+      'code-text': #e6e8f5,
+      'code-border': rgba(167, 139, 250, 0.16),
+      'accent': #bda9f8,
+      'accent-hover': #d0c0fa,
+      'accent-bg': #221b44,
+      'accent-bg-hover': #2b214f,
+      'accent-shadow': rgba(167, 139, 250, 0.35),
+      'accent-light': rgba(167, 139, 250, 0.14),
+      'accent-ring': rgba(167, 139, 250, 0.3),
+      'gradient-brand': linear-gradient(135deg, #a78bfa, #22d3ee),
+      'scrollbar-thumb': #2e3350,
+      'scrollbar-thumb-hover': #434a70,
+      'link': #22d3ee,
+      'link-hover': #67e8f9,
+    ),
+  ),
+
+  /* ---- D 猫窝（暖夜陪伴） ---- */
+  'den': (
+    light: (
+      'bg-body': #f6f1e9,
+      'bg-surface': #fdfaf4,
+      'bg-surface-soft': #f0e9dd,
+      'bg-elevated': #ffffff,
+      'bg-glass': rgba(253, 250, 244, 0.78),
+      'bg-input': #ffffff,
+      'text-primary': #433a2c,
+      'text-secondary': #6d6150,
+      'text-muted': #998d7a,
+      'text-placeholder': #c2b7a4,
+      'border-color': #e5ddd0,
+      'border-strong': #cfc4b2,
+      'divider': #eee7db,
+      'brand-50': #f9f1e6,
+      'brand-100': #f2e2cc,
+      'brand-200': #e6cba2,
+      'brand-300': #d3a76c,
+      'brand-400': #c18a45,
+      'brand-500': #b0732f,
+      'brand-600': #96602a,
+      'brand-700': #7a4e24,
+      'user-bubble-bg': #433a2c,
+      'user-bubble-text': #f6f1e9,
+      'user-bubble-border': rgba(67, 58, 44, 0.4),
+      'code-bg': #10131f,
+      'code-bg-deep': #0a0d17,
+      'code-text': #dfe3f0,
+      'code-border': rgba(255, 255, 255, 0.08),
+      'accent': #b0732f,
+      'accent-hover': #96602a,
+      'accent-bg': #f9f1e6,
+      'accent-bg-hover': #f2e2cc,
+      'accent-shadow': rgba(176, 115, 47, 0.3),
+      'accent-light': rgba(176, 115, 47, 0.1),
+      'accent-ring': rgba(176, 115, 47, 0.28),
+      'gradient-brand': linear-gradient(135deg, #e8a25c, #c18a45),
+      'scrollbar-thumb': #cfc4b2,
+      'scrollbar-thumb-hover': #998d7a,
+      'link': #b0732f,
+      'link-hover': #96602a,
+    ),
+    dark: (
+      'bg-body': #1a1612,
+      'bg-surface': #262019,
+      'bg-surface-soft': #2e261d,
+      'bg-elevated': #372d21,
+      'bg-glass': rgba(26, 22, 18, 0.74),
+      'bg-input': #2b231a,
+      'text-primary': #f0e9df,
+      'text-secondary': #c2b8a6,
+      'text-muted': #93897a,
+      'text-placeholder': #574e40,
+      'border-color': rgba(245, 180, 106, 0.16),
+      'border-strong': rgba(245, 180, 106, 0.26),
+      'divider': rgba(255, 255, 255, 0.06),
+      'brand-50': #3a2f20,
+      'brand-100': #463923,
+      'brand-200': #5a4a2e,
+      'brand-300': #c98d4e,
+      'brand-400': #e0a35e,
+      'brand-500': #e8a25c,
+      'brand-600': #eeb87c,
+      'brand-700': #f5d3a8,
+      'user-bubble-bg': #33291c,
+      'user-bubble-text': #f0e9df,
+      'user-bubble-border': rgba(232, 162, 92, 0.35),
+      'code-bg': #1a150e,
+      'code-bg-deep': #14100a,
+      'code-text': #e6ddd0,
+      'code-border': rgba(245, 180, 106, 0.12),
+      'accent': #e8a25c,
+      'accent-hover': #eeb87c,
+      'accent-bg': #3a2f20,
+      'accent-bg-hover': #463923,
+      'accent-shadow': rgba(232, 162, 92, 0.35),
+      'accent-light': rgba(232, 162, 92, 0.14),
+      'accent-ring': rgba(232, 162, 92, 0.3),
+      'gradient-brand': linear-gradient(135deg, #f5b46a, #e8a25c),
+      'scrollbar-thumb': #4a3e2c,
+      'scrollbar-thumb-hover': #5f5240,
+      'link': #e0a35e,
+      'link-hover': #eeb87c,
+    ),
+  ),
+);
+
+/* ============================================================
+   主题风味层（排版 + 工具卡片，不分亮/暗档）
+   - 每套主题在配色之外，还要在「文字间距 / 行高 / 工具卡造型」
+     上有可感知的差异，避免只换颜色像同一套皮肤
+   - agent-msg-*   ：助手/用户消息排版
+   - agent-tool-*  ：工具调用卡片
+   ============================================================ */
+$agent-flavor: (
+  /* 星轨：仪表盘般的疏朗科技感 */
+  'starfield': (
+    'agent-msg-ls': 0.02em,
+    'agent-msg-lh': 1.75,
+    'agent-msg-font': inherit,
+    'agent-tool-radius': 8px,
+    'agent-tool-bg': rgba(255, 255, 255, 0.04),
+    'agent-tool-border': rgba(255, 255, 255, 0.14),
+    'agent-tool-name-font': (ui-monospace, 'SF Mono', Menlo, monospace),
+    'agent-tool-name-ls': 0.06em,
+    'agent-tool-name-transform': uppercase,
+    'agent-tool-accent': #a5abee,
+    // 终端：深空蓝黑 + 星野靛蓝字
+    'agent-tool-term-bg': #080b1a,
+    'agent-tool-term-border': rgba(124, 131, 242, 0.3),
+    'agent-tool-term-name': #98a2f2,
+    'agent-tool-term-args': rgba(230, 233, 245, 0.55),
+    'agent-tool-term-head': rgba(230, 233, 245, 0.8),
+    'agent-tool-term-titlebar': rgba(124, 131, 242, 0.12),
+    'agent-tool-term-result': rgba(230, 233, 245, 0.9),
+    // 编辑：靛蓝高亮头
+    'agent-tool-edit-accent': #7c83f2,
+    'agent-tool-edit-head': rgba(124, 131, 242, 0.1),
+    'agent-tool-edit-bg': rgba(255, 255, 255, 0.04),
+    'agent-tool-edit-border': rgba(124, 131, 242, 0.25),
+    // 阅读：靛蓝左侧条
+    'agent-tool-read-bar': #6366f1,
+    'agent-tool-read-accent': #a5abee,
+    // 记忆：星辉紫蓝
+    'agent-tool-memory-bar': #7c83f2,
+    'agent-tool-memory-dot': #98a2f2,
+    'agent-tool-memory-ring': rgba(124, 131, 242, 0.18),
+    'agent-tool-memory-accent': #a5abee,
+  ),
+  /* 纸墨：信笺/批注的阅读感 */
+  'paper': (
+    'agent-msg-ls': 0.01em,
+    'agent-msg-lh': 1.9,
+    'agent-msg-font': ('Songti SC', 'STSong', Georgia, serif),
+    'agent-tool-radius': 6px,
+    'agent-tool-bg': rgba(253, 252, 249, 0.55),
+    'agent-tool-border': rgba(196, 202, 212, 0.9),
+    'agent-tool-name-font': ('Songti SC', 'STSong', Georgia, serif),
+    'agent-tool-name-ls': 0.02em,
+    'agent-tool-name-transform': none,
+    'agent-tool-accent': #3d5a80,
+    // 终端：宣纸底 + 墨字 + 朱砂提示符
+    'agent-tool-term-bg': #f7f4ec,
+    'agent-tool-term-border': rgba(196, 202, 212, 0.9),
+    'agent-tool-term-name': #b03a2e,
+    'agent-tool-term-args': rgba(38, 48, 63, 0.6),
+    'agent-tool-term-head': rgba(38, 48, 63, 0.85),
+    'agent-tool-term-titlebar': rgba(192, 57, 43, 0.06),
+    'agent-tool-term-result': rgba(38, 48, 63, 0.85),
+    // 编辑：朱砂批注头
+    'agent-tool-edit-accent': #b03a2e,
+    'agent-tool-edit-head': rgba(192, 57, 43, 0.06),
+    'agent-tool-edit-bg': rgba(253, 252, 249, 0.55),
+    'agent-tool-edit-border': rgba(196, 202, 212, 0.9),
+    // 阅读：靛青左侧条
+    'agent-tool-read-bar': #3d5a80,
+    'agent-tool-read-accent': #3d5a80,
+    // 记忆：墨青
+    'agent-tool-memory-bar': #5c7d9f,
+    'agent-tool-memory-dot': #3d5a80,
+    'agent-tool-memory-ring': rgba(61, 90, 128, 0.14),
+    'agent-tool-memory-accent': #334c6d,
+  ),
+  /* 全息：霓虹紧凑的发光感 */
+  'holo': (
+    'agent-msg-ls': -0.01em,
+    'agent-msg-lh': 1.65,
+    'agent-msg-font': inherit,
+    'agent-tool-radius': 14px,
+    'agent-tool-bg': rgba(13, 15, 30, 0.5),
+    'agent-tool-border': linear-gradient(135deg, rgba(167, 139, 250, 0.7), rgba(34, 211, 238, 0.5)),
+    'agent-tool-name-font': (ui-monospace, 'SF Mono', Menlo, monospace),
+    'agent-tool-name-ls': 0.02em,
+    'agent-tool-name-transform': none,
+    'agent-tool-accent': #22d3ee,
+    // 终端：深紫黑底 + 霓虹青字
+    'agent-tool-term-bg': #0a0c1a,
+    'agent-tool-term-border': rgba(34, 211, 238, 0.35),
+    'agent-tool-term-name': #22d3ee,
+    'agent-tool-term-args': rgba(189, 169, 248, 0.6),
+    'agent-tool-term-head': rgba(189, 169, 248, 0.85),
+    'agent-tool-term-titlebar': rgba(34, 211, 238, 0.1),
+    'agent-tool-term-result': rgba(230, 232, 245, 0.9),
+    // 编辑：霓虹紫头
+    'agent-tool-edit-accent': #a78bfa,
+    'agent-tool-edit-head': rgba(167, 139, 250, 0.14),
+    'agent-tool-edit-bg': rgba(13, 15, 30, 0.5),
+    'agent-tool-edit-border': rgba(167, 139, 250, 0.35),
+    // 阅读：青紫渐变条
+    'agent-tool-read-bar': #22d3ee,
+    'agent-tool-read-accent': #bda9f8,
+    // 记忆：全息紫
+    'agent-tool-memory-bar': #a78bfa,
+    'agent-tool-memory-dot': #22d3ee,
+    'agent-tool-memory-ring': rgba(167, 139, 250, 0.2),
+    'agent-tool-memory-accent': #bda9f8,
+  ),
+  /* 猫窝：暖软放松的陪伴感 */
+  'den': (
+    'agent-msg-ls': 0.01em,
+    'agent-msg-lh': 1.85,
+    'agent-msg-font': inherit,
+    'agent-tool-radius': 16px,
+    'agent-tool-bg': rgba(232, 162, 92, 0.08),
+    'agent-tool-border': rgba(232, 162, 92, 0.3),
+    'agent-tool-name-font': inherit,
+    'agent-tool-name-ls': 0.01em,
+    'agent-tool-name-transform': none,
+    'agent-tool-accent': #e8a25c,
+    // 终端：暖夜深棕底 + 琥珀字
+    'agent-tool-term-bg': #241d13,
+    'agent-tool-term-border': rgba(232, 162, 92, 0.3),
+    'agent-tool-term-name': #f5b46a,
+    'agent-tool-term-args': rgba(240, 233, 223, 0.55),
+    'agent-tool-term-head': rgba(240, 233, 223, 0.8),
+    'agent-tool-term-titlebar': rgba(232, 162, 92, 0.12),
+    'agent-tool-term-result': rgba(240, 233, 223, 0.9),
+    // 编辑：琥珀头
+    'agent-tool-edit-accent': #e8a25c,
+    'agent-tool-edit-head': rgba(232, 162, 92, 0.12),
+    'agent-tool-edit-bg': rgba(232, 162, 92, 0.08),
+    'agent-tool-edit-border': rgba(232, 162, 92, 0.3),
+    // 阅读：琥珀左侧条
+    'agent-tool-read-bar': #e8a25c,
+    'agent-tool-read-accent': #f5b46a,
+    // 记忆：暖琥珀
+    'agent-tool-memory-bar': #e8a25c,
+    'agent-tool-memory-dot': #f5b46a,
+    'agent-tool-memory-ring': rgba(232, 162, 92, 0.16),
+    'agent-tool-memory-accent': #eeb87c,
+  ),
+);
+
+/* 生成排版 + 工具卡风味变量（单档，不区分亮暗） */
+@each $name, $vars in $agent-flavor {
+  .agent-root[data-agent-theme='#{$name}'] {
+    @each $key, $value in $vars {
+      --#{$key}: #{$value};
+    }
+  }
+}
+
+/* ===== 背景纹理（内联 SVG data-URI；低透明度装饰层） ===== */
+$agent-textures: (
+  'starfield': url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600' viewBox='0 0 800 600'%3E%3Cg fill='none' stroke='%237c83f2' stroke-opacity='0.22'%3E%3Cpath d='M120 90 L260 60 L380 140 L520 80'/%3E%3Cpath d='M620 400 L720 340 L840 420'/%3E%3Cpath d='M180 500 L300 450 L420 540 L540 480'/%3E%3Cpath d='M700 160 L800 220'/%3E%3C/g%3E%3Cg fill='%23ffd9a0' fill-opacity='0.55'%3E%3Ccircle cx='120' cy='90' r='2.5'/%3E%3Ccircle cx='260' cy='60' r='3'/%3E%3Ccircle cx='380' cy='140' r='2'/%3E%3Ccircle cx='520' cy='80' r='2.5'/%3E%3Ccircle cx='620' cy='400' r='2.5'/%3E%3Ccircle cx='720' cy='340' r='3'/%3E%3Ccircle cx='840' cy='420' r='2'/%3E%3Ccircle cx='180' cy='500' r='2.5'/%3E%3Ccircle cx='300' cy='450' r='2'/%3E%3Ccircle cx='420' cy='540' r='3'/%3E%3Ccircle cx='540' cy='480' r='2'/%3E%3Ccircle cx='700' cy='160' r='2.5'/%3E%3Ccircle cx='800' cy='220' r='3'/%3E%3C/g%3E%3Cg fill='%23e6e9f5' fill-opacity='0.3'%3E%3Ccircle cx='90' cy='220' r='1.5'/%3E%3Ccircle cx='200' cy='170' r='1.2'/%3E%3Ccircle cx='330' cy='300' r='1.5'/%3E%3Ccircle cx='460' cy='230' r='1.2'/%3E%3Ccircle cx='580' cy='140' r='1.5'/%3E%3Ccircle cx='680' cy='520' r='1.2'/%3E%3Ccircle cx='760' cy='280' r='1.5'/%3E%3Ccircle cx='150' cy='380' r='1.2'/%3E%3Ccircle cx='480' cy='560' r='1.5'/%3E%3Ccircle cx='620' cy='220' r='1.2'/%3E%3C/g%3E%3C/svg%3E"),
+  'paper': url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600' viewBox='0 0 800 600'%3E%3Cg stroke='%23c4cad4' stroke-opacity='0.4'%3E%3Cline x1='0' y1='80' x2='800' y2='80'/%3E%3Cline x1='0' y1='160' x2='800' y2='160'/%3E%3Cline x1='0' y1='240' x2='800' y2='240'/%3E%3Cline x1='0' y1='320' x2='800' y2='320'/%3E%3Cline x1='0' y1='400' x2='800' y2='400'/%3E%3Cline x1='0' y1='480' x2='800' y2='480'/%3E%3Cline x1='0' y1='560' x2='800' y2='560'/%3E%3C/g%3E%3Cline x1='72' y1='0' x2='72' y2='600' stroke='%23c0392b' stroke-opacity='0.35'/%3E%3C/svg%3E"),
+  'holo': url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600' viewBox='0 0 800 600'%3E%3Cg stroke='%23a78bfa' stroke-opacity='0.2'%3E%3Cpath d='M400 0 L80 600'/%3E%3Cpath d='M400 0 L240 600'/%3E%3Cpath d='M400 0 L400 600'/%3E%3Cpath d='M400 0 L560 600'/%3E%3Cpath d='M400 0 L720 600'/%3E%3C/g%3E%3Cg stroke='%2322d3ee' stroke-opacity='0.13'%3E%3Cline x1='0' y1='120' x2='800' y2='120'/%3E%3Cline x1='0' y1='240' x2='800' y2='240'/%3E%3Cline x1='0' y1='360' x2='800' y2='360'/%3E%3Cline x1='0' y1='480' x2='800' y2='480'/%3E%3C/g%3E%3Ccircle cx='400' cy='300' r='180' fill='%23a78bfa' fill-opacity='0.06'/%3E%3C/svg%3E"),
+  'den': url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600' viewBox='0 0 800 600'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='0%25' r='80%25'%3E%3Cstop offset='0%25' stop-color='%23f5b46a' stop-opacity='0.22'/%3E%3Cstop offset='60%25' stop-color='%23f5b46a' stop-opacity='0.07'/%3E%3Cstop offset='100%25' stop-color='%23f5b46a' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='800' height='600' fill='url(%23g)'/%3E%3C/svg%3E"),
+);
+
+/* ===== 生成变量覆盖层 ===== */
+@each $name, $modes in $agent-themes {
+  @each $mode, $vars in $modes {
+    html[data-theme='#{$mode}'] .agent-root[data-agent-theme='#{$name}'] {
+      @each $key, $value in $vars {
+        --#{$key}: #{$value};
+      }
+    }
+  }
+}
+
+/* ===== 背景纹理层（跟随亮/暗两档，透明度一致） ===== */
+@each $name, $texture in $agent-textures {
+  .agent-root[data-agent-theme='#{$name}'] {
+    background-image: $texture;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+}
+
+/* 默认主题（default）不覆盖任何变量：完全沿用全局主题 */
+
+/* ===== 主题专属工具卡造型（在作用域内进一步差异化，无需改 JS） ===== */
+
+/* 星轨：玻璃面板 + 工具名发光（仅 misc 类卡片，分类卡有自己的造型） */
+.agent-root[data-agent-theme='starfield'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 16px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(6px);
+
+    .aentry__tool-name {
+      text-shadow: 0 0 8px var(--agent-tool-accent, rgba(165, 171, 238, 0.5));
+    }
+
+    .aentry__tool-status {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+  }
+}
+
+/* 纸墨：朱砂批注线 + 便签底（仅 misc 类卡片） */
+.agent-root[data-agent-theme='paper'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    border: 1px dashed rgba(196, 202, 212, 0.9);
+    border-left: 3px solid rgba(192, 57, 43, 0.5);
+
+    &.is-completed,
+    &.is-running {
+      border-left-color: rgba(61, 90, 128, 0.6);
+    }
+    &.is-failed {
+      border-left-color: rgba(192, 57, 43, 0.75);
+    }
+    &.is-denied {
+      border-left-color: rgba(217, 119, 6, 0.7);
+    }
+
+    .aentry__tool-head {
+      border-bottom: 1px dashed rgba(196, 202, 212, 0.6);
+      padding-bottom: 6px;
+    }
+  }
+}
+
+/* 全息：渐变边框（double background 技法）+ 辉光（仅 misc 类卡片） */
+.agent-root[data-agent-theme='holo'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    border: 1px solid transparent;
+    border-color: transparent;
+    background:
+      linear-gradient(var(--agent-tool-bg, #0d0f1e), var(--agent-tool-bg, #0d0f1e)) padding-box,
+      linear-gradient(135deg, rgba(167, 139, 250, 0.75), rgba(34, 211, 238, 0.55)) border-box;
+    box-shadow: 0 0 18px rgba(122, 84, 226, 0.18);
+
+    &.is-running {
+      border-color: transparent;
+      background:
+        linear-gradient(var(--agent-tool-bg, #0d0f1e), var(--agent-tool-bg, #0d0f1e)) padding-box,
+        linear-gradient(135deg, rgba(167, 139, 250, 0.95), rgba(34, 211, 238, 0.8)) border-box;
+      box-shadow: 0 0 22px rgba(122, 84, 226, 0.32);
+    }
+
+    .aentry__tool-name {
+      color: var(--agent-tool-accent, #22d3ee);
+      text-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
+    }
+  }
+}
+
+/* 猫窝：暖晕柔边（仅 misc 类卡片） */
+.agent-root[data-agent-theme='den'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    box-shadow: 0 4px 14px rgba(176, 115, 47, 0.12);
+
+    .aentry__tool-name {
+      color: var(--agent-tool-accent, #e8a25c);
+    }
+  }
+}
+
+/* ============================================================
+   主题动效层
+   - 基于 hyperframes-animation skill：用纯 CSS keyframes 实现
+     「装饰/微光/扫描/呼吸」等低频环境动效，零 JS 成本。
+   - 原则：低频、克制、按状态触发，不干扰阅读（对应 skill 的
+     “reduce disturbance / 该动的时候动、该静的时候静”）。
+   - 只动 transform / opacity / background-position，不动布局属性。
+   ============================================================ */
+
+/* ---- 环境动效：每个主题的 ::before 装饰层（背景之上、内容之下） ---- */
+
+/* 星轨：星野呼吸 + 缓慢视差漂移；星座线保留，增加「星尘微光」 */
+.agent-root[data-agent-theme='starfield'] {
+  animation: agent-star-drift 26s ease-in-out infinite alternate;
+
+  &::before {
+    background:
+      radial-gradient(1.5px 1.5px at 12% 18%, rgba(255, 217, 160, 0.7), transparent 60%),
+      radial-gradient(1px 1px at 34% 34%, rgba(230, 233, 245, 0.6), transparent 60%),
+      radial-gradient(2px 2px at 58% 22%, rgba(255, 217, 160, 0.55), transparent 70%),
+      radial-gradient(1px 1px at 74% 52%, rgba(230, 233, 245, 0.55), transparent 60%),
+      radial-gradient(1.5px 1.5px at 44% 66%, rgba(152, 162, 242, 0.6), transparent 60%),
+      radial-gradient(1px 1px at 82% 78%, rgba(255, 217, 160, 0.45), transparent 60%);
+    background-repeat: repeat;
+    animation: agent-star-twinkle 4.5s ease-in-out infinite alternate;
+  }
+}
+
+/* 纸墨：极淡的「朱砂批注光」呼吸，保持纸面安静 */
+.agent-root[data-agent-theme='paper'] {
+  &::before {
+    background: radial-gradient(60% 40% at 100% 0%, rgba(192, 57, 43, 0.07), transparent 70%);
+    animation: agent-ink-breathe 7s ease-in-out infinite alternate;
+  }
+}
+
+/* 全息：自上而下的全息扫描线（::before）+ 旋转棱镜微光（::after），纹理保留 */
+.agent-root[data-agent-theme='holo'] {
+  &::before {
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(34, 211, 238, 0.05) 49.5%,
+      rgba(167, 139, 250, 0.12) 50%,
+      rgba(34, 211, 238, 0.05) 50.5%,
+      transparent 100%
+    );
+    background-size: 100% 260px;
+    background-repeat: no-repeat;
+    animation: agent-holo-scan 6.5s ease-in-out infinite;
+  }
+
+  &::after {
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg 60deg,
+      rgba(167, 139, 250, 0.07) 130deg,
+      transparent 200deg 260deg,
+      rgba(34, 211, 238, 0.06) 330deg,
+      transparent 360deg
+    );
+    animation: agent-holo-rotate 26s linear infinite;
+  }
+}
+
+/* 猫窝：台灯光晕呼吸 + 上浮暖尘 */
+.agent-root[data-agent-theme='den'] {
+  &::before {
+    background:
+      radial-gradient(80% 55% at 50% -5%, rgba(245, 180, 106, 0.2), transparent 65%),
+      radial-gradient(1.5px 1.5px at 20% 70%, rgba(245, 180, 106, 0.4), transparent 70%),
+      radial-gradient(1px 1px at 55% 80%, rgba(245, 180, 106, 0.3), transparent 60%),
+      radial-gradient(1.5px 1.5px at 78% 68%, rgba(240, 233, 223, 0.25), transparent 70%);
+    animation: agent-den-breathe 4.5s ease-in-out infinite alternate;
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(1px 1px at 30% 85%, rgba(245, 180, 106, 0.4), transparent 60%);
+    animation: agent-den-dust 7s ease-in-out infinite;
+  }
+}
+
+/* ---- 工具卡：状态触发的差异化动效 ---- */
+
+/* 星轨 misc：玻璃卡上划过一道斜向高光（ambient-glow-bloom 的 traveling sweep） */
+.agent-root[data-agent-theme='starfield'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    position: relative;
+    overflow: hidden;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: -30%;
+      width: 26%;
+      background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+      transform: skewX(-20deg);
+      animation: agent-sheen 6s ease-in-out infinite;
+    }
+
+    &.is-running .aentry__tool-name {
+      animation: agent-glow-pulse 1.6s ease-in-out infinite alternate;
+    }
+  }
+}
+
+/* 纸墨 misc：工具名朱砂批注高亮扫过（css-marker-patterns 的 highlight 模式） */
+.agent-root[data-agent-theme='paper'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    position: relative;
+    overflow: hidden;
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(192, 57, 43, 0.6), transparent);
+      transform: scaleX(0);
+      transform-origin: left center;
+    }
+
+    &.is-completed::after {
+      animation: agent-marker-swipe 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    &.is-running .aentry__tool-name {
+      animation: agent-ink-fade 1.4s ease-in-out infinite alternate;
+    }
+  }
+}
+
+/* 全息 misc：执行中霓虹辉光脉动 + 工具名青光呼吸 */
+.agent-root[data-agent-theme='holo'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    &.is-running {
+      animation: agent-holo-pulse 1.6s ease-in-out infinite alternate;
+
+      .aentry__tool-name {
+        animation: agent-holo-name 1.6s ease-in-out infinite alternate;
+      }
+    }
+  }
+}
+
+/* 猫窝 misc：暖色呼吸光晕 */
+.agent-root[data-agent-theme='den'] {
+  .aentry--tool[data-tool-kind='misc'] {
+    &.is-running {
+      animation: agent-den-glow 2s ease-in-out infinite alternate;
+    }
+  }
+}
+
+/* ---- 交互反馈（press-release-spring）：工具卡头 / 权限按钮按下的触感 ---- */
+.agent-root[data-agent-theme] {
+  .aentry__tool-head {
+    transition: transform 0.12s ease;
+
+    &:active {
+      transform: scale(0.985);
+    }
+  }
+
+  .aentry__perm-actions button {
+    transition: transform 0.12s ease;
+
+    &:active {
+      transform: scale(0.95);
+    }
+  }
+}
+
+/* ============================================================
+   主题动效 keyframes
+   ============================================================ */
+
+/* 星轨：背景视差漂移 + 星尘闪烁 */
+@keyframes agent-star-drift {
+  from {
+    background-position: center;
+  }
+  to {
+    background-position: 2% 1%;
+  }
+}
+@keyframes agent-star-twinkle {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 0.95;
+  }
+}
+
+/* 纸墨：朱砂批注光呼吸 */
+@keyframes agent-ink-breathe {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 0.85;
+  }
+}
+
+/* 全息：扫描线上下滑动 + 棱镜光旋转 */
+@keyframes agent-holo-scan {
+  from {
+    background-position: 0 -280px;
+  }
+  to {
+    background-position: 0 calc(100% + 280px);
+  }
+}
+@keyframes agent-holo-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 猫窝：台灯光晕呼吸 + 暖尘上浮 */
+@keyframes agent-den-breathe {
+  from {
+    opacity: 0.55;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+}
+@keyframes agent-den-dust {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  35% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-18px);
+  }
+}
+
+/* 星轨：玻璃卡斜向高光扫过 */
+@keyframes agent-sheen {
+  0%,
+  55% {
+    opacity: 0;
+    transform: skewX(-20deg) translateX(0);
+  }
+  70% {
+    opacity: 1;
+  }
+  95% {
+    opacity: 0;
+    transform: skewX(-20deg) translateX(340%);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 通用：执行中工具名辉光 / 墨迹闪烁 */
+@keyframes agent-glow-pulse {
+  from {
+    text-shadow: 0 0 6px rgba(165, 171, 238, 0.4);
+  }
+  to {
+    text-shadow: 0 0 14px rgba(165, 171, 238, 0.8);
+  }
+}
+@keyframes agent-ink-fade {
+  from {
+    color: var(--agent-tool-accent, #3d5a80);
+  }
+  to {
+    color: #c0392b;
+  }
+}
+
+/* 纸墨：朱砂批注线从左扫过 */
+@keyframes agent-marker-swipe {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* 全息：渐变边框旋转 + 辉光脉动 */
+@keyframes agent-holo-pulse {
+  from {
+    box-shadow: 0 0 14px rgba(122, 84, 226, 0.2);
+  }
+  to {
+    box-shadow: 0 0 26px rgba(34, 211, 238, 0.35);
+  }
+}
+@keyframes agent-holo-name {
+  from {
+    text-shadow: 0 0 6px rgba(34, 211, 238, 0.4);
+  }
+  to {
+    text-shadow: 0 0 14px rgba(167, 139, 250, 0.8);
+  }
+}
+
+/* 猫窝：暖色辉光呼吸 */
+@keyframes agent-den-glow {
+  from {
+    box-shadow: 0 4px 14px rgba(176, 115, 47, 0.12);
+  }
+  to {
+    box-shadow: 0 4px 26px rgba(232, 162, 92, 0.4);
+  }
+}
+
+/* ---- 减弱动态：关闭所有装饰性动效，保留关键反馈 ---- */
+@media (prefers-reduced-motion: reduce) {
+  .agent-root[data-agent-theme]::before,
+  .agent-root[data-agent-theme]::after,
+  .agent-root[data-agent-theme] {
+    animation: none !important;
+  }
+  .agent-root[data-agent-theme] .aentry--tool[data-tool-kind]::after,
+  .agent-root[data-agent-theme] .aentry--tool[data-tool-kind] .aentry__tool-name {
+    animation: none !important;
+  }
+}

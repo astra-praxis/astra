@@ -5,6 +5,7 @@ import { Check } from 'lucide-react';
 import { useThemeStore } from '@/lib/theme';
 import SettingsSection from '../components/SettingsSection';
 import SettingsRow from '../components/SettingsRow';
+import AgentThemeGrid from '../components/AgentThemeGrid';
 import { useSettingsStore } from '../hooks/useSettings';
 
 const themeOptions: { value: 'light' | 'dark' | 'system'; label: string }[] = [
@@ -50,6 +51,14 @@ export default function GeneralSettings() {
             </button>
           ))}
         </div>
+      </SettingsRow>
+
+      <SettingsRow
+        stacked
+        title="Agent 对话主题"
+        desc="仅作用于 Agent 对话页（不影响其他页面），切换立即生效"
+      >
+        <AgentThemeGrid />
       </SettingsRow>
 
       <SettingsRow

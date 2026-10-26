@@ -18,6 +18,7 @@ export function StreamBlock({
   title,
   icon,
   variant,
+  diff,
 }: {
   text: string;
   /** 内容是否已结束；缺省视为未结束（流式中） */
@@ -25,6 +26,8 @@ export function StreamBlock({
   title: string;
   icon?: ReactNode;
   variant?: 'thinking' | 'tool';
+  /** 按行渲染 diff（- 删 / + 增），配合流式文本逐行上色 */
+  diff?: boolean;
 }) {
   const finished = done ?? false;
   const [open, setOpen] = useState(!finished);
@@ -52,8 +55,29 @@ export function StreamBlock({
     if (open && !finished) scroll.schedule();
   }, [open, renderedText, finished, scroll]);
 
+  // diff 模式：逐行拆分渲染，-/+ 行加专属类；空行保留占位
+  const bodyNode = diff ? (
+    renderedText.split('\n').map((line, i) => (
+      <span
+        key={i}
+        className={
+          line.startsWith('- ')
+            ? 'stream-block__diff-line is-del'
+            : line.startsWith('+ ')
+              ? 'stream-block__diff-line is-add'
+              : 'stream-block__diff-line'
+        }
+      >
+        {line}
+        {'\n'}
+      </span>
+    ))
+  ) : (
+    renderedText
+  );
+
   return (
-    <div className={`stream-block${variant ? ` stream-block--${variant}` : ''}`}>
+    <div className={`stream-block${variant ? ` stream-block--${variant}` : ''}${diff ? ' stream-block--diff' : ''}`}>
       <button
         type="button"
         className="stream-block__head"
@@ -83,7 +107,7 @@ export function StreamBlock({
             if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) scroll.pause();
           }}
         >
-          {renderedText}
+          {bodyNode}
         </pre>
       )}
     </div>

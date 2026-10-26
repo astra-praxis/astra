@@ -59,4 +59,28 @@
       border-left-color: var(--brand-300);
     }
   }
+
+  // diff 内容（编辑类工具）：- 删行红 / + 增行绿
+  &--diff {
+    .stream-block__body {
+      padding: 0;
+      border-left: none;
+    }
+
+    .stream-block__diff-line {
+      display: block;
+      padding: 1px 8px;
+      white-space: pre-wrap;
+
+      &.is-del {
+        background: var(--danger-50, rgba(239, 68, 68, 0.08));
+        color: var(--danger-600, #e5484d);
+      }
+
+      &.is-add {
+        background: var(--success-50, rgba(34, 197, 94, 0.08));
+        color: var(--success-600, #16a34a);
+      }
+    }
+  }
 }

@@ -7,12 +7,14 @@ import { forwardRef, memo, useCallback, useState, type HTMLAttributes } from 're
 import { invoke } from '@tauri-apps/api/core';
 import {
   Brain,
+  BrainCircuit,
   Check,
   ChevronDown,
   CircleAlert,
   CircleCheck,
   CircleX,
   Copy,
+  FileCode,
   FileText,
   HelpCircle,
   Loader2,
@@ -20,6 +22,7 @@ import {
   Pencil,
   RotateCcw,
   Sparkles,
+  Terminal,
   Wrench,
   X,
 } from 'lucide-react';
@@ -59,6 +62,53 @@ const PERM_ACTION_LABEL: Record<string, string> = {
 
 
 // ===== 单条条目渲染 =====
+
+/**
+ * 工具卡按工具类型区分视觉（term 终端 / edit 编辑 / read 阅读 / memory 记忆 / misc 其他）：
+ * 不同类别用不同的卡片造型、图标与配色，避免所有工具长得一样。
+ */
+export type ToolKind = 'term' | 'edit' | 'read' | 'memory' | 'misc';
+
+export function toolKindOf(name: string): ToolKind {
+  const n = name.toLowerCase();
+  // 终端 / 命令 / 任务类
+  if (
+    n.includes('shell') ||
+    n.includes('exec') ||
+    n.includes('command') ||
+    n.includes('terminal') ||
+    n.includes('task') ||
+    n.includes('run_command') ||
+    n.includes('build_docx')
+  )
+    return 'term';
+  // 写 / 改文件类
+  if (
+    n.includes('write') ||
+    n.includes('edit') ||
+    n.includes('patch') ||
+    n.includes('append') ||
+    n.includes('create_file')
+  )
+    return 'edit';
+  // 读 / 查 / 搜 / 网络抓取
+  if (
+    n.includes('read') ||
+    n.includes('list') ||
+    n.includes('grep') ||
+    n.includes('find') ||
+    n.includes('search') ||
+    n.includes('fetch') ||
+    n.includes('open') ||
+    n.includes('show') ||
+    n.includes('get')
+  )
+    return 'read';
+  // 记忆 / 嵌入 / 检查点
+  if (n.includes('memory') || n.includes('remember') || n.includes('chunk') || n.includes('embed') || n.includes('checkpoint'))
+    return 'memory';
+  return 'misc';
+}
 
 interface UserRef {
   kind: 'skill' | 'file';
@@ -548,6 +598,20 @@ function ToolEntry({
   const [open, setOpen] = useState(false);
   const hasBody = !!(entry.result || (entry.artifacts && entry.artifacts.length > 0));
   const perm = entry.perm;
+  const toolKind = toolKindOf(entry.toolName);
+  // 各类工具的头部图标（终端 / 编辑 / 阅读 / 记忆 / 其他）
+  const kindIcon =
+    toolKind === 'term' ? (
+      <Terminal size={12} strokeWidth={1.8} />
+    ) : toolKind === 'edit' ? (
+      <FileCode size={12} strokeWidth={1.8} />
+    ) : toolKind === 'read' ? (
+      <FileText size={12} strokeWidth={1.8} />
+    ) : toolKind === 'memory' ? (
+      <BrainCircuit size={12} strokeWidth={1.8} />
+    ) : (
+      <Wrench size={12} strokeWidth={1.8} />
+    );
   // 写文件类工具展示完整内容，shell 展示完整命令，edit 展示新旧文本对照
   // （args 由 tool_call_started 事件携带，旧会话无此字段）
   const contentPreview =
@@ -596,7 +660,10 @@ function ToolEntry({
     }
   }, [bgTaskId]);
   return (
-    <div className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}>
+    <div
+      className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}
+      data-tool-kind={toolKind}
+    >
       <button
         type="button"
         className="aentry__tool-head"
@@ -612,7 +679,14 @@ function ToolEntry({
         ) : (
           <CircleAlert size={13} strokeWidth={1.8} />
         )}
-        <Wrench size={12} strokeWidth={1.8} />
+        {kindIcon}
+        {toolKind === 'term' && (
+          <span className="aentry__term-dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
         <code className="aentry__tool-name">{entry.toolName}</code>
         <span className="aentry__tool-args"><FilePathText text={entry.argsSummary} /></span>
         <span className="aentry__tool-status">
@@ -646,6 +720,7 @@ function ToolEntry({
           icon={<FileText size={12} strokeWidth={1.8} />}
           text={previewText}
           done={previewDone}
+          diff={toolKind === 'edit' && entry.toolName === 'edit_file'}
         />
       )}
       {/* Confirm 工具的批准/拒绝直接内嵌在卡片里 */}

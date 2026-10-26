@@ -11,11 +11,27 @@ body .content:has(.agent-root) {
 }
 
 .agent-root {
+  position: relative; /* 环境动效伪元素（星轨/全息/猫窝等）的定位上下文 */
   display: flex;
   flex-direction: row;
   height: 100%;
   overflow: hidden;
   background: var(--bg-body);
+
+  /* 环境动效分层：伪元素装饰层浮在背景上、内容之下 */
+  &[data-agent-theme] > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  &[data-agent-theme]::before,
+  &[data-agent-theme]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
 }
 
 /* ===== 错误提示（在对话框内部，与其他 chip 同层；间距随 dock 的 gap） ===== */
@@ -252,6 +268,11 @@ body .content:has(.agent-root) {
   gap: 6px;
   animation: agent-fade-in 0.18s ease;
 
+  // 主题排版层：字距 / 行高 / 正文字体由 agent 主题注入（默认无差）
+  font-family: var(--agent-msg-font, inherit);
+  letter-spacing: var(--agent-msg-ls, normal);
+  line-height: var(--agent-msg-lh, 1.7);
+
   // 消息级复制按钮（用户气泡右上角，hover 浮现）
   .aentry__copy {
     position: absolute;
@@ -437,6 +458,13 @@ body .content:has(.agent-root) {
       overflow-wrap: break-word;
       word-break: break-word;
     }
+
+    // MarkdownMessage 硬编码了 line-height，这里用主题排版层覆盖
+    .aentry__md .md-content {
+      font-family: var(--agent-msg-font, inherit);
+      line-height: var(--agent-msg-lh, 1.7);
+      letter-spacing: var(--agent-msg-ls, normal);
+    }
   }
 
   // 猫猫互动消息：与 agent 消息明确区分（带 🐱 猫猫 前缀与专属气泡）
@@ -538,9 +566,9 @@ body .content:has(.agent-root) {
   align-self: stretch;
   width: 100%;
   padding: 8px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
+  background: var(--agent-tool-bg, var(--bg-surface));
+  border: 1px solid var(--agent-tool-border, var(--border-color));
+  border-radius: var(--agent-tool-radius, 12px);
   font-size: 12.5px;
 
   &.is-running {
@@ -633,9 +661,11 @@ body .content:has(.agent-root) {
   }
 
   .aentry__tool-name {
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-family: var(--agent-tool-name-font, ui-monospace, 'SF Mono', Menlo, monospace);
     font-size: 12px;
     font-weight: 600;
+    letter-spacing: var(--agent-tool-name-ls, normal);
+    text-transform: var(--agent-tool-name-transform, none);
     color: var(--brand-700);
     flex-shrink: 0;
   }
@@ -771,6 +801,127 @@ body .content:has(.agent-root) {
     background: var(--brand-50);
     color: var(--brand-700);
     border: 1px solid var(--brand-200);
+  }
+}
+
+/* ===== 工具卡分类造型（term / edit / read / memory / misc） =====
+   不同工具类型用不同的卡片形态，避免所有工具长一个样。
+   基础造型在这里定义，主题风味在 _agent-themes.scss 里再覆盖。 */
+
+/* --- 终端 / 命令：黑底终端风，头部带红黄绿圆点标题栏，命令带 $ 前缀 --- */
+.agent-root[data-agent-theme] .aentry--tool[data-tool-kind='term'] {
+  background: var(--agent-tool-term-bg, #0d1117);
+  border: 1px solid var(--agent-tool-term-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--agent-tool-radius, 10px);
+  padding: 0;
+  overflow: hidden;
+
+  .aentry__tool-head {
+    padding: 7px 12px;
+    color: var(--agent-tool-term-head, rgba(255, 255, 255, 0.75));
+    background: var(--agent-tool-term-titlebar, rgba(255, 255, 255, 0.05));
+
+    // 终端标题栏红黄绿三圆点：用真实 span 占位（正圆、不叠文字）
+    .aentry__term-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+
+      i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #ff5f57;
+
+        &:nth-child(2) {
+          background: #febc2e;
+        }
+
+        &:nth-child(3) {
+          background: #28c840;
+        }
+      }
+    }
+  }
+
+  .aentry__tool-name {
+    color: var(--agent-tool-term-name, #7ee787);
+  }
+
+  .aentry__tool-args {
+    color: var(--agent-tool-term-args, rgba(255, 255, 255, 0.55));
+  }
+
+  .aentry__tool-status {
+    color: var(--agent-tool-term-name, #7ee787);
+    background: rgba(126, 231, 135, 0.1);
+    border-color: rgba(126, 231, 135, 0.25);
+  }
+
+  .aentry__tool-body {
+    padding: 2px 12px 8px;
+  }
+
+  .aentry__tool-result {
+    background: rgba(255, 255, 255, 0.03);
+    border: none;
+    border-left: 2px solid rgba(126, 231, 135, 0.35);
+    border-radius: 0;
+    color: var(--agent-tool-term-result, rgba(255, 255, 255, 0.85));
+  }
+}
+
+/* --- 编辑 / 写文件：编辑器风，头部带行号/文件图标底色，正文 diff 上色 --- */
+.agent-root[data-agent-theme] .aentry--tool[data-tool-kind='edit'] {
+  background: var(--agent-tool-edit-bg, var(--bg-surface));
+  border: 1px solid var(--agent-tool-edit-border, var(--border-color));
+  border-radius: var(--agent-tool-radius, 12px);
+
+  .aentry__tool-head {
+    padding: 5px 8px;
+    background: var(--agent-tool-edit-head, var(--bg-surface-soft));
+    margin: -8px -12px 0;
+    border-radius: var(--agent-tool-radius, 12px) var(--agent-tool-radius, 12px) 0 0;
+
+    .aentry__tool-name {
+      color: var(--agent-tool-edit-accent, var(--accent));
+    }
+  }
+
+  .aentry__tool-status {
+    background: var(--agent-tool-edit-head, var(--bg-surface-soft));
+  }
+}
+
+/* --- 阅读 / 搜索 / 网络：文档风，左侧色条 + 圆角 --- */
+.agent-root[data-agent-theme] .aentry--tool[data-tool-kind='read'] {
+  border-left: 3px solid var(--agent-tool-read-bar, var(--accent));
+
+  .aentry__tool-name {
+    color: var(--agent-tool-read-accent, var(--accent));
+  }
+}
+
+/* --- 记忆：记忆卡风，左侧圆点装饰 + 柔和底色 --- */
+.agent-root[data-agent-theme] .aentry--tool[data-tool-kind='memory'] {
+  border-left: 3px solid var(--agent-tool-memory-bar, var(--brand-400));
+
+  .aentry__tool-head {
+    // 记忆图标前的圆点
+    &::before {
+      content: '';
+      flex-shrink: 0;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--agent-tool-memory-dot, var(--brand-400));
+      box-shadow: 0 0 0 3px var(--agent-tool-memory-ring, var(--brand-100));
+    }
+  }
+
+  .aentry__tool-name {
+    color: var(--agent-tool-memory-accent, var(--brand-600));
   }
 }
 

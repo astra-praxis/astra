@@ -29,6 +29,7 @@ import ModelPicker from '@/components/agent/ModelPicker';
 import { Mascot } from '@/components/agent/Mascot';
 import { useMascotStore } from '@/stores/mascot';
 import { parseCatCommandInput } from '@/hooks/useCatCommand';
+import { useAgentThemeStore } from '@/lib/agentTheme';
 
 import MentionInput, { type MentionInputHandle } from '../chat/MentionInput';
 import SettingsSheet from '../chat/SettingsSheet';
@@ -211,6 +212,8 @@ export default function AgentPage() {
 
   // ===== 历史面板开关（持久化，重启后保持上次的开合状态） =====
   const [historyOpen, setHistoryOpen] = useState(() => localStorage.getItem('astra.history.open') === '1');
+
+  const agentTheme = useAgentThemeStore((s) => s.id);
 
   // 链接预览面板（agent 回复中的链接拦截后在此用 iframe 打开）
   const linkPreviewOpen = useLinkPreviewStore((s) => s.open);
@@ -782,7 +785,7 @@ export default function AgentPage() {
 
   // ===== 渲染 =====
   return (
-    <div className="agent-root">
+    <div className="agent-root" data-agent-theme={agentTheme}>
       {/* 历史面板：全高左侧栏（Zed 式），与右列并排；开合时右列整体（tab + 对话）一起右移/左移 */}
       {historyOpen && (
         <AgentHistoryPanel

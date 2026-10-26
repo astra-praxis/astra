@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { openPath } from '@tauri-apps/plugin-opener';
+import { openWithDefaultApp, openWithEditor } from '@/lib/openService';
 import { ArrowRight, AtSign, ChevronDown, CircleAlert, FileText, FolderOpen, PanelLeftClose, PanelLeftOpen, Pencil, Trash, X } from 'lucide-react';
 import OrbArt from '@/components/illustrations/OrbArt';
 
@@ -683,7 +683,7 @@ export default function AgentPage() {
   const openProjectInFolder = useCallback(async () => {
     if (!projectPath) return;
     try {
-      await openPath(projectPath);
+      await openWithDefaultApp(projectPath);
     } catch (e) {
       setError(`打开文件夹失败: ${e}`);
     }
@@ -695,7 +695,7 @@ export default function AgentPage() {
       setError('请先在「设置」页面配置默认编辑器');
       return;
     }
-    invoke('open_in_editor', { path: projectPath, editorCommand: editor.command }).catch((e) => {
+    openWithEditor(projectPath, editor.command).catch((e) => {
       setError(`打开编辑器失败: ${e}`);
     });
   }, [projectPath, editor]);

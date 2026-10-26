@@ -19,6 +19,7 @@ import {
   History,
 } from 'lucide-react';
 import { describeArtifact, type Artifact } from '@/components/agent/artifact';
+import { openWithEditor } from '@/lib/openService';
 import { useWorkspaceStore } from '@/stores/workspace';
 import './ArtifactsPage.scss';
 
@@ -160,11 +161,7 @@ export default function ArtifactsPage() {
     const ws = useWorkspaceStore.getState();
     if (!ws.editor.command) return;
     try {
-      await invoke('open_in_editor', {
-        path: record.location,
-        editorCommand: ws.editor.command,
-        baseDir: ws.activePath || undefined,
-      });
+      await openWithEditor(record.location, ws.editor.command, ws.activePath || undefined);
     } catch {
       /* 打开失败静默；location 可能已失效（见页面顶部说明） */
     }

@@ -6,14 +6,14 @@
  *   代码类 → md 代码块（highlight.js）高亮
  * - 图片 / 视频 → data URL 内嵌；PDF → blob URL + iframe 内嵌
  * - 不支持内嵌的（docx / xlsx / zip 等）或读取失败 / 超限 →
- *   居中引导卡片，提供「使用默认应用打开」（plugin-opener openPath）
+ *   居中引导卡片，提供「使用默认应用打开」（openService openWithDefaultApp）
  *
  * 结构对齐 LinkPreviewPanel：左缘分隔条拖拽调宽 + 工具条（刷新 /
  * 默认应用 / 关闭）。单窗口语义：打开新文件即替换当前内容。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { openPath } from '@tauri-apps/plugin-opener';
+import { openWithDefaultApp } from '@/lib/openService';
 import {
   AppWindow,
   FileCode,
@@ -82,9 +82,9 @@ export default function FilePreviewPanel() {
 
   // 「使用默认应用打开」失败提示（原先 .catch(() => {}) 静默吞错，点了没反应无从排查）
   const [openError, setOpenError] = useState<string | null>(null);
-  const openWithDefaultApp = useCallback(() => {
+  const handleOpenWithDefaultApp = useCallback(() => {
     setOpenError(null);
-    openPath(path).catch((e) => setOpenError(`默认应用打开失败：${String(e)}`));
+    openWithDefaultApp(path).catch((e) => setOpenError(`默认应用打开失败：${String(e)}`));
   }, [path]);
 
   // 路径 / 刷新变化时重读文件（cancelled 守卫防乱序覆盖）
@@ -159,7 +159,7 @@ export default function FilePreviewPanel() {
           </button>
           <button
             type="button"
-            onClick={openWithDefaultApp}
+            onClick={handleOpenWithDefaultApp}
             title="使用默认应用打开"
             aria-label="使用默认应用打开"
           >
@@ -188,7 +188,7 @@ export default function FilePreviewPanel() {
             <TriangleAlert size={22} strokeWidth={1.8} />
             <b>无法内嵌预览</b>
             <span>{state.error}</span>
-            <button type="button" onClick={openWithDefaultApp}>
+            <button type="button" onClick={handleOpenWithDefaultApp}>
               <AppWindow size={13} strokeWidth={2} />
               使用默认应用打开
             </button>
@@ -240,7 +240,7 @@ export default function FilePreviewPanel() {
                 <span>
                   该文件类型（{payload.mime}）无法在应用内直接展示
                 </span>
-                <button type="button" onClick={openWithDefaultApp}>
+                <button type="button" onClick={handleOpenWithDefaultApp}>
                   <AppWindow size={13} strokeWidth={2} />
                   使用默认应用打开
                 </button>
@@ -254,7 +254,7 @@ export default function FilePreviewPanel() {
       {payload?.kind === 'pdf' && pdfUrl ? (
         <div className="file-preview__hint">
           <span>PDF 显示异常？</span>
-          <button type="button" onClick={openWithDefaultApp}>
+          <button type="button" onClick={handleOpenWithDefaultApp}>
             <AppWindow size={11} strokeWidth={2} />
             使用默认应用打开
           </button>

@@ -37,6 +37,7 @@ const { default: MarkdownMessage } = await load('./MarkdownMessage.tsx', {
   '@tauri-apps/api/core': { invoke: () => { throw Error('unexpected IPC'); } },
   '@tauri-apps/api/event': { listen: () => { throw Error('unexpected subscription in SSR'); } },
   '@tauri-apps/plugin-opener': { openUrl: () => { throw Error('unexpected openUrl'); } },
+  '@/lib/openService': { openInBrowser: () => { throw Error('unexpected openUrl'); } },
   '@/stores/linkPreview': { useLinkPreviewStore: { getState: () => { throw Error('unexpected link preview'); } } },
 '@/components/agent/FilePathText': { isAbsoluteFilePath: () => false, openFilePath: () => { throw Error('unexpected file path open'); } },
 });

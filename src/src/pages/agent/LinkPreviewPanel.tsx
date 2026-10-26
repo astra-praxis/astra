@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, RotateCw, ExternalLink, X, Globe, GripVertical, ShieldAlert } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openInBrowser } from '@/lib/openService';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useLinkPreviewStore, PREVIEW_WIDTH } from '@/stores/linkPreview';
 import './LinkPreviewPanel.scss';
@@ -138,7 +138,7 @@ export default function LinkPreviewPanel() {
         win.once('tauri://error', () => reject(new Error('create webview window failed')));
       });
     } catch {
-      void openUrl(url).catch(() => {});
+      void openInBrowser(url).catch(() => {});
     } finally {
       poppingRef.current = false;
     }
@@ -204,7 +204,7 @@ export default function LinkPreviewPanel() {
           </button>
           <button
             type="button"
-            onClick={() => void openUrl(url).catch(() => {})}
+            onClick={() => void openInBrowser(url).catch(() => {})}
             title="在系统浏览器打开"
             aria-label="在系统浏览器打开"
           >
@@ -237,7 +237,7 @@ export default function LinkPreviewPanel() {
               <GripVertical size={13} strokeWidth={2} />
               新窗口打开
             </button>
-            <button type="button" onClick={() => void openUrl(url).catch(() => {})}>
+            <button type="button" onClick={() => void openInBrowser(url).catch(() => {})}>
               <ExternalLink size={13} strokeWidth={2} />
               系统浏览器
             </button>

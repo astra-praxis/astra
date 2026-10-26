@@ -24,7 +24,7 @@ import rehypeHighlight from 'rehype-highlight';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Copy, Play, Link2 } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openInBrowser } from '@/lib/openService';
 import { parseActionHref, executeAction } from './action-links';
 import { useLinkPreviewStore } from '@/stores/linkPreview';
 import { isAbsoluteFilePath, openFilePath } from '@/components/agent/FilePathText';
@@ -189,7 +189,7 @@ function ActionAnchor({ href, children }: { href?: string; children?: ReactNode 
     );
   }
   // 链接拦截模式：http(s) 链接改到右侧 iframe 预览面板打开；
-  // 其他协议（mailto: 等）交给系统默认处理（openUrl），避免 webview 整页跳转
+  // 其他协议（mailto: 等）交给系统默认处理（openInBrowser），避免 webview 整页跳转
   if (href && linkPreview) {
     const isHttp = /^https?:\/\//i.test(href);
     return (
@@ -201,7 +201,7 @@ function ActionAnchor({ href, children }: { href?: string; children?: ReactNode 
           if (isHttp) {
             useLinkPreviewStore.getState().openLink(href);
           } else {
-            void openUrl(href).catch(() => {});
+            void openInBrowser(href).catch(() => {});
           }
         }}
       >

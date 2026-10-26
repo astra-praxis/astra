@@ -296,8 +296,48 @@ fn powershell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "''"))
 }
 
+/// 路径解析：绝对路径原样返回；相对路径以 base_dir 为基准 join 并做词法
+/// 规范化（处理 . 与 ..，不触碰文件系统，目标不存在也返回预期绝对路径）。
+/// 无 base_dir 的相对路径拒绝解析——静默落在进程/编辑器 cwd 的行为不可预测，
+/// 由调用方传入明确基准（当前工作空间根目录等）。
+fn resolve_open_path(path: &str, base_dir: Option<&str>) -> Result<String, String> {
+    // Windows 盘符 C:\、UNC \\server\share、POSIX / 开头都由 std 判定，不手写字符串判断
+    if std::path::Path::new(path).is_absolute() {
+        return Ok(path.to_string());
+    }
+    // file:// 等带协议前缀的不是文件系统路径，拒绝解析（URL 由浏览器链路处理）
+    if path.contains("://") {
+        return Err(format!("不是本地文件路径（含协议前缀）: {path}"));
+    }
+    let base = match base_dir {
+        Some(b) if !b.trim().is_empty() => std::path::PathBuf::from(b.trim()),
+        _ => {
+            return Err(format!(
+                "相对路径缺少解析基准（base_dir），无法定位: {path}"
+            ))
+        }
+    };
+    let mut normalized = base;
+    for comp in std::path::Path::new(path).components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
+    }
+    Ok(normalized.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
-pub(crate) fn open_in_editor(path: String, editor_command: String) -> Result<(), String> {
+pub(crate) fn open_in_editor(
+    path: String,
+    editor_command: String,
+    base_dir: Option<String>,
+) -> Result<(), String> {
+    // 相对路径先以 base_dir 解析成绝对路径；缺基准直接报错，不再静默交给编辑器 cwd
+    let path = resolve_open_path(&path, base_dir.as_deref())?;
     // 候选目录（打包后 GUI 应用继承的 PATH 只有 /usr/bin:/bin 等系统目录）
     let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     #[cfg(not(windows))]
@@ -451,6 +491,47 @@ mod tests {
         assert_eq!(powershell_quote(""), "''");
         // cmd 特殊字符（& % ^ ! 空格）都不需要额外转义
         assert_eq!(powershell_quote("x&y%z^w!q "), "'x&y%z^w!q '");
+    }
+
+    #[test]
+    fn resolve_open_path_absolute_passthrough() {
+        // 绝对路径原样返回，无 base_dir 也不报错
+        let abs = std::env::temp_dir().join("astra-open-test.txt");
+        let abs_str = abs.to_string_lossy().into_owned();
+        assert_eq!(resolve_open_path(&abs_str, None).unwrap(), abs_str);
+    }
+
+    #[test]
+    fn resolve_open_path_relative_joins_base() {
+        let base = std::env::temp_dir();
+        let got = resolve_open_path("src/main.rs", Some(base.to_str().unwrap())).unwrap();
+        assert!(std::path::Path::new(&got).is_absolute());
+        assert!(std::path::Path::new(&got).ends_with("src/main.rs"));
+        // ./ 前缀与直接写等价
+        let got2 = resolve_open_path("./src/main.rs", Some(base.to_str().unwrap())).unwrap();
+        assert_eq!(got, got2);
+    }
+
+    #[test]
+    fn resolve_open_path_parent_dir_resolves_lexically() {
+        let base = std::env::temp_dir();
+        let got = resolve_open_path("../README.md", Some(base.to_str().unwrap())).unwrap();
+        let expect = base.parent().unwrap().join("README.md");
+        assert_eq!(got, expect.to_string_lossy().into_owned());
+    }
+
+    #[test]
+    fn resolve_open_path_missing_base_is_error() {
+        // 相对路径无基准：报错而非静默落到 cwd
+        assert!(resolve_open_path("src/main.rs", None).is_err());
+        assert!(resolve_open_path("src/main.rs", Some("")).is_err());
+        assert!(resolve_open_path("src/main.rs", Some("  ")).is_err());
+    }
+
+    #[test]
+    fn resolve_open_path_rejects_url() {
+        assert!(resolve_open_path("file:///tmp/a.txt", None).is_err());
+        assert!(resolve_open_path("https://example.com/a.txt", Some("/tmp")).is_err());
     }
 
     #[cfg(not(windows))]

@@ -49,9 +49,12 @@ export async function executeAction(info: ActionInfo): Promise<ActionResult> {
       return { ok: false, label: '⚠ 请先在设置页配置编辑器' };
     }
     try {
+      // baseDir：相对路径以当前活跃工作空间为基准解析（与 run_command 的 cwd 同语义），
+      // 缺基准时 Rust 侧报明确错误，不再静默落到编辑器自己的 cwd
       await invoke('open_in_editor', {
         path: info.params.path,
         editorCommand: ws.editor.command,
+        baseDir: ws.activePath || undefined,
       });
       return { ok: true, label: `✓ 已用 ${ws.editor.name} 打开` };
     } catch (err) {

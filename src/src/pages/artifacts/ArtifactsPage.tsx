@@ -19,6 +19,7 @@ import {
   History,
 } from 'lucide-react';
 import { describeArtifact, type Artifact } from '@/components/agent/artifact';
+import { useWorkspaceStore } from '@/stores/workspace';
 import './ArtifactsPage.scss';
 
 /** agent.rs AgentArtifactInfo 的前端镜像（camelCase 由后端直接序列化） */
@@ -155,10 +156,14 @@ export default function ArtifactsPage() {
   }, []);
 
   const openInEditor = useCallback(async (record: AgentArtifactInfo) => {
+    // 读取当前配置的默认编辑器与活跃工作空间（原先 editorCommand 传空必然启动失败且被静默吞掉）
+    const ws = useWorkspaceStore.getState();
+    if (!ws.editor.command) return;
     try {
       await invoke('open_in_editor', {
         path: record.location,
-        editorCommand: '',
+        editorCommand: ws.editor.command,
+        baseDir: ws.activePath || undefined,
       });
     } catch {
       /* 打开失败静默；location 可能已失效（见页面顶部说明） */

@@ -1,12 +1,14 @@
 /**
- * 设置中心「账户」分区：本地多账户（P0 冷切换架构）。
+ * 设置中心「账户」分区：本地多账户（praxis 式登录，冷切换架构）。
  *
  * - 显示当前启动模式（账户 / legacy）与当前账户
- * - 列出已有账户，支持冷切换启动（释放锁 → spawn 新进程 → 当前进程退出）
- * - 创建新账户（首个账户自动承接 legacy 单用户数据迁移）
+ * - 列出已有账户：点击「启动」展开密码输入 → 验证密码冷切换
+ *   （老账户无凭据：首次启动设置初始密码）
+ * - 创建新账户：名称 + 登录密码（首个账户自动承接 legacy 数据迁移）
+ * - 更换登录密码：旧密码 + 新密码（KEK 不变，仅重新包装）
  *
- * legacy 模式用户经此进入多账户体系（账户门在 legacy 模式直接放行，
- * 这里是唯一的迁移入口）。
+ * legacy 模式用户经此进入多账户体系（账户门在 legacy 模式渲染登录列表，
+ * 这里是补充入口）。
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -20,6 +22,7 @@ interface Account {
   display_name: string;
   created_at: number;
   status: string;
+  has_auth?: boolean;
 }
 
 interface AccountStatus {
@@ -33,8 +36,12 @@ interface AccountStatus {
 
 export default function AccountSettings() {
   const [status, setStatus] = useState<AccountStatus | null>(null);
+  // 展开密码输入的账户（启动流程）
   const [launching, setLaunching] = useState<string | null>(null);
   const [error, setError] = useState('');
+
+  const refresh = () =>
+    invoke<AccountStatus>('account_status').then(setStatus).catch(() => {});
 
   useEffect(() => {
     invoke<AccountStatus>('account_status')
@@ -42,12 +49,12 @@ export default function AccountSettings() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  async function launch(accountId: string) {
+  async function launch(accountId: string, password: string) {
     setError('');
     setLaunching(accountId);
     try {
       // 成功时后端 spawn 新进程并 exit(0)，Promise 不会 resolve
-      await invoke('account_launch', { accountId });
+      await invoke('account_launch', { accountId, password });
       setLaunching(null);
     } catch (e) {
       setError(String(e));
@@ -55,18 +62,24 @@ export default function AccountSettings() {
     }
   }
 
-  async function createAccount(e: FormEvent, name: string, reset: () => void): Promise<void> {
+  async function createAccount(
+    e: FormEvent,
+    name: string,
+    password: string,
+    reset: () => void,
+  ): Promise<void> {
     e.preventDefault();
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed || !password) return;
     setError('');
     try {
       const account = await invoke<{ account_id: string }>('account_create', {
         displayName: trimmed,
+        password,
       });
       reset();
       // 创建成功即冷切换进入新账户；首个账户会自动迁移 legacy 数据
-      await launch(account.account_id);
+      await launch(account.account_id, password);
     } catch (err) {
       setError(String(err));
     }
@@ -80,7 +93,7 @@ export default function AccountSettings() {
           desc={
             status.mode === 'account'
               ? '已绑定账户启动，所有会话、记忆与配置归属该账户'
-              : 'legacy 单用户模式：沿用旧数据目录，账户功能可在下方开启'
+              : 'legacy 单用户模式：沿用旧数据目录，登录列表与创建入口见下方'
           }
         >
           <span className={`acct-mode acct-mode--${status.mode}`}>
@@ -90,29 +103,46 @@ export default function AccountSettings() {
       )}
 
       {status && status.accounts.length > 0 && (
-        <SettingsRow stacked title="已有账户" desc="启动即冷切换：退出当前进程并以该账户重启">
+        <SettingsRow
+          stacked
+          title="已有账户"
+          desc="启动需输入该账户的登录密码；老账户首次启动时设置初始密码"
+        >
           <ul className="acct-list">
             {status.accounts.map((a) => (
-              <li key={a.account_id} className="acct-list__item">
-                <span className="acct-list__avatar">{a.display_name.slice(0, 1)}</span>
-                <span className="acct-list__name">
-                  {a.display_name}
-                  {status.account_id === a.account_id && (
-                    <span className="acct-list__badge">
-                      <ShieldCheck size={12} strokeWidth={2} /> 当前
-                    </span>
+              <li key={a.account_id} className="acct-list__entry">
+                <div className="acct-list__item">
+                  <span className="acct-list__avatar">{a.display_name.slice(0, 1)}</span>
+                  <span className="acct-list__name">
+                    {a.display_name}
+                    {status.account_id === a.account_id && (
+                      <span className="acct-list__badge">
+                        <ShieldCheck size={12} strokeWidth={2} /> 当前
+                      </span>
+                    )}
+                  </span>
+                  {a.has_auth !== true && <span className="acct-list__initial">设初始密码</span>}
+                  {status.account_id !== a.account_id && (
+                    <button
+                      type="button"
+                      className="acct-list__launch"
+                      disabled={launching !== null}
+                      onClick={() =>
+                        setLaunching(launching === a.account_id ? null : a.account_id)
+                      }
+                    >
+                      <ArrowRightCircle size={13} strokeWidth={2} />
+                      启动
+                    </button>
                   )}
-                </span>
-                {status.account_id !== a.account_id && (
-                  <button
-                    type="button"
-                    className="acct-list__launch"
-                    disabled={launching !== null}
-                    onClick={() => launch(a.account_id)}
-                  >
-                    <ArrowRightCircle size={13} strokeWidth={2} />
-                    {launching === a.account_id ? '启动中…' : '启动'}
-                  </button>
+                </div>
+                {launching === a.account_id && (
+                  <LaunchPasswordForm
+                    account={a}
+                    busy={launching !== null}
+                    onSubmit={(password) => launch(a.account_id, password)}
+                    onCancel={() => setLaunching(null)}
+                  />
                 )}
               </li>
             ))}
@@ -136,10 +166,72 @@ export default function AccountSettings() {
   );
 }
 
+/** 启动密码表单（行内展开）：有凭据验证密码；老账户设初始密码（两次输入） */
+function LaunchPasswordForm({
+  account,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  account: Account;
+  busy: boolean;
+  onSubmit: (password: string) => void;
+  onCancel: () => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const needInit = account.has_auth !== true;
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!password || busy) return;
+    if (needInit && password !== confirm) {
+      setError('两次输入的密码不一致');
+      return;
+    }
+    setError('');
+    // 成功时进程退出，无需恢复状态
+    onSubmit(password);
+  }
+
+  return (
+    <form className="acct-list__pwform" onSubmit={submit}>
+      <input
+        className="acct-create__input"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder={needInit ? '设置初始登录密码（6-128 位）' : '登录密码'}
+        maxLength={128}
+        autoFocus
+        disabled={busy}
+      />
+      {needInit && (
+        <input
+          className="acct-create__input"
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="确认初始密码"
+          maxLength={128}
+          disabled={busy}
+        />
+      )}
+      <button type="submit" className="btn-save acct-create__btn" disabled={busy || !password}>
+        {needInit ? '设置并启动' : '启动'}
+      </button>
+      <button type="button" className="btn-discard acct-create__btn" onClick={onCancel}>
+        取消
+      </button>
+      {error && <p className="acct-error">{error}</p>}
+    </form>
+  );
+}
+
 /**
- * 访问密码（可选）：默认文件密钥零弹窗；设密码后启动需解锁。
- * 设置/更换共用一个输入框（有密码时即更换，无需旧密码——
- * 已解锁状态才允许操作）；移除需验证当前密码。
+ * 更换登录密码：旧密码 + 新密码（仅当前账户；KEK 不变，已加密数据无需重加密）。
+ * 老账户（未设密码）先启动一次完成初始密码设置，再回来更换。
  */
 function PasswordRow({
   status,
@@ -148,23 +240,28 @@ function PasswordRow({
   status: AccountStatus | null;
   onChanged: () => void;
 }) {
-  const [password, setPassword] = useState('');
-  const [removePassword, setRemovePassword] = useState('');
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const locked = !!status?.locked;
-  const protectedAccount = !!status?.password_protected;
+  const hasPassword = !!status?.password_protected;
 
-  async function run(action: () => Promise<unknown>, done: string) {
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!oldPassword || !newPassword || busy) return;
     setBusy(true);
     setErr('');
     setMsg('');
     try {
-      await action();
-      setMsg(done);
-      setPassword('');
-      setRemovePassword('');
+      await invoke('account_password_change', {
+        oldPassword,
+        newPassword,
+      });
+      setMsg('登录密码已更换，下次启动生效');
+      setOldPassword('');
+      setNewPassword('');
       onChanged();
     } catch (e) {
       setErr(String(e));
@@ -176,72 +273,45 @@ function PasswordRow({
   return (
     <SettingsRow
       stacked
-      title="访问密码（可选）"
+      title="登录密码"
       desc={
-        protectedAccount
-          ? '已启用：启动时需输入密码解锁本机数据（仅本地验证，不同步到云端）'
-          : '未启用：数据用本机随机密钥保护，无需密码、无弹窗。设置后启动需解锁'
+        hasPassword
+          ? '保护本账户数据；仅本地验证，不同步到云端'
+          : '当前账户尚未设置登录密码：先在登录/启动时设置初始密码，再在此更换'
       }
     >
       {locked ? (
         <p className="acct-password__hint">账户处于锁定状态，请先在启动界面解锁</p>
       ) : (
-        <>
-          <form
-            className="acct-create"
-            onSubmit={(e) => {
-              e.preventDefault();
-              run(
-                () => invoke('account_password_set', { password }),
-                protectedAccount ? '密码已更换' : '密码已启用，下次启动需解锁',
-              );
-            }}
+        <form className="acct-create acct-create--stacked" onSubmit={submit}>
+          <input
+            className="acct-create__input"
+            type="password"
+            value={oldPassword}
+            onChange={(e) => setOldPassword(e.target.value)}
+            placeholder={hasPassword ? '当前密码' : '初始密码（未设置过则填启动时设的密码）'}
+            maxLength={128}
+            disabled={busy}
+          />
+          <input
+            className="acct-create__input"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="新密码（6-128 位）"
+            maxLength={128}
+            disabled={busy}
+          />
+          <button
+            type="submit"
+            className="btn-save acct-create__btn"
+            disabled={busy || !oldPassword || !newPassword}
           >
-            <input
-              className="acct-create__input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={protectedAccount ? '新密码（更换）' : '设置访问密码（6-128 位）'}
-              maxLength={128}
-              disabled={busy}
-            />
-            <button type="submit" className="btn-save acct-create__btn" disabled={busy || !password}>
-              {protectedAccount ? '更换密码' : '启用密码'}
-            </button>
-          </form>
-          {protectedAccount && (
-            <form
-              className="acct-create"
-              onSubmit={(e) => {
-                e.preventDefault();
-                run(
-                  () => invoke('account_password_remove', { password: removePassword }),
-                  '密码已移除，回到免密码模式',
-                );
-              }}
-            >
-              <input
-                className="acct-create__input"
-                type="password"
-                value={removePassword}
-                onChange={(e) => setRemovePassword(e.target.value)}
-                placeholder="当前密码（移除需验证）"
-                maxLength={128}
-                disabled={busy}
-              />
-              <button
-                type="submit"
-                className="btn-discard acct-create__btn"
-                disabled={busy || !removePassword}
-              >
-                移除密码
-              </button>
-            </form>
-          )}
+            {busy ? '提交中…' : '更换密码'}
+          </button>
           {msg && <p className="acct-password__hint acct-password__hint--ok">{msg}</p>}
           {err && <p className="acct-error">{err}</p>}
-        </>
+        </form>
       )}
     </SettingsRow>
   );
@@ -254,13 +324,24 @@ function CreateAccountRow({
 }: {
   disabled: boolean;
   isFirst: boolean;
-  onSubmit: (e: FormEvent, name: string, reset: () => void) => Promise<void>;
+  onSubmit: (
+    e: FormEvent,
+    name: string,
+    password: string,
+    reset: () => void,
+  ) => Promise<void>;
 }) {
   const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const ready = name.trim() && password && password === confirm;
 
   return (
     <SettingsRow
+      stacked
       title="创建新账户"
       desc={
         isFirst
@@ -269,10 +350,19 @@ function CreateAccountRow({
       }
     >
       <form
-        className="acct-create"
+        className="acct-create acct-create--stacked"
         onSubmit={(e) => {
+          if (password !== confirm) {
+            setError('两次输入的密码不一致');
+            return;
+          }
+          setError('');
           setBusy(true);
-          onSubmit(e, name, () => setName('')).finally(() => setBusy(false));
+          onSubmit(e, name, password, () => {
+            setName('');
+            setPassword('');
+            setConfirm('');
+          }).finally(() => setBusy(false));
         }}
       >
         <input
@@ -283,13 +373,32 @@ function CreateAccountRow({
           maxLength={32}
           disabled={disabled || busy}
         />
+        <input
+          className="acct-create__input"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="登录密码（6-128 位）"
+          maxLength={128}
+          disabled={disabled || busy}
+        />
+        <input
+          className="acct-create__input"
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="确认登录密码"
+          maxLength={128}
+          disabled={disabled || busy}
+        />
         <button
           type="submit"
           className="btn-save acct-create__btn"
-          disabled={disabled || busy || !name.trim()}
+          disabled={disabled || busy || !ready}
         >
           {busy ? '创建中…' : isFirst ? '创建并迁移' : '创建'}
         </button>
+        {error && <p className="acct-error">{error}</p>}
       </form>
     </SettingsRow>
   );

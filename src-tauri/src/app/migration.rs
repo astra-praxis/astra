@@ -29,6 +29,8 @@ const DATA_FILES: &[&str] = &[
     "astra.log.old",
     "memory-cme.sqlite",
     "memory.key",
+    // legacy 明文 KEK：迁入账户 data 目录后由 auth_init 承接（用登录密码重新包装）
+    ".astra-kek",
     "vector_index.db",
     "generation.json",
     "download_history.json",

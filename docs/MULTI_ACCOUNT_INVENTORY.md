@@ -13,11 +13,19 @@
 >   `crate::app::accounts::data_dir()`（本清单 #1–16、21），
 >   #17–19 走 `astra_home()` 或 ASTRA_HOME 注入；#20 系统技能保持共享；
 >   前端账户门 `src/src/components/account/AccountGate.tsx`。
-> - P0-3：`src-tauri/src/app/secret.rs`（机器级 KEK：OS keychain 优先，
->   回退 `<目录>/.astra-kek` 0600 文件；XChaCha20-Poly1305 信封格式）；
->   `providers.json` 改为信封加密落盘（legacy 明文仍可读，首次写盘自动升级；
->   KEK 不可用时拒绝写明文）；`memory.key` 改为 KEK 包装格式
+> - P0-3：`src-tauri/src/app/secret.rs`（每账户登录密码：Argon2id 派生密钥
+>   包装随机 KEK，凭据存 `<data_dir>/.astra-auth.json`；XChaCha20-Poly1305
+>   信封格式）。**keychain 已弃用**（会反复弹授权框）；legacy `.astra-kek`
+>   0600 文件保留为 dev 兜底，auth_init 时承接并用密码重新包装。
+>   `providers.json` 信封加密落盘（legacy 明文仍可读，首次写盘自动升级；
+>   KEK 不可用时拒绝写明文）；`memory.key` KEK 包装格式
 >   （ASTRA-WRAP1 + 信封，legacy 裸密钥读入后 best-effort 升级重写）。
+> - P0-5（praxis 式登录）：账户门改为登录界面——选用户 → 输密码 →
+>   登录（`account_launch` 验证密码 → KEK 写一次性交接 token（0600、即读即删）
+>   → 冷切换）；新进程 setup 消费 token 免二次输密。绑定账户启动后处于
+>   锁定态需 `account_unlock`。老账户（无凭据）首次登录设置初始密码。
+>   设置中心：创建账户即设登录密码；更换密码 `account_password_change`
+>   （KEK 不变仅重新包装）。密码仅本地验证，不做云同步。
 > - P0-4：`src-tauri/src/app/migration.rs`（首个账户创建时一次性迁移 legacy
 >   数据：APPDATA 根数据文件 → 账户 data/，config.toml copy 保留原件，
 >   pastes/skills 搬移；marker 幂等，rename 失败回退 copy+保留）；

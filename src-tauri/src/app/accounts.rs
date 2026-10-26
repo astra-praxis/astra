@@ -27,6 +27,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tauri::Manager;
 
+use super::secret;
+
 /// 账户元数据（公共库内容，禁止放入任何敏感信息——设计文档 §3.2）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -37,6 +39,10 @@ pub struct Account {
     pub created_at: i64,
     /// active | locked（锁定语义随 P0-3 加密上线，P0 仅占位）
     pub status: String,
+    /// 是否已设置登录密码（读取时动态计算，不落盘）。
+    /// false 的账户首次登录时需设置初始密码。
+    #[serde(default, skip_serializing)]
+    pub has_auth: bool,
 }
 
 /// 进程绑定的活动账户上下文（setup 阶段初始化一次，之后只读）
@@ -143,7 +149,13 @@ fn read_accounts(app_data_root: &std::path::Path) -> Result<Vec<Account>, String
         return Ok(Vec::new());
     }
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取账户列表失败: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("解析账户列表失败: {e}"))
+    let mut accounts: Vec<Account> =
+        serde_json::from_str(&raw).map_err(|e| format!("解析账户列表失败: {e}"))?;
+    // has_auth 是运行时状态（登录密码凭据文件是否存在），不落盘、每次读取时计算
+    for a in accounts.iter_mut() {
+        a.has_auth = secret::has_auth(&account_dir(app_data_root, &a.account_id).join("data"));
+    }
+    Ok(accounts)
 }
 
 fn write_accounts(app_data_root: &std::path::Path, accounts: &[Account]) -> Result<(), String> {
@@ -284,7 +296,7 @@ pub fn account_status(app: tauri::AppHandle) -> Result<AccountStatus, String> {
     let dir = crate::app::accounts::data_dir(&app).ok();
     let (password_protected, locked) = match &dir {
         Some(dir) => (
-            crate::app::secret::password_is_set(dir),
+            crate::app::secret::has_auth(dir),
             crate::app::secret::is_locked(dir),
         ),
         None => (false, false),
@@ -324,12 +336,20 @@ pub fn account_list(app: tauri::AppHandle) -> Result<Vec<Account>, String> {
     read_accounts(&root)
 }
 
+/// 创建账户并设置登录密码（6-128 字符）。
+/// 首个账户会承接 legacy 数据：迁移（含明文 KEK）完成后 auth_init 承接 KEK
+/// 并用密码重新包装——旧密文（providers.json 等）依然可解。
 #[tauri::command]
-pub fn account_create(app: tauri::AppHandle, display_name: String) -> Result<Account, String> {
+pub fn account_create(
+    app: tauri::AppHandle,
+    display_name: String,
+    password: String,
+) -> Result<Account, String> {
     let name = display_name.trim();
     if name.is_empty() || name.chars().count() > 32 {
         return Err("账户名称需为 1-32 个字符".into());
     }
+    secret::validate_password(&password)?;
     let root = app
         .path()
         .app_data_dir()
@@ -345,6 +365,7 @@ pub fn account_create(app: tauri::AppHandle, display_name: String) -> Result<Acc
         display_name: name.to_string(),
         created_at: now_ms(),
         status: "active".into(),
+        has_auth: false,
     };
     accounts.push(account.clone());
     write_accounts(&root, &accounts)?;
@@ -353,7 +374,8 @@ pub fn account_create(app: tauri::AppHandle, display_name: String) -> Result<Acc
     std::fs::create_dir_all(dir.join("data")).map_err(|e| format!("创建账户数据目录失败: {e}"))?;
     std::fs::create_dir_all(dir.join("astra-home"))
         .map_err(|e| format!("创建账户 astra-home 失败: {e}"))?;
-    // 首个账户：一次性迁移 legacy 数据（失败不阻断创建，日志可查）
+    // 首个账户承接 legacy 单用户数据（P0-4）：必须先于 auth_init 执行，
+    // 这样 auth_init 才能承接迁移过来的明文 KEK（旧密文才能解）
     if was_first_account {
         match crate::app::migration::migrate_legacy_for_current_platform(
             &root,
@@ -372,16 +394,24 @@ pub fn account_create(app: tauri::AppHandle, display_name: String) -> Result<Acc
             Err(e) => app_log!(error, "accounts", "legacy migration failed: {e}"),
         }
     }
+    // 设置登录密码：承接 legacy KEK（若有）或生成新 KEK，密码包装后落 auth 文件
+    let data_dir = dir.join("data");
+    secret::auth_init(&data_dir, &password)?;
     Ok(account)
 }
 
-/// 冷切换：以目标账户重启进程。释放实例锁 → spawn 自身（--account=<id>）→
-/// 当前进程退出。dev 模式下 current_exe 是调试二进制，行为依赖 devUrl 可达，
+/// 冷切换：以目标账户重启进程。验证密码 → 交接 KEK（token 文件）→
+/// 取消运行中任务 → 释放实例锁 → spawn 自身（--account=<id>）→ 退出。
+/// dev 模式下 current_exe 是调试二进制，行为依赖 devUrl 可达，
 /// 正式验证以打包产物为准。
+///
+/// 老账户（无登录凭据，legacy 时期创建）兼容：首次登录即设置初始密码
+/// （auth_init 承接其现有文件 KEK，旧密文不受影响）。
 #[tauri::command]
 pub fn account_launch(
     app: tauri::AppHandle,
     account_id: String,
+    password: String,
     lock: tauri::State<'_, InstanceLockState>,
 ) -> Result<(), String> {
     let root = app
@@ -392,6 +422,16 @@ pub fn account_launch(
     if !accounts.iter().any(|a| a.account_id == account_id) {
         return Err(format!("账户不存在: {account_id}"));
     }
+    let data_dir = account_dir(&root, &account_id).join("data");
+    // 登录验证：已有凭据 → 验证密码取 KEK；无凭据（老账户）→ 首次登录设初始密码
+    let kek = if secret::has_auth(&data_dir) {
+        secret::auth_verify(&data_dir, &password)?
+    } else {
+        secret::auth_init(&data_dir, &password)?
+    };
+    // 登录态交接：KEK 经一次性 token 文件交给新进程（0600，即读即删），
+    // 新进程 setup 消费后免二次输密码
+    secret::auth_token_write(&root, &account_id, &kek)?;
     let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
     // 冷切换收尾（P0-4）：退出前取消本账户所有运行中的 Run，并终止
     // dev 服务器进程树（子进程不随进程退出自动消亡，必须显式清理）
@@ -422,18 +462,7 @@ pub fn account_launch(
 /// Mutex 允许冷切换命令在 &self 上释放锁。
 pub(crate) struct InstanceLockState(pub(crate) std::sync::Mutex<InstanceLock>);
 
-// ===== 访问密码（可选；默认文件密钥零弹窗，设密码后启动需解锁） =====
-
-/// 设置/更换当前数据目录的访问密码（6-128 字符）。
-/// 设置后：providers.json / memory.key 由密码派生密钥保护，明文 KEK 删除；
-/// 下次启动处于锁定态，需 account_unlock 解锁。
-#[tauri::command]
-pub fn account_password_set(app: tauri::AppHandle, password: String) -> Result<(), String> {
-    let dir = crate::app::accounts::data_dir(&app)?;
-    crate::app::secret::password_set(&dir, &password)?;
-    app_log!(info, "accounts", "access password set");
-    Ok(())
-}
+// ===== 账户登录密码（praxis 式登录：选用户 → 输密码 → 进应用） =====
 
 /// 解锁：验证密码，KEK 进程内缓存；随后补做被锁定跳过的初始化
 /// （记忆宿主）。前端解锁成功后刷新页面即可正常使用。
@@ -446,12 +475,17 @@ pub fn account_unlock(app: tauri::AppHandle, password: String) -> Result<(), Str
     Ok(())
 }
 
-/// 移除访问密码（需验证当前密码）：回到默认文件密钥方案（零弹窗）。
+/// 更换登录密码（需验证当前密码）。KEK 不变（仅重新包装），
+/// 已加密数据无需重加密。
 #[tauri::command]
-pub fn account_password_remove(app: tauri::AppHandle, password: String) -> Result<(), String> {
+pub fn account_password_change(
+    app: tauri::AppHandle,
+    old_password: String,
+    new_password: String,
+) -> Result<(), String> {
     let dir = crate::app::accounts::data_dir(&app)?;
-    crate::app::secret::password_remove(&dir, &password)?;
-    app_log!(info, "accounts", "access password removed");
+    crate::app::secret::password_change(&dir, &old_password, &new_password)?;
+    app_log!(info, "accounts", "login password changed");
     Ok(())
 }
 
@@ -477,6 +511,7 @@ mod tests {
             display_name: "工作".into(),
             created_at: 1,
             status: "active".into(),
+            has_auth: false,
         });
         write_accounts(&root, &accounts).unwrap();
         let got = read_accounts(&root).unwrap();
@@ -510,6 +545,7 @@ mod tests {
             display_name: "工作".into(),
             created_at: 1,
             status: "active".into(),
+            has_auth: false,
         });
         write_accounts(&root, &accounts).unwrap();
         let rt = resolve_account(&root, Some("abc123".into()))

@@ -96,11 +96,45 @@
       cursor: not-allowed;
     }
   }
+
+  // 老账户（无凭据）首次启动需设初始密码的提示角标
+  &__initial {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--warning-text, #f59e0b);
+  }
+
+  // 列表项 + 展开密码表单的包装
+  &__entry {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  // 行内展开的启动密码表单（缩进对齐条目头像）
+  &__pwform {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px 8px 38px;
+
+    .acct-create__input {
+      flex: 1;
+      min-width: 140px;
+    }
+  }
 }
 
 .acct-create {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+
+  // 多输入（创建/改密码）：纵向排列更清晰
+  &--stacked {
+    flex-direction: column;
+  }
 
   &__input {
     flex: 1;

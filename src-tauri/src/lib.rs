@@ -196,6 +196,15 @@ pub fn run() {
                     app.manage(app::accounts::InstanceLockState(std::sync::Mutex::new(
                         lock,
                     )));
+                    // 冷切换登录态交接：登录页启动新进程时会把 KEK 写入
+                    // 一次性 token 文件（即读即删）；本进程若是对应账户，
+                    // 消费 token 直接解锁，免二次输密码
+                    if let Some(rt) = app::accounts::active() {
+                        if let Some(kek) = app::secret::auth_token_take(&app_root, &rt.account_id) {
+                            app::secret::cache_kek(kek);
+                            app_log!(info, "accounts", "login token consumed, kek cached");
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("[account] {e}");
@@ -393,9 +402,8 @@ pub fn run() {
             app::accounts::account_list,
             app::accounts::account_create,
             app::accounts::account_launch,
-            app::accounts::account_password_set,
             app::accounts::account_unlock,
-            app::accounts::account_password_remove,
+            app::accounts::account_password_change,
             // Extensions 市场（状态展示；安装走 Agent 对话）
             extensions::market::market_status,
             // Extensions 管理（MCP / ACP 启停、编辑、删除）

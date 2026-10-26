@@ -103,6 +103,45 @@
     flex-shrink: 0;
   }
 
+  // 用户列表项：已设密码的锁标记
+  &__lock {
+    color: var(--text-tertiary, var(--text-secondary));
+    flex-shrink: 0;
+  }
+
+  // 老账户（无凭据）首次登录需设初始密码的提示角标
+  &__initial {
+    font-size: 11px;
+    color: var(--warning-500, #f59e0b);
+    flex-shrink: 0;
+  }
+
+  // 登录表单下的返回按钮
+  &__back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+
+    &:hover:not(:disabled) {
+      background: var(--bg-card-hover, rgba(127, 127, 127, 0.12));
+      color: var(--text-primary);
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+  }
+
   &__create {
     display: flex;
     flex-direction: column;

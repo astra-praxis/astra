@@ -12,6 +12,7 @@ import {
   Search,
   Settings,
   SquarePen,
+  UsersRound,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ import {
 /** 设置分类图标，key 对应 sections/index.ts 的 section id */
 export const SECTION_ICONS: Record<string, LucideIcon> = {
   general: Settings,
+  account: UsersRound,
   agent: Bot,
   memory: Brain,
   search: Search,

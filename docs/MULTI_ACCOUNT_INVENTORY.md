@@ -4,16 +4,25 @@
 > 本文档是其 P0 阶段的三份前置清单：全量存储清单、账户归属矩阵、迁移与验收矩阵。
 > 所有路径与入口均已核实到具体文件与函数，未做任何猜测。
 >
-> **实施状态（P0-1 / P0-2 已落地，提交于 feat(accounts)）**：
-> - 账户模块 `src-tauri/src/app/accounts.rs`：accounts.json 元数据、`--account=<id>`
->   启动参数绑定、账户数据目录解析器 `data_dir()`（全部账户私有落盘的唯一入口）、
->   `astra_home()`、ASTRA_HOME 注入、全局单实例锁（pid + 存活检测）、
->   account_status / account_list / account_create / account_launch 四命令；
-> - 全部落盘点已改走 `crate::app::accounts::data_dir()`（本清单 #1–16、21），
+> **实施状态（P0-1 / P0-2 / P0-3 / P0-4 已落地）**：
+> - P0-1 / P0-2：账户模块 `src-tauri/src/app/accounts.rs`：accounts.json 元数据、
+>   `--account=<id>` 启动参数绑定、账户数据目录解析器 `data_dir()`（全部账户
+>   私有落盘的唯一入口）、`astra_home()`、ASTRA_HOME 注入、全局单实例锁
+>   （pid + 存活检测）、account_status / account_list / account_create /
+>   account_launch 四命令；全部落盘点已改走
+>   `crate::app::accounts::data_dir()`（本清单 #1–16、21），
 >   #17–19 走 `astra_home()` 或 ASTRA_HOME 注入；#20 系统技能保持共享；
-> - 前端账户门 `src/src/components/account/AccountGate.tsx`：legacy 放行、
->   账户选择/创建 + 冷切换启动；
-> - 待办（P0-3 / P0-4）：敏感数据加密、旧数据迁移、迁移状态机。
+>   前端账户门 `src/src/components/account/AccountGate.tsx`。
+> - P0-3：`src-tauri/src/app/secret.rs`（机器级 KEK：OS keychain 优先，
+>   回退 `<目录>/.astra-kek` 0600 文件；XChaCha20-Poly1305 信封格式）；
+>   `providers.json` 改为信封加密落盘（legacy 明文仍可读，首次写盘自动升级；
+>   KEK 不可用时拒绝写明文）；`memory.key` 改为 KEK 包装格式
+>   （ASTRA-WRAP1 + 信封，legacy 裸密钥读入后 best-effort 升级重写）。
+> - P0-4：`src-tauri/src/app/migration.rs`（首个账户创建时一次性迁移 legacy
+>   数据：APPDATA 根数据文件 → 账户 data/，config.toml copy 保留原件，
+>   pastes/skills 搬移；marker 幂等，rename 失败回退 copy+保留）；
+>   `account_launch` 冷切换收尾（agent_cancel + dev server 进程树终止）；
+>   设置中心新增「账户」分区（AccountSettings，legacy 用户经此进入多账户）。
 
 ## 0. 已核实的架构事实（影响 P0 方案）
 

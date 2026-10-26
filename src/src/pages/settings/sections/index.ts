@@ -3,6 +3,7 @@
  */
 import type { ComponentType } from 'react';
 import GeneralSettings from './GeneralSettings';
+import AccountSettings from './AccountSettings';
 import AgentSettings from './AgentSettings';
 import MemorySettings from './MemorySettings';
 import SearchSettings from './SearchSettings';
@@ -24,6 +25,12 @@ export const PREFERENCE_SECTIONS: SettingsSectionDef[] = [
     label: '常规',
     desc: '调整外观和项目扫描的默认行为',
     component: GeneralSettings,
+  },
+  {
+    id: 'account',
+    label: '账户',
+    desc: '本地多账户：创建账户、冷切换启动，首个账户自动迁移旧数据',
+    component: AccountSettings,
   },
   {
     id: 'agent',

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 // ===== 类型定义 =====
@@ -62,6 +62,110 @@ fn ensure_providers_file(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+// ===== providers.json 加密存取（P0-3）=====
+
+/// KEK 回退文件的所在目录：与 providers.json 同目录（账户数据目录）。
+fn kek_fallback_dir(path: &Path) -> &Path {
+    path.parent().unwrap_or_else(|| Path::new("."))
+}
+
+/// 按内容解析 providers：信封格式先解密（KEK 失效/解密失败降级为空列表并记
+/// 日志，保持既有"解析失败降级"语义）；legacy 明文数组直接解析（下次写盘
+/// 自动升级为加密格式）。
+fn parse_providers_content(content: &str, kek: Option<&[u8; 32]>) -> Vec<ProviderConfig> {
+    if crate::app::secret::looks_like_envelope(content) {
+        let Some(kek) = kek else {
+            app_log!(
+                error,
+                "providers",
+                "load_providers: kek unavailable, fallback to empty"
+            );
+            return vec![];
+        };
+        return match crate::app::secret::decrypt_envelope(kek, content) {
+            Some(plain) => match serde_json::from_slice::<Vec<ProviderConfig>>(&plain) {
+                Ok(p) => p,
+                Err(e) => {
+                    app_log!(
+                        error,
+                        "providers",
+                        "load_providers: decrypt parse failed, fallback to empty: {}",
+                        e
+                    );
+                    vec![]
+                }
+            },
+            None => {
+                app_log!(
+                    error,
+                    "providers",
+                    "load_providers: decrypt failed, fallback to empty"
+                );
+                vec![]
+            }
+        };
+    }
+    match serde_json::from_str::<Vec<ProviderConfig>>(content) {
+        Ok(p) => p,
+        Err(e) => {
+            app_log!(
+                error,
+                "providers",
+                "load_providers: parse failed, fallback to empty: {}",
+                e
+            );
+            vec![]
+        }
+    }
+}
+
+/// 从磁盘读取 providers（信封或 legacy 明文）；KEK 不可用/读取失败降级为空。
+fn load_providers_from_disk(path: &Path) -> Vec<ProviderConfig> {
+    match crate::app::secret::machine_kek(kek_fallback_dir(path)) {
+        Ok(kek) => load_providers_from_disk_with(path, &kek),
+        Err(e) => {
+            app_log!(
+                error,
+                "providers",
+                "load_providers: kek unavailable, fallback to empty: {}",
+                e
+            );
+            vec![]
+        }
+    }
+}
+
+/// 指定 KEK 的读取版本（单测用，避免触碰真实 keychain）。
+fn load_providers_from_disk_with(path: &Path, kek: &[u8; 32]) -> Vec<ProviderConfig> {
+    let content = fs::read_to_string(path).unwrap_or_else(|_| "[]".to_string());
+    parse_providers_content(&content, Some(kek))
+}
+
+/// 写盘为加密信封。KEK 不可用或加密失败时返回 Err——绝不静默写明文，
+/// 也不静默丢数据（调用方向上传播）。落盘权限收紧为 0600（unix）。
+fn store_providers_to_disk(path: &Path, providers: &[ProviderConfig]) -> Result<(), String> {
+    let kek = crate::app::secret::machine_kek(kek_fallback_dir(path))?;
+    store_providers_to_disk_with(path, providers, &kek)
+}
+
+/// 指定 KEK 的写入版本（单测用）。
+fn store_providers_to_disk_with(
+    path: &Path,
+    providers: &[ProviderConfig],
+    kek: &[u8; 32],
+) -> Result<(), String> {
+    let plain =
+        serde_json::to_string_pretty(providers).map_err(|e| format!("序列化配置失败: {}", e))?;
+    let envelope = crate::app::secret::encrypt_to_envelope(kek, plain.as_bytes())?;
+    fs::write(path, envelope).map_err(|e| format!("写入配置文件失败: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 fn unix_timestamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -80,19 +184,17 @@ pub fn list_providers(app: AppHandle) -> Result<Vec<ProviderConfig>, String> {
     let path = ensure_providers_file(&app)?;
 
     match fs::read_to_string(&path) {
-        Ok(content) => match serde_json::from_str::<Vec<ProviderConfig>>(&content) {
-            Ok(providers) => Ok(providers),
-            Err(e) => {
-                // 解析失败降级为空列表（配置丢失盲点），只记日志不改行为
-                app_log!(
-                    error,
-                    "providers",
-                    "list_providers: parse failed, fallback to empty: {}",
-                    e
-                );
-                Ok(vec![])
-            }
-        },
+        Ok(content) => {
+            // 读失败报错（区别于解析/解密失败降级为空，语义保持不变）
+            let kek = match crate::app::secret::machine_kek(kek_fallback_dir(&path)) {
+                Ok(k) => Some(k),
+                Err(e) => {
+                    app_log!(error, "providers", "list_providers: kek unavailable: {}", e);
+                    None
+                }
+            };
+            Ok(parse_providers_content(&content, kek.as_ref()))
+        }
         Err(e) => {
             app_log!(error, "providers", "list_providers: read failed: {}", e);
             Err(format!("读取配置失败: {}", e))
@@ -112,9 +214,8 @@ pub fn save_provider(
 ) -> Result<ProviderConfig, String> {
     let path = ensure_providers_file(&app)?;
 
-    // 读取现有配置
-    let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
-    let mut providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
+    // 读取现有配置（信封或 legacy 明文）
+    let mut providers = load_providers_from_disk(&path);
 
     let now = unix_timestamp();
 
@@ -131,10 +232,7 @@ pub fn save_provider(
             provider.updated_at = now;
 
             let result = provider.clone();
-            let _ = fs::write(
-                &path,
-                serde_json::to_string_pretty(&providers).unwrap_or_default(),
-            );
+            store_providers_to_disk(&path, &providers)?;
             app_log!(
                 info,
                 "providers",
@@ -166,10 +264,7 @@ pub fn save_provider(
         };
 
         providers.push(provider.clone());
-        let _ = fs::write(
-            &path,
-            serde_json::to_string_pretty(&providers).unwrap_or_default(),
-        );
+        store_providers_to_disk(&path, &providers)?;
         app_log!(
             info,
             "providers",
@@ -186,8 +281,7 @@ pub fn save_provider(
 pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
     let path = ensure_providers_file(&app)?;
 
-    let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
-    let mut providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
+    let mut providers = load_providers_from_disk(&path);
 
     let len_before = providers.len();
     providers.retain(|p| p.id != id);
@@ -197,10 +291,7 @@ pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
         return Err("找不到要删除的配置".to_string());
     }
 
-    let _ = fs::write(
-        &path,
-        serde_json::to_string_pretty(&providers).unwrap_or_default(),
-    );
+    store_providers_to_disk(&path, &providers)?;
     app_log!(info, "providers", "delete_provider ok: id={}", id);
     Ok(())
 }
@@ -462,16 +553,12 @@ pub fn set_active_model(
 ) -> Result<(), String> {
     let path = ensure_providers_file(&app)?;
 
-    let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
-    let mut providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
+    let mut providers = load_providers_from_disk(&path);
 
     if let Some(provider) = providers.iter_mut().find(|p| p.id == provider_id) {
         provider.active_model = Some(model_id.clone());
         provider.updated_at = unix_timestamp();
-        let _ = fs::write(
-            &path,
-            serde_json::to_string_pretty(&providers).unwrap_or_default(),
-        );
+        store_providers_to_disk(&path, &providers)?;
         app_log!(
             info,
             "providers",
@@ -499,9 +586,7 @@ pub fn get_provider(app: AppHandle, id: String) -> Result<ProviderConfig, String
 /// 内部复用版本：供 chat 模块直接调用
 pub fn get_provider_inner(app: &AppHandle, id: &str) -> Result<ProviderConfig, String> {
     let path = ensure_providers_file(app)?;
-
-    let content = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
-    let providers: Vec<ProviderConfig> = serde_json::from_str(&content).unwrap_or_default();
+    let providers = load_providers_from_disk(&path);
 
     providers
         .into_iter()
@@ -623,5 +708,66 @@ mod tests {
         assert_eq!(models[12].id, "glm-5.2");
         assert_eq!(models[23].id, "deepseek-v4-pro");
         assert_eq!(models[24].id, "deepseek-v4-flash");
+    }
+
+    fn test_provider(id: &str, key: &str) -> ProviderConfig {
+        ProviderConfig {
+            id: id.into(),
+            name: "测试服务商".into(),
+            base_url: "https://api.example.com/v1".into(),
+            api_key: key.into(),
+            active_model: Some("gpt-4o".into()),
+            kind: ProviderKind::default(),
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn test_providers_envelope_roundtrip_and_no_plaintext_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("providers.json");
+        let kek = [7u8; 32];
+        let providers = vec![
+            test_provider("p1", "sk-secret-key-123"),
+            test_provider("p2", "sk-another-key"),
+        ];
+
+        store_providers_to_disk_with(&path, &providers, &kek).unwrap();
+
+        let on_disk = fs::read_to_string(&path).unwrap();
+        assert!(!on_disk.contains("sk-secret-key-123"));
+        assert!(!on_disk.contains("sk-another-key"));
+        assert!(crate::app::secret::looks_like_envelope(&on_disk));
+
+        let loaded = load_providers_from_disk_with(&path, &kek);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].api_key, "sk-secret-key-123");
+        assert_eq!(loaded[1].id, "p2");
+    }
+
+    #[test]
+    fn test_providers_legacy_plaintext_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("providers.json");
+        let legacy =
+            serde_json::to_string_pretty(&vec![test_provider("p1", "sk-legacy-plain")]).unwrap();
+        fs::write(&path, &legacy).unwrap();
+
+        let kek = [9u8; 32];
+        let loaded = load_providers_from_disk_with(&path, &kek);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].api_key, "sk-legacy-plain");
+    }
+
+    #[test]
+    fn test_providers_wrong_kek_degrades_to_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("providers.json");
+        let kek = [3u8; 32];
+        store_providers_to_disk_with(&path, &vec![test_provider("p1", "sk-x")], &kek).unwrap();
+
+        let loaded = load_providers_from_disk_with(&path, &[4u8; 32]);
+        assert!(loaded.is_empty(), "解密失败必须降级为空列表而非明文报错");
     }
 }

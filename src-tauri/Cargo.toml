@@ -50,6 +50,11 @@ base64 = "0.22"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # 用户图片归一化（agent_images.rs）：与 astra-tools 同版本同特性集
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# P0-3 敏感数据加密：providers.json 信封加密 + memory.key 密钥包装
+chacha20poly1305 = "0.10"
+# 机器级 KEK：优先 OS keychain（macOS Keychain / Windows Credential Manager /
+# Linux Secret Service），失败回退本地文件
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [dev-dependencies]
 tokio-util = "0.7"

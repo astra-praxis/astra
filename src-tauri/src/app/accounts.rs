@@ -322,6 +322,8 @@ pub fn account_create(app: tauri::AppHandle, display_name: String) -> Result<Acc
     if accounts.len() >= 16 {
         return Err("账户数量已达上限（16）".into());
     }
+    // 首个账户承接 legacy 单用户数据（P0-4）：必须在 push 之前判定
+    let was_first_account = accounts.is_empty();
     let account = Account {
         account_id: generate_account_id(),
         display_name: name.to_string(),
@@ -335,6 +337,25 @@ pub fn account_create(app: tauri::AppHandle, display_name: String) -> Result<Acc
     std::fs::create_dir_all(dir.join("data")).map_err(|e| format!("创建账户数据目录失败: {e}"))?;
     std::fs::create_dir_all(dir.join("astra-home"))
         .map_err(|e| format!("创建账户 astra-home 失败: {e}"))?;
+    // 首个账户：一次性迁移 legacy 数据（失败不阻断创建，日志可查）
+    if was_first_account {
+        match crate::app::migration::migrate_legacy_for_current_platform(
+            &root,
+            &dir,
+            &account.account_id,
+        ) {
+            Ok(report) => app_log!(
+                info,
+                "accounts",
+                "legacy migration done: moved={} copied={} skipped={} failed={}",
+                report.moved.len(),
+                report.copied.len(),
+                report.skipped.len(),
+                report.failed.len()
+            ),
+            Err(e) => app_log!(error, "accounts", "legacy migration failed: {e}"),
+        }
+    }
     Ok(account)
 }
 
@@ -356,6 +377,21 @@ pub fn account_launch(
         return Err(format!("账户不存在: {account_id}"));
     }
     let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
+    // 冷切换收尾（P0-4）：退出前取消本账户所有运行中的 Run，并终止
+    // dev 服务器进程树（子进程不随进程退出自动消亡，必须显式清理）
+    let agent_state = app.state::<crate::agent::AgentState>();
+    let _cancelled = crate::agent::commands::agent_cancel(agent_state, None);
+    {
+        let dev_state = app.state::<crate::app::dev_mode::DevServerState>();
+        let mut servers = dev_state.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, mut server) in servers.drain() {
+            let port = server.port;
+            crate::app::dev_mode::terminate_process_tree(&mut server.child);
+            if let Some(p) = port {
+                crate::app::dev_mode::kill_processes_on_port(p);
+            }
+        }
+    }
     // 先释放锁再 spawn：新进程启动时会尝试获取同一把锁
     lock.release();
     std::process::Command::new(exe)

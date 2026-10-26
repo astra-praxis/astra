@@ -127,12 +127,51 @@ impl MemoryHost {
     }
 }
 
+/// 密钥包装格式魔数：`ASTRA-WRAP1\n` + 信封 JSON（P0-3 起 memory.key
+/// 不再裸字节落盘，改用 machine KEK 包装）。
+const WRAP_MAGIC: &str = "ASTRA-WRAP1\n";
+
 /// 32 字节主密钥：存在则读，不存在则生成并落盘（0600）。
-/// 主密钥与库文件同目录——本地方便性取舍，密钥层级升级（Keychain /
-/// 硬件绑定）留给 docs/07 的 KeyProvider 演进，接口已预留。
+/// P0-3 起落盘为 KEK 包装格式；读到旧版裸字节时返回原密钥并 best-effort
+/// 升级重写为包装格式；<32 字节的异常文件仍拒绝静默轮换（已有数据会不可读）。
 fn load_or_create_key(path: &Path) -> Result<Vec<u8>, String> {
+    let kek = crate::app::secret::machine_kek(path.parent().unwrap_or_else(|| Path::new(".")))?;
+    load_or_create_key_with_kek(path, &kek)
+}
+
+/// 指定 KEK 的版本（单测用，避免触碰真实 keychain）。
+fn load_or_create_key_with_kek(path: &Path, kek: &[u8; 32]) -> Result<Vec<u8>, String> {
     if let Ok(bytes) = std::fs::read(path) {
+        // 新格式：WRAP_MAGIC + 信封 JSON
+        if bytes.starts_with(WRAP_MAGIC.as_bytes()) {
+            let envelope = std::str::from_utf8(&bytes[WRAP_MAGIC.len()..])
+                .map_err(|e| format!("{} is not valid UTF-8: {}", path.display(), e))?;
+            let plain = crate::app::secret::decrypt_envelope(kek, envelope)
+                .ok_or_else(|| format!("{}: unwrap failed (KEK changed?)", path.display()))?;
+            if plain.len() != 32 {
+                return Err(format!(
+                    "{}: unwrapped key has {} bytes, expected 32",
+                    path.display(),
+                    plain.len()
+                ));
+            }
+            return Ok(plain);
+        }
         if bytes.len() >= 32 {
+            // legacy 裸密钥：返回原值；恰为 32 字节时 best-effort 升级为包装格式
+            if bytes.len() == 32 {
+                let key: [u8; 32] = bytes.clone().try_into().unwrap();
+                match store_wrapped_key(path, &key, kek) {
+                    Ok(()) => {
+                        eprintln!("[memory] upgraded {} to KEK-wrapped format", path.display())
+                    }
+                    Err(e) => eprintln!(
+                        "[memory] could not wrap {}: {} (keeping legacy raw format)",
+                        path.display(),
+                        e
+                    ),
+                }
+            }
             return Ok(bytes);
         }
         return Err(format!(
@@ -140,17 +179,25 @@ fn load_or_create_key(path: &Path) -> Result<Vec<u8>, String> {
             path.display()
         ));
     }
-    // 两个 UUIDv4 = 32 字节随机（uuid crate 无 getrandom 特性也能用）
+    // 两个 UUIDv4 = 32 字节随机（uuid crate 无 getrandom 特性也能用），
+    // 生成后直接写包装格式
     let mut key = [0u8; 32];
     key[..16].copy_from_slice(&uuid::Uuid::new_v4().as_bytes()[..]);
     key[16..].copy_from_slice(&uuid::Uuid::new_v4().as_bytes()[..]);
-    std::fs::write(path, key).map_err(|e| format!("write {KEY_FILE}: {e}"))?;
+    store_wrapped_key(path, &key, kek)?;
+    Ok(key.to_vec())
+}
+
+fn store_wrapped_key(path: &Path, key: &[u8; 32], kek: &[u8; 32]) -> Result<(), String> {
+    let envelope = crate::app::secret::encrypt_to_envelope(kek, key)?;
+    std::fs::write(path, format!("{}{}", WRAP_MAGIC, envelope))
+        .map_err(|e| format!("write {KEY_FILE}: {e}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
-    Ok(key.to_vec())
+    Ok(())
 }
 
 // ===== agent 摘要客户端（summary_mode = agent 时由引擎回调） =====
@@ -631,14 +678,40 @@ mod tests {
     use super::*;
 
     fn key_roundtrip_and_short_key_rejected(dir: &Path) {
+        let kek = [0x42u8; 32];
         let key_path = dir.join(KEY_FILE);
-        let first = load_or_create_key(&key_path).unwrap();
+        let first = load_or_create_key_with_kek(&key_path, &kek).unwrap();
         assert_eq!(first.len(), 32);
-        let second = load_or_create_key(&key_path).unwrap();
+        let second = load_or_create_key_with_kek(&key_path, &kek).unwrap();
         assert_eq!(first, second, "key must be stable across restarts");
 
         std::fs::write(&key_path, b"short").unwrap();
-        assert!(load_or_create_key(&key_path).is_err());
+        assert!(load_or_create_key_with_kek(&key_path, &kek).is_err());
+    }
+
+    #[test]
+    fn key_legacy_raw_bytes_are_upgraded_to_wrapped() {
+        let kek = [0x11u8; 32];
+        let dir = std::env::temp_dir().join(format!("astra-mem-key-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let key_path = dir.join(KEY_FILE);
+        // 旧版裸 32 字节主密钥
+        let raw: Vec<u8> = (0..32u8).collect();
+        std::fs::write(&key_path, &raw).unwrap();
+
+        let key = load_or_create_key_with_kek(&key_path, &kek).unwrap();
+        assert_eq!(key, raw, "legacy key value must be preserved");
+
+        // 文件已升级为包装格式，且盘上不再有裸密钥字节
+        let on_disk = std::fs::read(&key_path).unwrap();
+        assert!(on_disk.starts_with(WRAP_MAGIC.as_bytes()));
+        let text = std::fs::read_to_string(&key_path).unwrap();
+        assert!(!text.contains("\x00\x01\x02"));
+        // 升级后再读：同 KEK 稳定，异 KEK 报错
+        assert_eq!(load_or_create_key_with_kek(&key_path, &kek).unwrap(), raw);
+        assert!(load_or_create_key_with_kek(&key_path, &[0x22u8; 32]).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

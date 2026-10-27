@@ -383,6 +383,7 @@ pub fn run() {
             agent::status::agent_status,
             agent::events::agent_recent_events,
             agent::artifacts::agent_spill_paste,
+            agent::artifacts::agent_import_pasted_files,
             // Agent Generation（多模态 M5：生成供应商配置）
             agent_generation::generation_get_config,
             agent_generation::generation_set_config,

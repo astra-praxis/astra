@@ -49,6 +49,10 @@ interface Props {
   /** 超长粘贴拦截（SpillPaste）：返回 true 表示内容已落盘、不必插入编辑器；
    * false / 未传时照常内联插入。阈值 SPILL_PASTE_CHARS */
   onSpillPaste?: (text: string) => Promise<boolean>;
+  /** 系统文件粘贴导入：剪贴板含文件（Finder/资源管理器复制的真实文件）时调用，
+   * 由页面复制到 .astra/pastes/ 并返回实际导入列表；空列表表示无可导入文件
+   * （截图等图片数据 / 读取失败），降级为普通文本粘贴 */
+  onPasteFiles?: () => Promise<{ path: string; name: string; size: number }[]>;
 }
 
 /** 粘贴落盘阈值：超过该字符数的粘贴内容改写为文件，避免撑爆输入框与上下文 */
@@ -310,7 +314,7 @@ function buildChip(kind: 'skill' | 'file', token: string): HTMLElement {
 // ===== 组件 =====
 
 const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput(
-  { value, onChange, files, skills, placeholder, onKeyDown, onSpillPaste },
+  { value, onChange, files, skills, placeholder, onKeyDown, onSpillPaste, onPasteFiles },
   ref,
 ) {
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -660,35 +664,49 @@ const MentionInput = forwardRef<MentionInputHandle, Props>(function MentionInput
     onChangeRef.current(serializeEl(el));
   }, []);
 
+  /** 纯文本插入（粘贴 / 落盘失败降级的公共尾路径） */
+  const insertPlainText = useCallback((text: string) => {
+    if (!document.execCommand('insertText', false, text)) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(document.createTextNode(text));
+        range.collapse(false);
+      }
+    }
+  }, []);
+
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLDivElement>) => {
       e.preventDefault();
       const text = e.clipboardData.getData('text/plain');
-      if (!text) return;
-      const insert = () => {
-        if (!document.execCommand('insertText', false, text)) {
-          const sel = window.getSelection();
-          if (sel && sel.rangeCount > 0) {
-            const range = sel.getRangeAt(0);
-            range.deleteContents();
-            range.insertNode(document.createTextNode(text));
-            range.collapse(false);
+      // 系统文件粘贴（Finder/资源管理器复制的文件）优先导入；webview 可能不把
+      // 文件 URL 暴露给 clipboardData.files，故无文本时也尝试导入一次
+      if (onPasteFiles && (e.clipboardData.files.length > 0 || !text)) {
+        void onPasteFiles().then((imported) => {
+          // 空结果 = 剪贴板没有可导入文件（截图等），降级回文本粘贴
+          if (imported.length === 0 && text) {
+            editorRef.current?.focus();
+            insertPlainText(text);
           }
-        }
-      };
+        });
+        return;
+      }
+      if (!text) return;
       if (onSpillPaste && text.length >= SPILL_PASTE_CHARS) {
         // 落盘失败（无项目 / 写入报错）时降级回内联插入
         void onSpillPaste(text).then((spilled) => {
           if (!spilled) {
             editorRef.current?.focus();
-            insert();
+            insertPlainText(text);
           }
         });
         return;
       }
-      insert();
+      insertPlainText(text);
     },
-    [onSpillPaste],
+    [onSpillPaste, onPasteFiles, insertPlainText],
   );
 
   useImperativeHandle(ref, () => ({

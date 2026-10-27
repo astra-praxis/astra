@@ -172,8 +172,12 @@ export default function AgentPage() {
   // <project>/.astra/pastes/，纯聊天时写在 ~/.astra/pastes/（后者的文件工具
   // 以主目录为 root，read_file 可直接读），均 Allow 级可读
   const [spill, setSpill] = useState<{ path: string; size: number } | null>(null);
+  // ===== 粘贴文件（Finder/资源管理器复制的文件 → 复制到 .astra/pastes/） =====
+  // 同为页面级状态，切会话重置；导入后的文件与 spill 同目录，read_file Allow 级可读
+  const [pastedFiles, setPastedFiles] = useState<{ path: string; name: string; size: number }[]>([]);
   useEffect(() => {
     setSpill(null);
+    setPastedFiles([]);
   }, [sessionId]);
 
   const handleSpillPaste = useCallback(
@@ -192,6 +196,40 @@ export default function AgentPage() {
       }
     },
     [projectPath, setError],
+  );
+
+  /** 系统文件粘贴导入：把剪贴板里的文件复制到粘贴目录，返回导入结果。
+   *  空列表 = 剪贴板没有文件 URL（截图等图片数据），输入框降级为文本粘贴 */
+  const handlePasteFiles = useCallback(async (): Promise<{ path: string; name: string; size: number }[]> => {
+    try {
+      const res = await invoke<{ path: string; name: string; size: number }[]>(
+        'agent_import_pasted_files',
+        { projectRoot: projectPath || null },
+      );
+      if (res.length > 0) {
+        setPastedFiles((prev) => [...prev, ...res.filter((f) => !prev.some((p) => p.path === f.path))]);
+      }
+      return res;
+    } catch (e) {
+      setError(`导入粘贴文件失败：${String(e)}`);
+      return [];
+    }
+  }, [projectPath, setError]);
+
+  /** 发送前组装粘贴文件：正文换为「先读文件再处理指令」，并取走暂存列表。
+   *  displaySuffix 追加到会话气泡展示文本，保留粘贴的可见痕迹 */
+  const takePastedFiles = useCallback(
+    (text: string): { text: string; displaySuffix: string } => {
+      if (pastedFiles.length === 0) return { text, displaySuffix: '' };
+      const list = pastedFiles.map((f) => f.path).join('\n');
+      const names = pastedFiles.map((f) => f.name).join('、');
+      setPastedFiles([]);
+      return {
+        text: `【用户粘贴的 ${pastedFiles.length} 个文件已复制到：\n${list}\n请先用 read_file 工具读取这些文件，再处理下方指令】\n\n${text}`,
+        displaySuffix: `\n📎 粘贴文件：${names}，已让 Agent 先读取`,
+      };
+    },
+    [pastedFiles],
   );
 
   /** 发送前组装：有暂存粘贴时把正文换成「先读文件再处理指令」，并取走暂存。
@@ -484,8 +522,9 @@ export default function AgentPage() {
     const parsed = parseSendInput(raw);
     if (!parsed) return;
     const spilled = takeSpill(parsed.text);
-    await doSend(raw + spilled.displaySuffix, parsed.skill, spilled.text);
-  }, [input, running, fireCatInteraction, parseSendInput, doSend, takeSpill]);
+    const withFiles = takePastedFiles(spilled.text);
+    await doSend(raw + spilled.displaySuffix + withFiles.displaySuffix, parsed.skill, withFiles.text);
+  }, [input, running, fireCatInteraction, parseSendInput, doSend, takeSpill, takePastedFiles]);
 
   /** 失败卡片「重试 / 编辑后重发」：回退到出错前（含工作区还原）后重发或回填。
    *  找不到快照时降级为仅回退对话（非 git 项目 / 本功能上线前的会话） */
@@ -563,9 +602,10 @@ export default function AgentPage() {
     if (!parsed) return;
     setEditing(null); // 排队新消息 = 放弃挂起的编辑意图（不回退）
     const spilled = takeSpill(parsed.text);
-    enqueueMessage(raw + spilled.displaySuffix, spilled.text, parsed.skill);
+    const withFiles = takePastedFiles(spilled.text);
+    enqueueMessage(raw + spilled.displaySuffix + withFiles.displaySuffix, withFiles.text, parsed.skill);
     setInput('');
-  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, takeSpill]);
+  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, takeSpill, takePastedFiles]);
 
   /** 打断并优先发送：当前 Run 取消 + 本条插到会话队首，settle 后立即续发。
    *  别的会话占用后端时不能打断（cancel 是全局单活动 Run），退化为普通排队 */
@@ -579,7 +619,8 @@ export default function AgentPage() {
     const st = useAgentStore.getState();
     const interruptible = st.running && !st.settling;
     const spilled = takeSpill(parsed.text);
-    enqueueMessage(raw + spilled.displaySuffix, spilled.text, parsed.skill, { front: interruptible });
+    const withFiles = takePastedFiles(spilled.text);
+    enqueueMessage(raw + spilled.displaySuffix + withFiles.displaySuffix, withFiles.text, parsed.skill, { front: interruptible });
     setInput('');
     if (interruptible) {
       try {
@@ -588,7 +629,7 @@ export default function AgentPage() {
         setError(`停止失败：${String(error)}`);
       }
     }
-  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, setError, sessionId, takeSpill]);
+  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, setError, sessionId, takeSpill, takePastedFiles]);
 
   /** 编辑排队消息（Zed move_queued_message_to_main_editor 语义）：
    *  从队列移除，原文回填主输入框并聚焦到末尾，改完再自行发送 */
@@ -981,12 +1022,34 @@ export default function AgentPage() {
                   </button>
                 </div>
               )}
+              {/* 粘贴文件 chip：系统剪贴板文件已复制到粘贴目录，发送时正文只带「先读后处理」指令 */}
+              {pastedFiles.map((f) => (
+                <div key={f.path} className="agent-dock__spill" role="status">
+                  <FileText size={13} strokeWidth={1.8} />
+                  <span
+                    title={f.path}
+                    className="agent-dock__spill-path"
+                    onClick={() => openFilePath(f.path)}
+                  >
+                    粘贴文件 {f.name}（{Math.max(1, Math.round(f.size / 1024))} KB）· 发送时 Agent 将先读取
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPastedFiles((prev) => prev.filter((p) => p.path !== f.path))}
+                    aria-label="移除粘贴文件"
+                    title="移除（文件保留在 .astra/pastes/，不随消息发送）"
+                  >
+                    <X size={12} strokeWidth={1.8} />
+                  </button>
+                </div>
+              ))}
               <MentionInput
                 ref={composerRef}
                 value={input}
                 onChange={setInput}
                 files={files}
                 skills={skills}
+                onPasteFiles={handlePasteFiles}
                 onSpillPaste={handleSpillPaste}
                 placeholder={
                   running

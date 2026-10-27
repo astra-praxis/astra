@@ -59,7 +59,11 @@ pub(crate) struct SessionExtensions {
 
 impl Default for AgentState {
     fn default() -> Self {
-        let processes = Arc::new(agent_core::shell_background::ProcessManager::new());
+        // G2 账户隔离：进程/任务注册表共享 accounts::task_scope 句柄，
+        // 任务创建时戳记当前账户，跨账户默认不可见、不可查、不可取消。
+        let scope = crate::app::accounts::task_scope();
+        let processes =
+            Arc::new(agent_core::shell_background::ProcessManager::new().with_scope(scope.clone()));
         let mcp_tasks = Arc::new(astra_mcp::McpTaskBackend::new());
         let generation = crate::agent_generation::GenerationStack::new();
         Self {
@@ -75,6 +79,7 @@ impl Default for AgentState {
             processes: Arc::clone(&processes),
             tasks: Arc::new(
                 agent_core::TaskManager::new(agent_core::task::DEFAULT_MAX_TASKS, None)
+                    .with_scope(scope)
                     .with_backend(Arc::clone(&mcp_tasks) as Arc<dyn agent_core::TaskBackend>)
                     .with_backend(Arc::new(agent_core::ShellTaskBackend::new(
                         // root only serves direct backend.start (host path is

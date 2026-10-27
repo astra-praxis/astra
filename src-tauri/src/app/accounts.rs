@@ -69,6 +69,23 @@ static ACTIVE: RwLock<Option<AccountRuntime>> = RwLock::new(None);
 /// 前端渲染账户选择器；下次 account_switch 成功后清除。
 static LOGGED_OUT: AtomicBool = AtomicBool::new(false);
 
+/// 后台任务归属句柄（G2 账户隔离）：TaskManager / ProcessManager 持有同一
+/// 句柄（内部 Arc 共享），任务创建时戳记当前值，访问前按此校验。core 侧
+/// 只把它当作宿主定义的 opaque 标签，不解释语义。None = detached（legacy
+/// 模式与登出态，此时新旧任务互相不可见仅限「无标签 vs 有标签」——本应用
+/// legacy 与登出均不产生带标签任务，detached 任务照常可见）。
+pub(crate) fn task_scope() -> agent_core::task::ScopeHandle {
+    static SCOPE: std::sync::OnceLock<agent_core::task::ScopeHandle> = std::sync::OnceLock::new();
+    SCOPE
+        .get_or_init(agent_core::task::ScopeHandle::new)
+        .clone()
+}
+
+/// 同步任务归属标签到当前活动账户（legacy / 登出态为 None）。
+fn set_task_scope(runtime: Option<&AccountRuntime>) {
+    task_scope().set(runtime.map(|rt| rt.account_id.clone()));
+}
+
 /// 登出态查询（secret.rs 自动解锁时用：登出中不得免密重新拿到 KEK）
 pub(crate) fn logged_out() -> bool {
     LOGGED_OUT.load(Ordering::Relaxed)
@@ -118,6 +135,7 @@ pub(crate) fn bind(runtime: Option<AccountRuntime>) {
     if let Ok(mut guard) = ACTIVE.write() {
         *guard = runtime;
     }
+    set_task_scope(active().as_ref());
 }
 
 /// 热切换：替换活动账户绑定（account_switch 专用）。
@@ -125,6 +143,7 @@ fn rebind(runtime: Option<AccountRuntime>) {
     if let Ok(mut guard) = ACTIVE.write() {
         *guard = runtime;
     }
+    set_task_scope(active().as_ref());
 }
 
 /// 当前绑定的账户（legacy 模式为 None）。快照式返回（内部 RwLock）。
@@ -528,6 +547,9 @@ pub async fn account_logout(app: tauri::AppHandle) -> Result<(), String> {
     switch_cleanup_processes(&app);
     secret::clear_kek();
     LOGGED_OUT.store(true, Ordering::Relaxed);
+    // G2：登出态任务归属标签归 None——旧账户的后台任务继续运行，但在
+    // 重新登录前对所有账户不可见、不可查、不可取消。
+    task_scope().set(None);
     app_log!(info, "accounts", "account logged out, showing selector");
     Ok(())
 }

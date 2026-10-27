@@ -436,6 +436,9 @@ pub async fn agent_start_run(
     let active = Arc::clone(&state.active);
     let errors = Arc::clone(&state.persistence_errors);
     let settled_session = session_id.clone();
+    // 日志目录在 Run 启动时定格：账户热切换会重绑 data_dir，若尾部事件
+    // 在切换后写入时解析，会落进新账户的事件日志（跨账户串写）。
+    let log_dir = crate::app::accounts::data_dir(&app).ok();
     // 记忆采集（宿主能力，不暴露给 agent 模型）：Run 结束后把用户输入、
     // 助手最终回答和已完成的工具结果 ingest 进 CME 待处理队列，达到阈值时
     // 压缩会话并提炼长期记忆。提炼是确定性规则，无模型调用；异步 spawn，
@@ -452,7 +455,9 @@ pub async fn agent_start_run(
         let mut collector = MemoryRunCollector::new();
         while let Some(env) = rx.recv().await {
             collector.observe(&env);
-            log_event(&forward_app, &env);
+            if let Some(dir) = &log_dir {
+                log_event(dir, &env);
+            }
             let _ = forward_app.emit("agent-event", &env);
         }
         // 先结算后记忆：流关闭即释放准入并通知 UI（底部 loading 随渲染

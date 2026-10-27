@@ -169,13 +169,14 @@ pub(crate) async fn commit_collected_memory(
     force
 }
 
-/// 把事件追加写入 app_data_dir/agent_events.log（JSONL）。
+/// 把事件追加写入 log_dir/agent_events.log（JSONL）。
 /// 失败只忽略——日志不能影响对话本身。
-pub(crate) fn log_event(app: &AppHandle, env: &Envelope) {
-    let Some(dir) = crate::app::accounts::data_dir(app).ok() else {
-        return;
-    };
-    let path = dir.join("agent_events.log");
+///
+/// log_dir 由调用方在 Run 启动时捕获后传入，而不是这里解析：账户热切换
+/// 会重绑 data_dir，若在写入时解析，旧 Run 取消收尾的尾部事件会落进
+/// 新账户的事件日志（跨账户串写）。
+pub(crate) fn log_event(log_dir: &std::path::Path, env: &Envelope) {
+    let path = log_dir.join("agent_events.log");
     let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

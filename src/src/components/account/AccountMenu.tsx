@@ -1,6 +1,6 @@
 /**
  * 侧栏底部用户入口（praxis 式）：头像 + 名称，点击弹出菜单。
- * 菜单：账户设置（深链 /settings/accounts）、更换登录密码（弹窗）、
+ * 菜单：设置（深链 /settings，侧栏不再单独放设置按钮）、更换登录密码（弹窗）、
  * 切换用户（account_logout 热切换回登录列表）。
  * legacy 模式（无绑定账户）不渲染。
  */
@@ -80,10 +80,10 @@ export default function AccountMenu({ collapsed }: { collapsed: boolean }) {
           </div>
           <DropdownMenu.Item
             className="acct-menu__item"
-            onSelect={() => navigate('/settings/accounts')}
+            onSelect={() => navigate('/settings')}
           >
             <Settings2 size={15} strokeWidth={1.8} />
-            账户设置
+            设置
           </DropdownMenu.Item>
           <DropdownMenu.Item className="acct-menu__item" onSelect={() => setPwOpen(true)}>
             <KeyRound size={15} strokeWidth={1.8} />

@@ -10,7 +10,6 @@ import {
   FolderOpen,
   Blocks,
   GraduationCap,
-  Settings,
   Activity,
   Square,
   X,
@@ -200,24 +199,11 @@ export default function AppLayout() {
             })}
           </nav>
 
-          {/* 底部：用户入口（praxis 式，legacy 模式不渲染） + 设置入口 */}
+          {/* 底部：用户入口（praxis 式，legacy 模式不渲染）；设置入口收进用户菜单 */}
           <div className="sidebar-footer">
             <div className="sidebar-footer__account">
               <AccountMenu collapsed={sidebarCollapsed} />
             </div>
-            <a
-              href="/settings"
-              className={isActive('/settings') ? 'active' : ''}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate('/settings');
-                setSidebarOpen(false);
-              }}
-              title="设置"
-            >
-              <Settings size={18} strokeWidth={1.8} className="settings-icon" />
-              <span className="footer-label">设置</span>
-            </a>
           </div>
         </aside>
 

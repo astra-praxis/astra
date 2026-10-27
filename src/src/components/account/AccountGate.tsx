@@ -104,7 +104,6 @@ export default function AccountGate({ children }: { children: ReactNode }) {
             >
               <UserAvatar name={a.display_name} size={64} />
               <span className="account-gate__user-name">{formatAccountName(a.display_name)}</span>
-              {a.has_auth !== true && <span className="account-gate__user-flag">首次登录</span>}
             </button>
           ))}
         </div>
@@ -294,9 +293,6 @@ function LoginForm({ account, onBack }: { account: Account; onBack: () => void }
         autoFocus
         disabled={busy}
       />
-      {needInit && (
-        <p className="account-gate__notice">首次登录：输入的密码将设为该账户的登录密码</p>
-      )}
       <button type="submit" className="account-gate__go" disabled={busy || !password}>
         <LogIn size={15} strokeWidth={2} />
         {busy ? '登录中…' : needInit ? '设置并登录' : '登录'}

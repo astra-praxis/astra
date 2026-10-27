@@ -179,18 +179,6 @@
     color: var(--text-primary);
   }
 
-  // 老账户角标：首次登录
-  &__user-flag {
-    position: absolute;
-    top: 2px;
-    right: 0;
-    padding: 1px 7px;
-    border-radius: 999px;
-    font-size: 10px;
-    background: var(--accent-bg);
-    color: var(--accent);
-  }
-
   // ===== 点选后的登录区 =====
   &__picked {
     display: flex;
@@ -239,12 +227,6 @@
     width: 100%;
     text-align: left;
     border-radius: 10px;
-  }
-
-  &__notice {
-    margin: 0;
-    font-size: 12px;
-    color: var(--text-secondary);
   }
 
   &__go {

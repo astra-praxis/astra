@@ -165,6 +165,59 @@
 - 临时数据必须声明清理时机。
 - 密钥凭据必须走 KEK 包装，PR 中不得出现明文落盘路径。
 
+## 4. 架构能力结论：astra-core 多实例并存边界（2026-10 审查，decision record）
+
+> 本文档定位为**架构能力结论**，不是实施任务：记录 astra-core 是否具备
+> 同进程多账户并存的结构基础，以及未来要动它时的触发点与验证项。
+
+### 判定
+
+- **结构上可多开**：无 `lazy_static` / `static mut` / `once_cell`；static 仅
+  AtomicU64 计数器、解码 Semaphore(1)、进程解析 OnceLock 缓存、tracing 幂等
+  guard。运行时状态全实例注入（Thread / RunConfig / RunHandle / McpManager /
+  astra-serve per-session registry）；`parse_str(text, astra_home)` 是纯函数可注入；
+  store-sqlite 全 WAL。
+- **但「无全局单例」是代码级证据，不是集成级证明**：多会话 ≠ 多账户隔离。
+  完整的多账户隔离仍需集成测试验证（见下「未验证项」）。
+
+### 两类需求必须分开讨论
+
+- **多账户隔离**（同进程同时跑账户 A/B）：必须审查进程级共享资源与生命周期，
+  属于本结论管辖范围。
+- **多会话调度**（同进程多 Thread）：当前实例化设计已足够，与本结论无关。
+
+### 冻结决策
+
+1. 保留冷切换（P0-4），**不启动热切换重构**，也不为假设中的多租户需求改
+   astra-core。
+2. SDK 能力边界与产品运行策略分开：astra-core 保持可嵌入、可实例化、少依赖
+   宿主全局状态；Astra 桌面宿主继续冷切换，优先保证隔离与故障恢复。
+
+### 未来触发点：`ASTRA_HOME` 去全局化（出现真并存需求时）
+
+当前 `ASTRA_HOME` 是进程级 env，宿主靠 `set_var` 切换——热切换可行，真并存不可。
+去 env 化不是几行改动：宿主侧直接调用点共 **7 处 / 4 文件**（已核实）：
+
+- `src-tauri/src/app/accounts.rs:157`——`astra_home()` legacy 回退
+  `resolve_astra_home()`
+- `src-tauri/src/app/accounts.rs:496`——`account_switch` 的
+  `std::env::set_var("ASTRA_HOME", …)`
+- `src-tauri/src/lib.rs:215`——setup 按账户注入 `ASTRA_HOME`
+- `src-tauri/src/app/migration.rs:79`——legacy 迁移读取 `resolve_astra_home()`
+- `src-tauri/src/extensions/mcp_config_tool.rs:22 / 60 / 86`——config 路径解析与
+  `parse_str` 校验
+
+建议形态：astra-config 增加 `load_home(home: &Path)` 显式入口，宿主把已解析的
+账户 home 一路传入，模块内部不再读 env；替换以上 7 处后再评估全链路。
+
+### 未验证项（需集成测试，当前不改代码）
+
+- MCP 子进程能否随对应 Runtime 销毁，而不影响另一实例。
+- 同一 MCP server 是否允许多进程共存：固定端口、共享文件等冲突。
+- Memory Host 的密钥、缓存、数据库连接是否严格绑定各自账户。
+- Run 取消 / 超时 / 销毁是否只作用于所属实例。
+- 全局解码信号量等共享资源对性能 / 跨账户资源争用的影响。
+
 ## 附：P0 不做清单（防 scope 蔓延）
 
 - 不做进程内热切换 / AccountContext 重构 AgentState

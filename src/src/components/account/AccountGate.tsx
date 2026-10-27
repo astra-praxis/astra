@@ -120,18 +120,86 @@ export default function AccountGate({ children }: { children: ReactNode }) {
   );
 }
 
-/** 登录页外壳：logo + 副标题 + 内容，一次入场动画，背景品牌光晕 */
+/**
+ * 登录页外壳：左侧星轨插图（Astra = 星，本地优先）+ 右侧表单区。
+ * 卡片一次入场动画；插图轨道慢速进动、星点闪烁，respect prefers-reduced-motion。
+ */
 function GateShell({ subtitle, children }: { subtitle: string; children: ReactNode }) {
   return (
     <div className="account-gate">
       <div className="account-gate__glow" aria-hidden />
-      <div className="account-gate__panel">
-        <img className="account-gate__logo" src="/logo.png" alt="Astra" />
-        <h1 className="account-gate__title">Astra</h1>
-        <p className="account-gate__subtitle">{subtitle}</p>
-        {children}
+      <div className="account-gate__card">
+        <aside className="account-gate__hero">
+          <OrbitIllustration />
+          <div className="account-gate__hero-copy">
+            <h2 className="account-gate__hero-title">本地优先的 AI Agent 工作台</h2>
+            <ul className="account-gate__hero-points">
+              <li>会话、记忆与凭据只保存在本机</li>
+              <li>多账户数据各自独立存放</li>
+              <li>无需联网注册，开箱即用</li>
+            </ul>
+          </div>
+        </aside>
+        <div className="account-gate__panel">
+          <img className="account-gate__logo" src="/logo.png" alt="Astra" />
+          <h1 className="account-gate__title">Astra</h1>
+          <p className="account-gate__subtitle">{subtitle}</p>
+          {children}
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * 星轨插图：三环轨道陀螺（各环带一颗星，整组慢速进动）+ 中心品牌核 + 闪烁星点。
+ * 颜色经 SCSS 类注入主题变量，亮暗两态自动适配。
+ */
+function OrbitIllustration() {
+  return (
+    <svg className="account-gate__art" viewBox="0 0 320 320" aria-hidden>
+      <defs>
+        <radialGradient id="gate-core" cx="35%" cy="32%" r="80%">
+          <stop offset="0%" stopColor="#c7d2fe" />
+          <stop offset="55%" stopColor="#6366f1" />
+          <stop offset="100%" stopColor="#7c3aed" />
+        </radialGradient>
+        <radialGradient id="gate-halo" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      <circle cx="160" cy="160" r="132" fill="url(#gate-halo)" />
+
+      {/* 环 A：扁椭圆 + 星，整组进动 */}
+      <g className="account-gate__spin account-gate__spin--a">
+        <ellipse className="account-gate__orbit" cx="160" cy="160" rx="128" ry="52" />
+        <circle className="account-gate__node" cx="288" cy="160" r="5" />
+      </g>
+
+      {/* 静止圆轨道 + 星（匀速公转，视觉上只有星在走） */}
+      <g className="account-gate__spin account-gate__spin--c">
+        <circle className="account-gate__orbit account-gate__orbit--dim" cx="160" cy="160" r="96" />
+        <circle className="account-gate__node account-gate__node--alt" cx="64" cy="160" r="4" />
+      </g>
+
+      {/* 环 B：竖椭圆 + 星，反向进动 */}
+      <g className="account-gate__spin account-gate__spin--b">
+        <ellipse className="account-gate__orbit" cx="160" cy="160" rx="52" ry="128" />
+        <circle className="account-gate__node account-gate__node--alt" cx="160" cy="32" r="3.5" />
+      </g>
+
+      {/* 闪烁星点（错峰） */}
+      <circle className="account-gate__twinkle" cx="56" cy="72" r="2" />
+      <circle className="account-gate__twinkle" cx="264" cy="84" r="1.6" />
+      <circle className="account-gate__twinkle" cx="82" cy="248" r="1.8" />
+      <circle className="account-gate__twinkle" cx="246" cy="242" r="1.4" />
+
+      {/* 中心核：品牌渐变球 + 高光 */}
+      <circle cx="160" cy="160" r="26" fill="url(#gate-core)" />
+      <circle cx="151" cy="151" r="7" fill="#ffffff" opacity="0.45" />
+    </svg>
   );
 }
 

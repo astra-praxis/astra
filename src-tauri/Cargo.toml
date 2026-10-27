@@ -25,6 +25,7 @@ astra-process = { path = "../../astra-core/crates/astra-process", version = "=1.
 astra-memory = { path = "../../astra-memory", features = ["sqlite"] }
 astra-memory-provider = { path = "../../astra-memory/crates/astra-memory-provider" }
 tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

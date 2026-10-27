@@ -158,6 +158,17 @@ pub fn run() {
             String,
             app::dev_mode::RunningDevProcess,
         >::new()))
+        // 单实例必须最先注册：第二实例在任何窗口创建之前就被终止（Windows
+        // 上 WebView2 冷启动慢，用户连点会拉起多个实例，pid 文件锁在
+        // setup 里检查来不及且存在竞态）。回调里聚焦已有主窗口。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

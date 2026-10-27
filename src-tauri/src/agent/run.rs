@@ -380,7 +380,7 @@ pub async fn agent_start_run(
                     .map(|m| m.engine().clone()),
             );
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
-            // ~/.astra/config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
+            // 账户感知的 config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
             // registry；required 失败阻断启动，其余失败降级（工具不出现）。
             // manager 句柄登记到 state.extensions：运行状态查询 + ACP 懒重连。
             let mut ext = SessionExtensions::default();

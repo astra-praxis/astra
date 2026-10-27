@@ -1,12 +1,13 @@
 //! MCP 配置自助管理工具（Agent 对话内安装/启停/移除 MCP server）。
 //!
-//! 边界：只写 `~/.astra/config.toml`（ASTRA_HOME 可覆盖）的 `[mcp.servers]`
-//! 段，用 toml_edit 保留文件其余部分的注释与格式；写后用 astra-config 的
-//! schema 校验，失败即回滚——坏配置会静默关闭整个 MCP（attach_extensions
-//! 降级路径），所以这里必须挡在写入前。
+//! 边界：只写账户感知的 config.toml（账户模式 accounts/<id>/astra-home/，
+//! legacy 回退 ~/.astra）的 `[mcp.servers]` 段，用 toml_edit 保留文件其余
+//! 部分的注释与格式；写后用 astra-config 的 schema 校验，失败即回滚——
+//! 坏配置会静默关闭整个 MCP（attach_extensions 降级路径），所以这里必须
+//! 挡在写入前。
 //!
-//! 生效语义与 attach_extensions 一致：工具集合建 Thread 时冻结，写入后
-//! 需新开会话。工具输出文案里明确提示模型转告用户。
+//! 生效语义：agent_start_run 检测配置指纹变化自动重建 Thread，各会话的
+//! 下一次对话生效（当前对话也是），无需新建会话。
 
 use agent_core::astra_config;
 use agent_core::tool::{ToolContext, ToolOutput};

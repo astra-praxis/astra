@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
-use agent_core::{
-    ThreadConfig, ToolPolicy, ToolRegistry,
-};
+use agent_core::{ThreadConfig, ToolPolicy, ToolRegistry};
 use std::path::{Path, PathBuf};
-
 
 use super::*;
 // ===== 工具注册（全部实现在 agent-core，本层只做组装） =====
@@ -83,7 +80,7 @@ pub(crate) fn build_registry(
     let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search)
         .register(agent_core::AskUserTool::new(question_bridge))
         // MCP 配置自助管理：用户在对话里说「装个 xx MCP」时，agent 用它写
-        // ~/.astra/config.toml（工具集合建会话时冻结，写入后新会话生效）
+        // 账户感知的 config.toml（保存后各会话下次对话自动重建生效）
         .register(crate::extensions::mcp_config_tool::McpConfigRead)
         .register(crate::extensions::mcp_config_tool::McpConfigWrite);
     let reg = agent_core::task_tools::register(reg, tasks.clone());
@@ -138,12 +135,13 @@ pub(crate) fn build_registry(
     }
 }
 
-/// MCP/ACP 扩展装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：读
-/// `~/.astra/config.toml`（`ASTRA_HOME` 可覆盖）的 [mcp]/[acp] 段，
-/// 加载外部能力并注册进本次 registry。规则：
+/// MCP/ACP 扩展装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：读账户感知的
+/// config.toml（账户模式 accounts/<id>/astra-home/，legacy 回退 ~/.astra）
+/// 的 [mcp]/[acp] 段，加载外部能力并注册进本次 registry。规则：
 /// - required 失败阻断本次启动；其余失败降级（工具不出现，日志报错）
 /// - 配置文件缺失或无效 = 无扩展，不阻断普通对话（配置错误经日志暴露）
-/// - 工具集合建 Thread 时冻结：仅新会话生效，与「切项目/模型后需新会话」一致
+/// - 配置变更由 agent_start_run 的指纹检测自动重建（当前对话下一句生效），
+///   与「切项目/模型后重建 Thread」同一机制
 /// - 每个 Thread 一份独立 manager，避免共享 manager 重载时拆掉其他会话
 ///   仍在用的连接（v1 简化，代价是同 server 随会话数多开进程）
 pub(crate) async fn attach_extensions(

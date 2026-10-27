@@ -3,8 +3,8 @@
 //! - MCP/ACP：不再提供远程目录与一键安装；前端展示已安装（config.toml
 //!   已配置）的扩展，启停 / 删除由 extensions.rs 的命令承担，运行状态由
 //!   agent.rs 的 extensions_runtime_status 提供。新扩展由用户在 Agent 对话
-//!   中让 AI 下载并写好配置（配置本体在 ~/.astra/config.toml 的
-//!   [mcp.servers.<id>] / [acp.agents.<id>] 段，冻结 schema 见
+//!   中让 AI 下载并写好配置（配置本体在账户感知的 config.toml 的
+//!   [mcp.servers.<id>] / [acp.agents.<id>] 段，schema 见
 //!   MCP_SPEC §11 / ACP_SPEC §11；安装态读取与 extensions_list 同源）
 //! - Skill：不再提供 skills.sh 在线搜索与 git 安装；已安装技能由
 //!   user_skills.rs 的 list_user_skills 展示，新技能同样回 Agent 对话让

@@ -16,3 +16,4 @@ target/
 
 # 吉祥物处理中间产物（预览条可随时重新生成）
 design/mascot/source/preview/
+.agents/

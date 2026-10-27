@@ -1,0 +1,147 @@
+// 侧栏底部用户入口（praxis 式）：触发器 + 弹出菜单
+.acct-menu {
+  &__trigger {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: var(--bg-card-hover);
+    }
+
+    &[data-state='open'] {
+      background: var(--bg-card-hover);
+    }
+  }
+
+  &__trigger--collapsed {
+    justify-content: center;
+    padding: 7px;
+  }
+
+  &__avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--gradient-brand);
+    color: var(--on-accent-text, #fff);
+    font-size: 12px;
+    font-weight: 600;
+    user-select: none;
+  }
+
+  &__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: left;
+  }
+
+  // ===== 弹出菜单 =====
+  &__content {
+    min-width: 208px;
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.22);
+    z-index: 60;
+    animation: acct-menu-in 0.14s ease-out;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px 10px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 4px;
+  }
+
+  &__meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  &__meta-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    outline: none;
+    user-select: none;
+
+    &:hover,
+    &[data-highlighted] {
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+
+    &--danger:hover,
+    &--danger[data-highlighted] {
+      background: color-mix(in srgb, var(--error-500, #ef4444) 10%, transparent);
+      color: var(--error-500, #ef4444);
+    }
+
+    &[data-disabled] {
+      opacity: 0.5;
+      cursor: wait;
+    }
+  }
+
+  &__sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--border-color);
+  }
+}
+
+@keyframes acct-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .acct-menu__content {
+    animation: none;
+  }
+}

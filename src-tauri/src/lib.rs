@@ -402,6 +402,7 @@ pub fn run() {
             app::accounts::account_list,
             app::accounts::account_create,
             app::accounts::account_launch,
+            app::accounts::account_logout,
             app::accounts::account_unlock,
             app::accounts::account_password_change,
             // Extensions 市场（状态展示；安装走 Agent 对话）

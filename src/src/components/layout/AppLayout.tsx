@@ -19,6 +19,7 @@ import { useNmStore } from '@/stores/nm';
 import { useFavoriteStore } from '@/stores/favorite';
 import { useChatToolbarStore } from '@/stores/chatToolbar';
 import { useWorkspaceStore } from '@/stores/workspace';
+import AccountMenu from '@/components/account/AccountMenu';
 import './layout.scss';
 
 const menuItems = [
@@ -199,8 +200,11 @@ export default function AppLayout() {
             })}
           </nav>
 
-          {/* 底部设置入口 */}
+          {/* 底部：用户入口（praxis 式，legacy 模式不渲染） + 设置入口 */}
           <div className="sidebar-footer">
+            <div className="sidebar-footer__account">
+              <AccountMenu collapsed={sidebarCollapsed} />
+            </div>
             <a
               href="/settings"
               className={isActive('/settings') ? 'active' : ''}

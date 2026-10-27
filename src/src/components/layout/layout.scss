@@ -303,6 +303,11 @@
 .sidebar-footer {
   padding: 8px;
   border-top: 1px solid var(--sidebar-border);
+
+  // 用户入口（AccountMenu）与设置入口之间的间隔
+  &__account {
+    margin-bottom: 4px;
+  }
 }
 
 /* ===== 移动端 ===== */

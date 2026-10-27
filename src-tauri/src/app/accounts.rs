@@ -400,6 +400,22 @@ pub fn account_create(
     Ok(account)
 }
 
+/// 冷切换前的进程收尾：取消运行中 Run + 终止 dev 服务器进程树。
+/// account_launch / account_logout 共用（子进程不随进程退出自动消亡）。
+fn cold_switch_cleanup(app: &tauri::AppHandle) {
+    let agent_state = app.state::<crate::agent::AgentState>();
+    let _cancelled = crate::agent::commands::agent_cancel(agent_state, None);
+    let dev_state = app.state::<crate::app::dev_mode::DevServerState>();
+    let mut servers = dev_state.lock().unwrap_or_else(|e| e.into_inner());
+    for (_, mut server) in servers.drain() {
+        let port = server.port;
+        crate::app::dev_mode::terminate_process_tree(&mut server.child);
+        if let Some(p) = port {
+            crate::app::dev_mode::kill_processes_on_port(p);
+        }
+    }
+}
+
 /// 冷切换：以目标账户重启进程。验证密码 → 交接 KEK（token 文件）→
 /// 取消运行中任务 → 释放实例锁 → spawn 自身（--account=<id>）→ 退出。
 /// dev 模式下 current_exe 是调试二进制，行为依赖 devUrl 可达，
@@ -433,27 +449,30 @@ pub fn account_launch(
     // 新进程 setup 消费后免二次输密码
     secret::auth_token_write(&root, &account_id, &kek)?;
     let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
-    // 冷切换收尾（P0-4）：退出前取消本账户所有运行中的 Run，并终止
-    // dev 服务器进程树（子进程不随进程退出自动消亡，必须显式清理）
-    let agent_state = app.state::<crate::agent::AgentState>();
-    let _cancelled = crate::agent::commands::agent_cancel(agent_state, None);
-    {
-        let dev_state = app.state::<crate::app::dev_mode::DevServerState>();
-        let mut servers = dev_state.lock().unwrap_or_else(|e| e.into_inner());
-        for (_, mut server) in servers.drain() {
-            let port = server.port;
-            crate::app::dev_mode::terminate_process_tree(&mut server.child);
-            if let Some(p) = port {
-                crate::app::dev_mode::kill_processes_on_port(p);
-            }
-        }
-    }
+    cold_switch_cleanup(&app);
     // 先释放锁再 spawn：新进程启动时会尝试获取同一把锁
     lock.release();
     std::process::Command::new(exe)
         .arg(format!("--account={account_id}"))
         .spawn()
         .map_err(|e| format!("启动新账户进程失败: {e}"))?;
+    app.exit(0);
+    Ok(())
+}
+
+/// 退出登录（冷切换回登录列表）：spawn 自身不带 --account → legacy 模式
+/// 启动，账户门渲染用户列表。不写交接 token（切换用户必须重新输密码）。
+#[tauri::command]
+pub fn account_logout(
+    app: tauri::AppHandle,
+    lock: tauri::State<'_, InstanceLockState>,
+) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
+    cold_switch_cleanup(&app);
+    lock.release();
+    std::process::Command::new(exe)
+        .spawn()
+        .map_err(|e| format!("启动新进程失败: {e}"))?;
     app.exit(0);
     Ok(())
 }

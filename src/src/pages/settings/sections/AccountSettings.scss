@@ -1,5 +1,6 @@
 /**
  * 账户分区样式：仅使用主题变量（_variables.scss），BEM 命名。
+ * 表单均走 Modal（.acct-modal-form），页面内只有列表与入口按钮。
  */
 
 .acct-mode {
@@ -19,6 +20,14 @@
     background: var(--bg-subtle);
     color: var(--text-secondary);
   }
+}
+
+// 行内入口按钮（创建账户 / 更换密码）
+.acct-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .acct-list {
@@ -71,6 +80,12 @@
     font-size: 11px;
   }
 
+  // 老账户（无凭据）首次启动需设初始密码的提示角标
+  &__initial {
+    font-size: 11px;
+    color: var(--warning-text, #f59e0b);
+  }
+
   &__launch {
     display: inline-flex;
     align-items: center;
@@ -96,68 +111,6 @@
       cursor: not-allowed;
     }
   }
-
-  // 老账户（无凭据）首次启动需设初始密码的提示角标
-  &__initial {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--warning-text, #f59e0b);
-  }
-
-  // 列表项 + 展开密码表单的包装
-  &__entry {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  // 行内展开的启动密码表单（缩进对齐条目头像）
-  &__pwform {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 10px 8px 38px;
-
-    .acct-create__input {
-      flex: 1;
-      min-width: 140px;
-    }
-  }
-}
-
-.acct-create {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-
-  // 多输入（创建/改密码）：纵向排列更清晰
-  &--stacked {
-    flex-direction: column;
-  }
-
-  &__input {
-    flex: 1;
-    padding: 8px 12px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--text-primary);
-
-    &:focus {
-      outline: none;
-      border-color: var(--accent);
-    }
-
-    &:disabled {
-      opacity: 0.5;
-    }
-  }
-
-  &__btn {
-    flex-shrink: 0;
-  }
 }
 
 .acct-error {
@@ -166,19 +119,52 @@
   color: var(--error-text);
 }
 
-.acct-password {
-  &__hint {
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: var(--text-muted);
+// ===== 弹窗表单（Modal 内容，供所有账户弹窗共用） =====
+.acct-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 
-    &--ok {
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+
+    > span {
+      font-size: 12px;
+      font-weight: 500;
       color: var(--text-secondary);
     }
-  }
-}
 
-.acct-create + .acct-create,
-.acct-create + .acct-password__hint {
-  margin-top: 8px;
+    input {
+      padding: 8px 12px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text-primary);
+
+      &:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      &:disabled {
+        opacity: 0.5;
+      }
+    }
+  }
+
+  &__error {
+    margin: 0;
+    font-size: 12px;
+    color: var(--error-text);
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
 }

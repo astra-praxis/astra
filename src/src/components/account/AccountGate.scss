@@ -1,139 +1,209 @@
-// 本地账户门（AccountGate）样式：全屏阻断层，BEM + var(--...) 主题变量
+// 账户登录门样式：praxis 式头像选择器。
+// 只用主题变量；一个入场动画（面板 fade-up），尊重 prefers-reduced-motion。
 .account-gate {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-page, #0d1120);
   padding: 24px;
+  background: var(--bg-page, #0d1120);
+  overflow: hidden;
 
   &--loading {
     // 状态查询期间：纯占位，不闪现主应用
     background: var(--bg-page, #0d1120);
   }
 
+  // 品牌光晕：两团极淡的渐变光，给登录页一点空间感（纯装饰）
+  &__glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        42rem 30rem at 18% 8%,
+        color-mix(in srgb, var(--brand-500) 14%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        36rem 26rem at 84% 92%,
+        color-mix(in srgb, var(--brand-600) 12%, transparent),
+        transparent 70%
+      );
+  }
+
   &__panel {
-    width: 100%;
-    max-width: 420px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 32px 28px;
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 420px;
+    animation: gate-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  &__logo {
+    width: 46px;
+    height: 46px;
+    margin-bottom: 4px;
   }
 
   &__title {
     margin: 0;
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 700;
-    text-align: center;
+    letter-spacing: 0.4px;
     color: var(--text-primary);
-    letter-spacing: 0.5px;
   }
 
-  &__hint {
-    margin: 0;
+  &__subtitle {
+    margin: 0 0 18px;
     font-size: 13px;
-    line-height: 1.6;
     color: var(--text-secondary);
     text-align: center;
   }
 
-  &__list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
+  // ===== 头像选择器 =====
+  &__picker {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 22px;
   }
 
-  &__item {
-    width: 100%;
+  &__user {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
-    background: var(--bg-card-hover, transparent);
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
+    gap: 8px;
+    padding: 10px;
+    border: none;
+    background: transparent;
+    border-radius: 16px;
     cursor: pointer;
-    color: var(--text-primary);
-    font-size: 14px;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    transition: transform 0.15s ease, background 0.15s ease;
 
-    &:hover:not(:disabled) {
-      border-color: var(--brand-400);
-      background: var(--brand-50);
+    &:hover {
+      background: var(--bg-card-hover);
+      transform: translateY(-2px);
     }
 
-    &:disabled {
-      opacity: 0.55;
-      cursor: wait;
+    &:focus-visible {
+      outline: 2px solid var(--accent-ring);
+      outline-offset: 2px;
     }
   }
 
   &__avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--brand-100);
-    color: var(--brand-700);
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  &__name {
-    flex: 1;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__action {
-    font-size: 12px;
-    color: var(--brand-500);
-    flex-shrink: 0;
-  }
-
-  // 用户列表项：已设密码的锁标记
-  &__lock {
-    color: var(--text-tertiary, var(--text-secondary));
-    flex-shrink: 0;
-  }
-
-  // 老账户（无凭据）首次登录需设初始密码的提示角标
-  &__initial {
-    font-size: 11px;
-    color: var(--warning-500, #f59e0b);
-    flex-shrink: 0;
-  }
-
-  // 登录表单下的返回按钮
-  &__back {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    padding: 8px 12px;
-    border: none;
-    background: transparent;
-    border-radius: 8px;
-    color: var(--text-secondary);
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--gradient-brand);
+    color: var(--on-accent-text, #fff);
+    font-weight: 600;
+    user-select: none;
+  }
+
+  &__user-name {
+    max-width: 76px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  // 老账户角标：首次登录
+  &__user-flag {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+
+  // ===== 点选后的登录区 =====
+  &__picked {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    animation: gate-enter 0.22s ease-out both;
+  }
+
+  &__form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+  }
+
+  &__form--create {
+    align-items: stretch;
+  }
+
+  &__input {
+    width: 240px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 14px;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+    &::placeholder {
+      color: var(--text-tertiary, var(--text-secondary));
+    }
+
+    &:focus {
+      border-color: var(--brand-400);
+      box-shadow: 0 0 0 3px var(--accent-light);
+    }
+  }
+
+  // 创建表单（三行输入）左对齐、更宽
+  &__form--create &__input {
+    width: 100%;
+    text-align: left;
+    border-radius: 10px;
+  }
+
+  &__notice {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  &__go {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 22px;
+    border: none;
+    border-radius: 999px;
+    background: var(--gradient-brand);
+    color: var(--on-accent-text, #fff);
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: filter 0.15s ease, transform 0.15s ease;
 
     &:hover:not(:disabled) {
-      background: var(--bg-card-hover, rgba(127, 127, 127, 0.12));
-      color: var(--text-primary);
+      filter: brightness(1.06);
+      transform: translateY(-1px);
     }
 
     &:disabled {
@@ -142,45 +212,25 @@
     }
   }
 
-  &__create {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 4px;
-  }
-
-  &__input {
-    width: 100%;
-    padding: 10px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--bg-page);
-    color: var(--text-primary);
-    font-size: 14px;
-    outline: none;
-
-    &:focus {
-      border-color: var(--brand-400);
-    }
-  }
-
-  &__submit {
-    padding: 10px 12px;
+  &__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
     border: none;
+    background: transparent;
     border-radius: 8px;
-    background: var(--brand-500);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 500;
+    color: var(--text-secondary);
+    font-size: 12px;
     cursor: pointer;
-    transition: background 0.15s ease;
 
     &:hover:not(:disabled) {
-      background: var(--brand-600);
+      color: var(--text-primary);
+      background: var(--bg-card-hover);
     }
 
     &:disabled {
-      opacity: 0.55;
+      opacity: 0.5;
       cursor: not-allowed;
     }
   }
@@ -190,5 +240,29 @@
     font-size: 12px;
     color: var(--error-500, #ef4444);
     word-break: break-all;
+    text-align: center;
+  }
+}
+
+@keyframes gate-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-gate__panel,
+  .account-gate__picked {
+    animation: none;
+  }
+
+  .account-gate__user,
+  .account-gate__go {
+    transition: none;
   }
 }

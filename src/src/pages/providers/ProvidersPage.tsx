@@ -401,7 +401,7 @@ export default function ProvidersPage() {
               type="text"
               value={newBaseUrl}
               onChange={(e) => setNewBaseUrl(e.target.value)}
-              placeholder={newKind === 'anthropic' ? 'https://api.anthropic.com' : 'http://gateway.internal:8002/v1'}
+              placeholder={newKind === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'}
             />
 {newKind === 'anthropic' ? (
             <p className="input-hint">
@@ -481,7 +481,7 @@ export default function ProvidersPage() {
               type="text"
               value={editBaseUrl}
               onChange={(e) => setEditBaseUrl(e.target.value)}
-              placeholder={editKind === 'anthropic' ? 'https://api.anthropic.com' : 'http://gateway.internal:8002/v1'}
+              placeholder={editKind === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'}
             />
 {editKind === 'anthropic' ? (
             <p className="input-hint">

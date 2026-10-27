@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn test_parse_real_gateway_response_e2e() {
-        // 2026-07-03 从 http://gateway.internal:8002/v1/chat/completions 用
+        // 2026-07-03 从内部网关（地址已脱敏）的 /v1/chat/completions 用
         // 非法模型名 __probe_invalid_model__ 实际拿到的网关响应
         let text = "{\"req_id\":\"f4abd85d-0e07-49f0-8048-de45e6f3981f\",\"code\":403,\"domain\":\"gateway\",\"error_code\":\"model_not_available\",\"msg\":\"模型 __probe_invalid_model__ 无权限，可用模型：['MiniMax-M2.7-highspeed', 'minimax-auto', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.7', 'MiniMax-M3', 'glm-4.7', 'glm-auto', 'glm-5.1', 'kimi-k2.5', 'kimi-auto', 'glm-5', 'glm-5.2', 'ark-code-latest', 'minimax-m2.5', 'qwen3-coder-plus', 'qwen-coder-auto', 'qwen3.5-plus', 'qwen-plus-auto', 'qwen3.7-plus', 'qwen3-coder-next', 'qwen3.6-plus', 'MiniMax-auto', 'deepseek-v4-pro', 'deepseek-v4-flash']\"}";
         let models = parse_models_from_text(text);

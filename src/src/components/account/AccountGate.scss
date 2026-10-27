@@ -46,11 +46,11 @@
     animation: gate-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  // 左栏：星轨插图 + 产品事实
+  // 左栏：星轨插图
   &__hero {
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
+    justify-content: center;
     gap: 16px;
     padding: 26px 26px 24px;
     background: linear-gradient(170deg, var(--brand-50), transparent 78%);
@@ -61,39 +61,6 @@
     width: min(82%, 300px);
     margin: auto;
     display: block;
-  }
-
-  &__hero-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  &__hero-points {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 8px;
-    font-size: 12.5px;
-    color: var(--text-secondary);
-
-    li {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-
-      &::before {
-        content: '';
-        flex-shrink: 0;
-        width: 5px;
-        height: 5px;
-        background: var(--brand-400);
-        transform: rotate(45deg);
-        border-radius: 1px;
-      }
-    }
   }
 
   // 右栏：logo + 表单
@@ -427,18 +394,8 @@
     margin: 0;
   }
 
-  .account-gate__hero-title {
-    font-size: 13.5px;
-  }
-
   .account-gate__panel {
     padding: 30px 24px 28px;
-  }
-}
-
-@media (max-width: 520px) {
-  .account-gate__hero-points {
-    display: none;
   }
 }
 

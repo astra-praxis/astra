@@ -98,7 +98,7 @@ export default function AccountGate({ children }: { children: ReactNode }) {
         </div>
       </GateShell>
     ) : (
-      <GateShell subtitle="选择账户，数据各自独立">
+      <GateShell subtitle="选择账户">
         {autoEntering ? (
           <div className="account-gate__picked">
             <UserAvatar name={autoEntering.display_name} size={64} />
@@ -148,7 +148,7 @@ export default function AccountGate({ children }: { children: ReactNode }) {
 }
 
 /**
- * 登录页外壳：左侧星轨插图（Astra = 星，本地优先）+ 右侧表单区。
+ * 登录页外壳：左侧星轨插图 + 右侧表单区。
  * 卡片一次入场动画；插图轨道慢速进动、星点闪烁，respect prefers-reduced-motion。
  */
 function GateShell({ subtitle, children }: { subtitle: string; children: ReactNode }) {
@@ -158,14 +158,6 @@ function GateShell({ subtitle, children }: { subtitle: string; children: ReactNo
       <div className="account-gate__card">
         <aside className="account-gate__hero">
           <OrbitIllustration />
-          <div className="account-gate__hero-copy">
-            <h2 className="account-gate__hero-title">本地优先的 AI Agent 工作台</h2>
-            <ul className="account-gate__hero-points">
-              <li>会话、记忆与凭据只保存在本机</li>
-              <li>多账户数据各自独立存放</li>
-              <li>无需联网注册，开箱即用</li>
-            </ul>
-          </div>
         </aside>
         <div className="account-gate__panel">
           <img className="account-gate__logo" src="/logo.png" alt="Astra" />

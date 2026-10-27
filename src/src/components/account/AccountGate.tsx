@@ -257,15 +257,14 @@ function UnlockForm() {
 
 /**
  * 点选用户后的密码表单（单密码框）。
- * - has_auth：验证密码 → 热切换
- * - 老账户无凭据：输入的密码即设为该账户的登录密码（只输一次）
+ * 老账户无凭据时后端会把首次输入的密码设为登录密码——这是后端行为，
+ * UI 统一按「登录」表达，不让用户感知初始化过程。
  * 成功时后端进程内换绑账户，前端整页 reload。
  */
 function LoginForm({ account, onBack }: { account: Account; onBack: () => void }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const needInit = account.has_auth !== true;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -289,13 +288,13 @@ function LoginForm({ account, onBack }: { account: Account; onBack: () => void }
         type="password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        placeholder={needInit ? '设置登录密码' : '登录密码'}
+        placeholder="登录密码"
         autoFocus
         disabled={busy}
       />
       <button type="submit" className="account-gate__go" disabled={busy || !password}>
         <LogIn size={15} strokeWidth={2} />
-        {busy ? '登录中…' : needInit ? '设置并登录' : '登录'}
+        {busy ? '登录中…' : '登录'}
       </button>
       <button type="button" className="account-gate__back" onClick={onBack} disabled={busy}>
         <ArrowLeft size={13} strokeWidth={2} /> 返回

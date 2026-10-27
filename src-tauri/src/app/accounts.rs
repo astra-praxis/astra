@@ -42,12 +42,13 @@ pub struct Account {
     pub created_at: i64,
     /// active | locked（锁定语义随 P0-3 加密上线，P0 仅占位）
     pub status: String,
-    /// 是否已设置登录密码（读取时动态计算，不落盘）。
+    /// 是否已设置登录密码（读取时动态计算覆盖，落盘值不作为依据）。
     /// false 的账户首次登录时需设置初始密码。
-    #[serde(default, skip_serializing)]
+    /// 注意：必须序列化——account_status 依赖它传给前端。
+    #[serde(default)]
     pub has_auth: bool,
-    /// 30 天免密信任凭据是否有效（读取时动态计算，不落盘）
-    #[serde(default, skip_serializing)]
+    /// 30 天免密信任凭据是否有效（读取时动态计算覆盖，落盘值不作为依据）
+    #[serde(default)]
     pub trusted: bool,
 }
 

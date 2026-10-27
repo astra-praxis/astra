@@ -571,17 +571,22 @@ mod tests {
 
     // ===== 30 天信任凭据 =====
 
-    /// 设置进程级设备密钥路径并在测试结束后还原（全局状态，串行风险低：
-    /// 其他测试的临时目录内无信任文件，设备路径值对它们无影响）
-    fn with_device_path(dir: &Path) {
+    /// 设备密钥路径是进程级全局，trust 系列测试并行跑会互相干扰
+    /// （A 设置路径后、trust_save 前，B 抢先改成自己的路径），必须串行。
+    static TRUST_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 持锁并把进程级设备密钥路径指向测试自己的临时目录
+    fn with_device_path(dir: &Path) -> std::sync::MutexGuard<'static, ()> {
+        let guard = TRUST_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_device_key_path(dir.join(DEVICE_KEY_FILE));
+        guard
     }
 
     #[test]
     fn trust_roundtrip_and_validity() {
         let root = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        with_device_path(root.path());
+        let _g = with_device_path(root.path());
 
         let kek = test_kek();
         trust_save(dir.path(), &kek).unwrap();
@@ -598,7 +603,7 @@ mod tests {
     fn trust_expired_is_none_and_cleaned() {
         let root = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        with_device_path(root.path());
+        let _g = with_device_path(root.path());
 
         let kek = test_kek();
         trust_save(dir.path(), &kek).unwrap();
@@ -618,7 +623,7 @@ mod tests {
     fn trust_rejected_with_wrong_device_key() {
         let root = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        with_device_path(root.path());
+        let _g = with_device_path(root.path());
         let kek = test_kek();
 
         trust_save(dir.path(), &kek).unwrap();
@@ -635,7 +640,7 @@ mod tests {
     fn trust_cleared_forces_relogin() {
         let root = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        with_device_path(root.path());
+        let _g = with_device_path(root.path());
 
         let kek = test_kek();
         trust_save(dir.path(), &kek).unwrap();

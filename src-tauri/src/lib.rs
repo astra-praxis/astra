@@ -10,6 +10,15 @@ mod proc_util;
 mod providers;
 mod skills;
 
+// 非 panic 版 eprintln!：stderr 写失败（如冷切换后死管道 EPIPE）时静默。
+// eprintln! 写失败会 panic；若发生在 panic hook 内则二次 panic 直接 abort。
+macro_rules! elog {
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -26,7 +35,7 @@ fn init_memory_host(app: &tauri::AppHandle) {
     // 访问密码锁定：跳过初始化（密钥不可用），解锁后再补做
     if let Ok(dir) = app::accounts::data_dir(app) {
         if app::secret::is_locked(&dir) {
-            eprintln!("[memory] account locked, init deferred until unlock");
+            elog!("[memory] account locked, init deferred until unlock");
             app_log!(info, "memory", "account locked, init deferred until unlock");
             return;
         }
@@ -34,7 +43,7 @@ fn init_memory_host(app: &tauri::AppHandle) {
     let settings = get_settings(app.clone());
     let provider_id = settings.memory_summary_provider_id.clone();
     let agent_summary_client = if settings.memory_agent_summary {
-        eprintln!(
+        elog!(
             "[memory] agent summary enabled (provider: {})",
             provider_id.as_deref().unwrap_or("auto")
         );
@@ -89,13 +98,13 @@ fn init_memory_host(app: &tauri::AppHandle) {
                     app_log!(info, "memory", "host init ok");
                 }
                 Err(error) => {
-                    eprintln!("[memory] init failed, memory disabled: {error}");
+                    elog!("[memory] init failed, memory disabled: {error}");
                     app_log!(error, "memory", "init failed, memory disabled: {error}");
                 }
             }
         }
         Err(error) => {
-            eprintln!("[memory] app_data_dir unavailable, memory disabled: {error}");
+            elog!("[memory] app_data_dir unavailable, memory disabled: {error}");
             app_log!(error, "memory", "app_data_dir unavailable: {error}");
         }
     }
@@ -108,7 +117,11 @@ pub fn run() {
     // 任何机器崩溃后用户都能直接反馈该文件。stderr 同步保留（CI 重定向可捕获）。
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("panicked: {info}\n");
-        eprintln!("{msg}");
+        // panic hook 内绝不能 panic：不用 eprintln!/elog!（writeln! 失败静默）
+        {
+            use std::io::Write;
+            let _ = std::io::stderr().write_all(msg.as_bytes());
+        }
         crate::logging::log("error", "panic", info.to_string().trim());
         let log = std::env::temp_dir().join("astra-panic.log");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -172,7 +185,7 @@ pub fn run() {
             let app_root = match app.path().app_data_dir() {
                 Ok(dir) => dir,
                 Err(e) => {
-                    eprintln!("[account] app_data_dir unavailable: {e}");
+                    elog!("[account] app_data_dir unavailable: {e}");
                     std::process::exit(1);
                 }
             };
@@ -187,7 +200,7 @@ pub fn run() {
                     app::accounts::bind(runtime);
                 }
                 Err(e) => {
-                    eprintln!("[account] {e}");
+                    elog!("[account] {e}");
                     std::process::exit(1);
                 }
             }
@@ -207,7 +220,7 @@ pub fn run() {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[account] {e}");
+                    elog!("[account] {e}");
                     std::process::exit(1);
                 }
             }
@@ -237,7 +250,7 @@ pub fn run() {
             // 内置技能（astra-memory 记忆指南 + astra-find-skills 找装技能）：
             // 技能库中已有同名技能时不覆盖，用户修改优先。best-effort。
             if let Err(error) = skills::user::ensure_builtin_skills(app.handle()) {
-                eprintln!("[skills] builtin memory skill install failed: {error}");
+                elog!("[skills] builtin memory skill install failed: {error}");
                 app_log!(error, "skills", "builtin skills install failed: {error}");
             }
 
@@ -293,7 +306,7 @@ pub fn run() {
             // Alt+Space 被 PowerToys Run / uTools / Listary 等启动器默认占用，
             // setup 返回 Err 会导致应用直接退出（Windows 首发秒退的根因）。
             if let Err(error) = app.global_shortcut().register("Alt+Space") {
-                eprintln!("[shortcut] Alt+Space register failed (likely in use): {error}");
+                elog!("[shortcut] Alt+Space register failed (likely in use): {error}");
                 app_log!(warn, "shortcut", "Alt+Space register failed: {error}");
             }
 

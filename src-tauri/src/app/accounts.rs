@@ -416,6 +416,22 @@ fn cold_switch_cleanup(app: &tauri::AppHandle) {
     }
 }
 
+/// 冷切换 spawn 自身。stdio 重定向到 null：若继承旧进程的终端管道，
+/// 旧进程退出后管道关闭，子进程里任何 eprintln! 都会因 EPIPE panic
+/// （曾导致登录后新进程启动即崩）。
+fn spawn_self(exe: &std::path::Path, account: Option<&str>) -> Result<(), String> {
+    use std::process::Stdio;
+    let mut cmd = std::process::Command::new(exe);
+    if let Some(id) = account {
+        cmd.arg(format!("--account={id}"));
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd.spawn().map_err(|e| format!("启动新进程失败: {e}"))?;
+    Ok(())
+}
+
 /// 冷切换：以目标账户重启进程。验证密码 → 交接 KEK（token 文件）→
 /// 取消运行中任务 → 释放实例锁 → spawn 自身（--account=<id>）→ 退出。
 /// dev 模式下 current_exe 是调试二进制，行为依赖 devUrl 可达，
@@ -452,10 +468,7 @@ pub fn account_launch(
     cold_switch_cleanup(&app);
     // 先释放锁再 spawn：新进程启动时会尝试获取同一把锁
     lock.release();
-    std::process::Command::new(exe)
-        .arg(format!("--account={account_id}"))
-        .spawn()
-        .map_err(|e| format!("启动新账户进程失败: {e}"))?;
+    spawn_self(&exe, Some(&account_id))?;
     app.exit(0);
     Ok(())
 }
@@ -470,9 +483,7 @@ pub fn account_logout(
     let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
     cold_switch_cleanup(&app);
     lock.release();
-    std::process::Command::new(exe)
-        .spawn()
-        .map_err(|e| format!("启动新进程失败: {e}"))?;
+    spawn_self(&exe, None)?;
     app.exit(0);
     Ok(())
 }

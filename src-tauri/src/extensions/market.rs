@@ -17,6 +17,11 @@ use std::path::PathBuf;
 #[serde(rename_all = "camelCase")]
 pub struct MarketStatus {
     pub node_available: bool,
+    /// 实际生效的 config.toml 路径（账户模式为 accounts/<id>/astra-home/，
+    /// legacy 为 ~/.astra/）——UI 提示文案用，避免硬编码旧路径误导用户
+    pub config_path: String,
+    /// 实际生效的技能库目录（账户模式为 astra-home/skills，随账户隔离）
+    pub skills_dir: String,
 }
 
 /// 检查裸命令是否可解析：GUI 启动的生产包里宿主 PATH 极小（不含
@@ -27,9 +32,17 @@ fn tool_available(name: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn market_status() -> MarketStatus {
+pub fn market_status(app: tauri::AppHandle) -> MarketStatus {
+    let config_path = astra_config_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let skills_dir = crate::skills::user::app_skills_dir(&app)
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
     MarketStatus {
         node_available: tool_available("npm"),
+        config_path,
+        skills_dir,
     }
 }
 

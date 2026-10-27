@@ -64,6 +64,19 @@ pub struct AgentStartReq {
 /// 工具图与本图共享该预算，超限时由 core 二次校验明确拒绝）
 pub(crate) const MAX_ATTACHED_IMAGES: usize = agent_core::model::image::MAX_IMAGES_PER_REQUEST;
 
+/// config.toml 内容指纹：检测 MCP/ACP 配置在 Thread 创建后是否变化。
+/// 文件缺失/路径不可解视为同一空配置（哈希值为常数），避免无配置文件时
+/// 每次都误判为变更。
+fn mcp_config_fingerprint() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let content: Vec<u8> = crate::extensions::market::astra_config_path()
+        .and_then(|p| std::fs::read(&p).map_err(|e| e.to_string()))
+        .unwrap_or_default();
+    content.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// 组装用户输入内容块（多模态 M1）。
 ///
 /// 顺序：文本块在前（技能包装只影响文本），图片块随后。纯图片消息允许
@@ -216,6 +229,53 @@ pub async fn agent_start_run(
         .generation
         .sync(&directory, crate::agent_generation::load_config(&app));
 
+    // 2.7 MCP/ACP 配置变更检测：config.toml 在 Thread 创建后发生变化
+    // （对话里装了新扩展 / 扩展管理页开关）→ 卸载缓存 Thread，本条消息
+    // 按新配置重建，实现「当前对话下一句生效」而无需新建会话。历史已
+    // 持久化在 SQLite，Thread::load 无损恢复。运行中/未落盘的会话跳过
+    //（下次对话再试），与 agent_unload_all_sessions 同语义。
+    let config_fp = mcp_config_fingerprint();
+    if threads.threads.contains_key(&session_id)
+        && state
+            .mcp_config_fps
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&session_id)
+            .copied()
+            != Some(config_fp)
+    {
+        let running = state
+            .active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&session_id);
+        if running {
+            app_log!(
+                info,
+                "agent",
+                "mcp config changed, session {session_id} busy - reload deferred"
+            );
+        } else {
+            match threads.unload(&session_id, &state.persistence_errors) {
+                Ok(()) => {
+                    app_log!(
+                        info,
+                        "agent",
+                        "mcp config changed, session {session_id} rebuilt with new config"
+                    );
+                }
+                Err(e) => {
+                    // 未落盘尾部：保留旧 Thread 继续对话，下次再试
+                    app_log!(
+                        warn,
+                        "agent",
+                        "mcp config changed but reload failed, keeping old thread: {e}"
+                    );
+                }
+            }
+        }
+    }
+
     // 3. 取或建 Thread（绑定 root/backend/policy；历史保留在消息序列里）
     {
         if dest_changed && threads.threads.contains_key(&session_id) {
@@ -341,6 +401,13 @@ pub async fn agent_start_run(
             threads
                 .load_or_create(config, backend, registry, bridge)
                 .await?;
+            // 记录建 Thread 时的配置指纹：之后的 agent_start_run 以此
+            // 检测 config.toml 变更并自动重建（见上方 2.7）。
+            state
+                .mcp_config_fps
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(session_id.clone(), config_fp);
         }
     }
 

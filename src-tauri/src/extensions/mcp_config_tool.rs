@@ -106,7 +106,9 @@ fn list_servers(path: &std::path::Path) -> Result<ToolOutput> {
             s.permissions.allow.join(","),
         ));
     }
-    out.push_str("提示：工具集合在会话创建时冻结，修改配置后需用户新开会话才生效。");
+    out.push_str(
+        "提示：修改保存后，各会话的下一次对话会自动按新配置重建（当前对话也是），无需新建会话。",
+    );
     Ok(ToolOutput::from(out))
 }
 

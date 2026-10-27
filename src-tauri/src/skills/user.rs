@@ -483,8 +483,12 @@ fact=环境/项目事实｜experience=经验/解决方案｜task=待续任务。
 /// 内置找装技能：改写自 Zed 的 find-skills（skills.sh 生态），让 agent 在
 /// 对话里帮用户搜技能/装技能时走 GitHub API + tarball 快速通道，
 /// 避免 fetch 抓网页 / git clone 整仓导致的长时间等待。
+///
+/// 安装目标路径不是常量：技能库目录随账户隔离（账户模式在
+/// accounts/<id>/astra-home/skills），写入时用 {SKILLS_DIR} 占位符替换为
+/// 当前实际目录，避免硬编码 legacy 路径把技能装到读不到的地方。
 const BUILTIN_FIND_SKILLS_NAME: &str = "astra-find-skills";
-const BUILTIN_FIND_SKILLS_MD: &str = r#"---
+const BUILTIN_FIND_SKILLS_MD_TEMPLATE: &str = r#"---
 name: astra-find-skills
 description: 技能搜索与安装指南。当用户想找技能或装技能（「帮我装个 xx 技能」「有没有处理 xx 的技能」）时使用本 skill：如何搜索开源技能生态、如何用 tarball 快速安装进本机技能库、装完如何验证与生效。禁止用 git clone 整仓或逐文件抓取的方式安装。
 ---
@@ -498,6 +502,12 @@ github.com 网页（会拿到海量 HTML 且常被 Cloudflare 403 拦截），�
 
 前提：安装需要 shell 工具（curl / tar）。未打开项目时 shell 工具不可用——
 引导用户先打开一个项目再说一句「继续装」，或让用户在「我的技能」页手动导入。
+
+本机技能库目录（安装目标，已按当前账户解析）：
+
+```
+{SKILLS_DIR}
+```
 
 ## 第一步：搜索候选
 
@@ -535,26 +545,31 @@ https://api.github.com/search/repositories?q=<关键词>+topic:agent-skills&sort
 4. 拷进技能库（目标目录名 = frontmatter 里的 name）：
 
    ```
-   cp -R /tmp/astra-skill-src/<repo>-<branch>/<技能子目录> ~/.config/astra/skills/<name>
+   cp -R /tmp/astra-skill-src/<repo>-<branch>/<技能子目录> {SKILLS_DIR}/<name>
    ```
 
    目标已存在同名技能时，先问用户是否覆盖，不要直接覆盖。技能目录必须
-   直接位于 ~/.config/astra/skills 下且根层有 SKILL.md，不要多套一层目录。
+   直接位于技能库目录下且根层有 SKILL.md，不要多套一层目录。
 5. 验证：调 list_skills 确认新技能已出现
 6. 清理：`rm -rf /tmp/astra-skill.tgz /tmp/astra-skill-src`
 
 备选：机器上有 node 时可用 `npx skills add <owner>/<repo>@<技能名> -g -y`
-（装到 ~/.agents/skills），装完同样要复制进 ~/.config/astra/skills 才生效。
+（装到 ~/.agents/skills），装完同样要复制进上面的技能库目录才生效。
 
 ## 注意
 
-- 涉及项目外路径（/tmp、~/.config）的命令会弹用户确认，属正常安全流程，
+- 涉及项目外路径（/tmp、技能库目录）的命令会弹用户确认，属正常安全流程，
   向用户说明即可，不要试图绕过。
 - 技能摘要是在会话创建时注入的：当前会话里用 read_skill 读出新装技能的
   说明并直接照做即可；**/技能名 直接调用要新开会话才能看到**，装完告知
   用户这一点。
 - 提醒用户可在「我的技能」页查看与编辑刚装的技能。
 "#;
+
+/// 用当前技能库目录渲染内置找装技能正文。
+fn builtin_find_skills_md(skills_dir: &Path) -> String {
+    BUILTIN_FIND_SKILLS_MD_TEMPLATE.replace("{SKILLS_DIR}", &skills_dir.to_string_lossy())
+}
 
 /// 启动时确保内置技能存在：技能库中没有同名技能时写入；已存在则不动
 /// （用户可能已自行修改，不覆盖）。best-effort：失败只影响技能提示，
@@ -567,9 +582,10 @@ pub fn ensure_builtin_skills(app: &AppHandle) -> Result<(), String> {
 /// ensure_builtin_skills 的可测内核：逐个写入缺失的内置技能，
 /// 已有同名技能一律不动（用户可能已自行修改）。
 fn ensure_builtin_skills_into(dir: &Path) -> Result<(), String> {
+    let find_skills_md = builtin_find_skills_md(dir);
     for (name, md) in [
         (BUILTIN_MEMORY_SKILL_NAME, BUILTIN_MEMORY_SKILL_MD),
-        (BUILTIN_FIND_SKILLS_NAME, BUILTIN_FIND_SKILLS_MD),
+        (BUILTIN_FIND_SKILLS_NAME, find_skills_md.as_str()),
     ] {
         let skill_dir = dir.join(name);
         if skill_dir.join("SKILL.md").is_file() {

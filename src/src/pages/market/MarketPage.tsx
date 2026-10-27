@@ -61,8 +61,12 @@ interface UserSkillMeta {
   available: boolean;
 }
 
+// 后端 market_status 序列化为 camelCase；路径为账户感知的实际路径
+// （账户模式：accounts/<id>/astra-home/；legacy：~/.astra 与 ~/.config/astra）
 interface MarketStatus {
   nodeAvailable: boolean;
+  configPath: string;
+  skillsDir: string;
 }
 
 type Kind = 'mcp' | 'acp';
@@ -346,7 +350,7 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                     </span>
                     <span className="mcp-guide-desc">
                       回到 Agent 对话直接说，例如：「帮我安装 Playwright 浏览器 MCP」，AI 会下载依赖并写好
-                      ~/.astra/config.toml 配置，保存后新建会话生效。
+                      {installed?.configPath || 'config.toml'} 配置，保存后回到对话即可使用（当前对话下一句生效，无需新建会话）。
                     </span>
                   </div>
                   <button className="btn-install" onClick={goAgentInstall}>
@@ -462,8 +466,8 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                   <span className="empty-icon">🧩</span>
                   <h3>还没有已安装的扩展</h3>
                   <p>
-                    回到 Agent 对话说「帮我安装 xxx MCP」，
-                    AI 会下载依赖并写好 ~/.astra/config.toml 配置，装完这里就能看到。
+                    回到 Agent 对话说「帮我安装 xxx MCP」,
+                    AI 会下载依赖并写好 {installed?.configPath || 'config.toml'} 配置，装完这里就能看到。
                   </p>
                   <button className="btn-install" onClick={goAgentInstall}>
                     <MessageSquarePlus size={14} strokeWidth={2.5} />
@@ -484,7 +488,7 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                     </span>
                     <span className="mcp-guide-desc">
                       回到 Agent 对话直接说，例如：「帮我安装 docx 技能」，AI 会从 GitHub /
-                      skills.sh 下载并装进 ~/.config/astra/skills，装完用 /技能名 调用。
+                      skills.sh 下载并装进技能库目录（{status?.skillsDir || '见技能详情'}），装完用 /技能名 调用。
                     </span>
                   </div>
                   <button className="btn-install" onClick={goAgentInstall}>
@@ -555,8 +559,8 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                   <span className="empty-icon">🎓</span>
                   <h3>还没有已安装的技能</h3>
                   <p>
-                    回到 Agent 对话说「帮我安装 xxx 技能」，
-                    AI 会下载并装进 ~/.config/astra/skills，装完这里就能看到。
+                    回到 Agent 对话说「帮我安装 xxx 技能」,
+                    AI 会下载并装进技能库目录（{status?.skillsDir || '见技能详情'}），装完这里就能看到。
                   </p>
                   <button className="btn-install" onClick={goAgentInstall}>
                     <MessageSquarePlus size={14} strokeWidth={2.5} />
@@ -594,8 +598,8 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
             </p>
             <p className="market-confirm-hint">
               {deleting.kind === 'skill'
-                ? '将删除技能库目录 ~/.config/astra/skills 下的整个技能目录，不可恢复。'
-                : '仅删除 ~/.astra/config.toml 中的配置段，不会卸载外部程序本身。'}
+                ? `将删除技能库目录（${status?.skillsDir || '见技能详情'}）下的整个技能目录，不可恢复。`
+                : `仅删除 ${installed?.configPath || 'config.toml'} 中的配置段，不会卸载外部程序本身。`}
             </p>
           </>
         )}

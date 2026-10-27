@@ -4,7 +4,8 @@
 //!   解析失败原样暴露给 UI，不让坏配置静默消失）
 //! - 写侧保持文本级修改（与 market.rs 同策略）：只动目标段内的目标键，
 //!   不整文件重排，保留用户注释与未托管键
-//! - 所有修改仅新会话生效（工具集合建 Thread 时冻结，MCP_SPEC §11）
+//! - 修改后各会话的下一次对话自动生效：agent_start_run 检测 config.toml
+//!   指纹变化并重建缓存 Thread（历史在 SQLite，无损恢复），无需新建会话
 //!
 //! 段定位规则：`[mcp.servers.<id>]` 起始，遇到下一个非子表 `[` 行结束
 //! （子表如 `[mcp.servers.<id>.permissions]` 归属本段）。
@@ -222,7 +223,7 @@ fn save_config_text(text: &str) -> Result<(), String> {
     std::fs::rename(&tmp, &path).map_err(|e| format!("替换配置失败: {e}"))
 }
 
-/// 启用 / 停用（enabled = false 后装配直接跳过，新会话生效）
+/// 启用 / 停用（enabled = false 后装配直接跳过；保存后各会话下次对话自动重建生效）
 #[tauri::command]
 pub fn extensions_set_enabled(kind: String, id: String, enabled: bool) -> Result<(), String> {
     let header = section_header(&kind, &id)?;

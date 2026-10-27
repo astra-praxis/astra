@@ -34,6 +34,10 @@ pub struct AgentState {
     /// adopt 收编进来，task_status/task_result/task_cancel 跨会话跟踪。
     /// v1 仅内存态（无 store、无事件通道），Run 永不挂起（D1）。
     pub(crate) tasks: Arc<agent_core::TaskManager>,
+    /// MCP/ACP 配置指纹（会话 id → 建 Thread 时的 config.toml 内容哈希）：
+    /// 配置变更后，会话的下一次 agent_start_run 检测到不匹配即卸载重建，
+    /// 实现「当前对话下一句生效」而无需新建会话。
+    pub(crate) mcp_config_fps: std::sync::Mutex<HashMap<String, u64>>,
     /// MCP 任务后端（TASK_SPEC D6 修订版）：MCP server 物化的任务经
     /// adapter 收编进 tasks，路由回各会话的 McpManager 连接轮询。
     pub(crate) mcp_tasks: Arc<astra_mcp::McpTaskBackend>,
@@ -94,6 +98,7 @@ impl Default for AgentState {
             ),
             mcp_tasks,
             generation,
+            mcp_config_fps: Mutex::new(HashMap::new()),
             memory: Arc::new(std::sync::RwLock::new(None)),
         }
     }
@@ -107,6 +112,12 @@ pub(crate) async fn reset_for_account_switch(state: &AgentState) {
     let _ = crate::agent::commands::agent_cancel_ref(state, None);
     // 会话缓存/存储句柄归零：store 回到 None，下次 open 指向新账户目录
     *state.threads.lock().await = crate::agent::threads::AgentThreads::default();
+    // 配置指纹随会话缓存一同失效（账户切换后 config.toml 已指向新账户）
+    state
+        .mcp_config_fps
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
     state.session_files.lock().await.clear();
     state
         .persistence_errors

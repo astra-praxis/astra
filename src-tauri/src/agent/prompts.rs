@@ -26,7 +26,12 @@ pub fn agent_skills_section() -> String {
 
 /// 模板渲染：填充 {app_name} 占位符，并去掉模板文件首尾多余空白
 fn render(template: &str) -> String {
-    template.trim().replace("{app_name}", APP_NAME)
+    template
+        .trim()
+        // 仓库检出为 CRLF 时（core.autocrlf=true），模板里同样会混入 \r，
+        // 统一剥掉保证断言与拼接后的文本形状稳定
+        .replace('\r', "")
+        .replace("{app_name}", APP_NAME)
 }
 
 #[cfg(test)]

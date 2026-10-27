@@ -24,7 +24,6 @@ use chacha20poly1305::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::OnceLock;
 
 /// XChaCha20-Poly1305 nonce 长度
 pub(crate) type XNonceSize = U24;
@@ -38,16 +37,24 @@ const ENVELOPE_ALG: &str = "xchacha20poly1305";
 const KEK_FILE: &str = ".astra-kek";
 /// 登录凭据文件（salt + 被密码派生密钥包装的 KEK + 验证信封）
 const AUTH_FILE: &str = ".astra-auth.json";
-/// 冷切换登录态交接 token（APPDATA 根，0600，即读即删）
-const TOKEN_FILE: &str = ".astra-auth-token";
 
 /// 进程内 KEK 缓存：登录/解锁后写入，之后所有加解密走缓存，
-/// 不再触碰磁盘上的密钥材料。
-static KEK_CACHE: OnceLock<[u8; 32]> = OnceLock::new();
+/// 不再触碰磁盘上的密钥材料。热切换账户时整体替换/清除（RwLock）。
+static KEK_CACHE: std::sync::RwLock<Option<[u8; 32]>> = std::sync::RwLock::new(None);
 
-/// 登录/解锁成功后（或消费交接 token 后）把 KEK 写入进程内缓存。
+/// 登录/解锁成功后把 KEK 写入进程内缓存（热切换时覆盖旧账户的）。
 pub fn cache_kek(kek: [u8; 32]) {
-    let _ = KEK_CACHE.set(kek);
+    if let Ok(mut guard) = KEK_CACHE.write() {
+        *guard = Some(kek);
+    }
+}
+
+/// 清除进程内 KEK 缓存（切换用户/登出时）：旧账户的解密能力随之失效，
+/// is_locked 重新变为 true，直到下次登录。
+pub(crate) fn clear_kek() {
+    if let Ok(mut guard) = KEK_CACHE.write() {
+        *guard = None;
+    }
 }
 
 fn b64_encode(data: &[u8]) -> String {
@@ -134,8 +141,10 @@ pub fn decrypt_envelope(kek: &[u8; 32], envelope: &str) -> Option<Vec<u8>> {
 /// 取当前数据目录的 KEK（进程内缓存优先）。缓存未命中且目录处于锁定态
 /// （有登录凭据、未验证密码）→ Err，调用方（providers/memory）降级等待解锁。
 pub fn machine_kek(dir: &Path) -> Result<[u8; 32], String> {
-    if let Some(kek) = KEK_CACHE.get() {
-        return Ok(*kek);
+    if let Ok(guard) = KEK_CACHE.read() {
+        if let Some(kek) = guard.as_ref() {
+            return Ok(*kek);
+        }
     }
     machine_kek_uncached(dir)
 }
@@ -213,7 +222,11 @@ pub fn has_auth(dir: &Path) -> bool {
 
 /// 是否处于锁定态：设了登录密码且本进程尚未验证
 pub fn is_locked(dir: &Path) -> bool {
-    has_auth(dir) && KEK_CACHE.get().is_none()
+    has_auth(dir)
+        && KEK_CACHE
+            .read()
+            .map(|guard| guard.is_none())
+            .unwrap_or(true)
 }
 
 /// Argon2id 派生 32 字节密钥（Params::default：m=19MiB, t=2, p=1）。
@@ -324,60 +337,6 @@ pub fn password_change(dir: &Path, old: &str, new: &str) -> Result<(), String> {
     Ok(())
 }
 
-// ===== 冷切换登录态交接 =====
-
-#[derive(Serialize, Deserialize)]
-struct AuthToken {
-    account_id: String,
-    /// b64(32B KEK)
-    kek: String,
-}
-
-fn token_path(app_data_root: &Path) -> std::path::PathBuf {
-    app_data_root.join(TOKEN_FILE)
-}
-
-/// 写一次性交接 token（0600）：验证成功后、spawn 新进程前调用。
-/// 文件包含 KEK，即读即删；属本地临时暴露，与 .astra-kek 同级风险。
-pub fn auth_token_write(
-    app_data_root: &Path,
-    account_id: &str,
-    kek: &[u8; 32],
-) -> Result<(), String> {
-    let token = AuthToken {
-        account_id: account_id.into(),
-        kek: b64_encode(kek),
-    };
-    let json = serde_json::to_string(&token).map_err(|e| format!("serialize token: {e}"))?;
-    let path = token_path(app_data_root);
-    std::fs::write(&path, json).map_err(|e| format!("write {TOKEN_FILE}: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
-}
-
-/// 消费交接 token（setup 阶段）：account_id 匹配则返回 KEK；
-/// 无论是否匹配，读到的 token 都删除（一次性）。
-pub fn auth_token_take(app_data_root: &Path, account_id: &str) -> Option<[u8; 32]> {
-    let path = token_path(app_data_root);
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let _ = std::fs::remove_file(&path);
-    let token: AuthToken = serde_json::from_str(&raw).ok()?;
-    if token.account_id != account_id {
-        return None;
-    }
-    let kek = b64_decode(&token.kek)?;
-    if kek.len() != 32 {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&kek);
-    Some(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,22 +434,5 @@ mod tests {
         assert!(auth_init(dir.path(), "12345").is_err()); // < 6
         assert!(auth_init(dir.path(), &"x".repeat(129)).is_err()); // > 128
         assert!(!has_auth(dir.path()));
-    }
-
-    #[test]
-    fn auth_token_write_take_roundtrip() {
-        let root = tempfile::tempdir().unwrap();
-        let kek = test_kek();
-        auth_token_write(root.path(), "acc1", &kek).unwrap();
-
-        // id 不匹配：token 被消费但不返回 KEK
-        auth_token_write(root.path(), "acc1", &kek).unwrap();
-        assert!(auth_token_take(root.path(), "acc2").is_none());
-        assert!(!token_path(root.path()).exists(), "token 必须即读即删");
-
-        auth_token_write(root.path(), "acc1", &kek).unwrap();
-        assert_eq!(auth_token_take(root.path(), "acc1").unwrap(), kek);
-        assert!(!token_path(root.path()).exists());
-        assert!(auth_token_take(root.path(), "acc1").is_none());
     }
 }

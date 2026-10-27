@@ -583,18 +583,29 @@ fn item_from_memory(memory: astra_memory::cme::model::Memory) -> MemoryItem {
 
 // ===== Tauri 命令（memory 关闭时统一报错，不静默） =====
 
-fn host_or_err<'a>(
-    state: &'a tauri::State<'_, crate::agent::AgentState>,
-) -> Result<&'a MemoryHost, String> {
-    state
+/// MemoryHost 关键字段的拥有式快照：从 RwLock 读锁里提取 Arc 克隆后立即
+/// 释放锁，命令的 .await 段不持锁（否则 future 非 Send，Tauri 命令编译不过）。
+struct HostHandles {
+    engine: Arc<MemoryEngine<CmeSqliteStore>>,
+}
+
+fn host_handles(state: &tauri::State<'_, crate::agent::AgentState>) -> Result<HostHandles, String> {
+    let guard = state
         .memory
-        .get()
-        .ok_or_else(|| "memory is unavailable (init failed or not started)".to_string())
+        .read()
+        .map_err(|_| "memory host lock poisoned".to_string())?;
+    match guard.as_ref() {
+        Some(host) => Ok(HostHandles {
+            engine: Arc::clone(&host.engine),
+        }),
+        None => Err("memory is unavailable (init failed or not started)".to_string()),
+    }
 }
 
 #[tauri::command]
 pub fn memory_status(state: tauri::State<'_, crate::agent::AgentState>) -> MemoryStatus {
-    match state.memory.get() {
+    let guard = state.memory.read().unwrap_or_else(|e| e.into_inner());
+    match guard.as_ref() {
         Some(host) => MemoryStatus {
             enabled: true,
             model: "cme-rule".into(),
@@ -615,7 +626,7 @@ pub async fn memory_search(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<MemoryItem>, String> {
-    let host = host_or_err(&state)?;
+    let host = host_handles(&state)?;
     let query = query.trim().to_owned();
     if query.is_empty() {
         return Err("query must not be empty".to_string());
@@ -637,7 +648,7 @@ pub async fn memory_remember(
     state: tauri::State<'_, crate::agent::AgentState>,
     content: String,
 ) -> Result<MemoryItem, String> {
-    let host = host_or_err(&state)?;
+    let host = host_handles(&state)?;
     let req = RememberRequest {
         content: content.trim().to_owned(),
         kind: MemoryKind::Preference,
@@ -660,7 +671,7 @@ pub async fn memory_forget(
     id: String,
     purge: Option<bool>,
 ) -> Result<(), String> {
-    let host = host_or_err(&state)?;
+    let host = host_handles(&state)?;
     let forgotten = if purge.unwrap_or(false) {
         host.engine.forget(&id).await
     } else {

@@ -30,8 +30,9 @@ use app::settings::{get_settings, get_settings_path, workspace_roots};
 // ===== 应用入口 =====
 
 /// 记忆宿主初始化（CME）：加密 SQLite + 主密钥，失败降级 memory-off。
-/// setup 与 account_unlock（解锁后补做）共用；OnceLock 幂等，重复调用安全。
-fn init_memory_host(app: &tauri::AppHandle) {
+/// setup 与 account_switch / account_unlock（登录/解锁后）共用。
+/// 重复调用会用当前绑定账户的数据目录重建（热切换后换宿主）。
+pub(crate) fn init_memory_host(app: &tauri::AppHandle) {
     // 访问密码锁定：跳过初始化（密钥不可用），解锁后再补做
     if let Ok(dir) = app::accounts::data_dir(app) {
         if app::secret::is_locked(&dir) {
@@ -94,7 +95,9 @@ fn init_memory_host(app: &tauri::AppHandle) {
                 },
             ) {
                 Ok(host) => {
-                    let _ = app.state::<agent::AgentState>().memory.set(host);
+                    if let Ok(mut guard) = app.state::<agent::AgentState>().memory.write() {
+                        *guard = Some(host);
+                    }
                     app_log!(info, "memory", "host init ok");
                 }
                 Err(error) => {
@@ -209,24 +212,12 @@ pub fn run() {
                     app.manage(app::accounts::InstanceLockState(std::sync::Mutex::new(
                         lock,
                     )));
-                    // 冷切换登录态交接：登录页启动新进程时会把 KEK 写入
-                    // 一次性 token 文件（即读即删）；本进程若是对应账户，
-                    // 消费 token 直接解锁，免二次输密码
-                    if let Some(rt) = app::accounts::active() {
-                        if let Some(kek) = app::secret::auth_token_take(&app_root, &rt.account_id) {
-                            app::secret::cache_kek(kek);
-                            app_log!(info, "accounts", "login token consumed, kek cached");
-                        }
-                    }
                 }
                 Err(e) => {
                     elog!("[account] {e}");
                     std::process::exit(1);
                 }
             }
-
-            // dev 冷切换驻留根进程需要跟随会话 PID（见 finish_cold_switch）
-            app::accounts::claim_session(&app_root);
 
             // 功能点落盘日志：Windows GUI 无控制台，关键事件写
             // %APPDATA%\com.astra.app\astra.log，用户可直接反馈该文件。
@@ -417,7 +408,7 @@ pub fn run() {
             app::accounts::account_status,
             app::accounts::account_list,
             app::accounts::account_create,
-            app::accounts::account_launch,
+            app::accounts::account_switch,
             app::accounts::account_logout,
             app::accounts::account_unlock,
             app::accounts::account_password_change,

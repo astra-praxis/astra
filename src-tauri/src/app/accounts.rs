@@ -1,10 +1,10 @@
-//! 本地账户（多账户 P0，冷切换架构）。
+//! 本地账户（多账户，热切换架构）。
 //!
 //! 三层边界中的「本地账户 = 数据归属边界」：每个账户拥有独立的数据目录与
-//! astra-home（MCP/ACP 配置），账户身份由**进程启动参数**决定
-//! （`--account=<account_id>`），不由前端在 IPC 中任意指定。
+//! astra-home（MCP/ACP 配置），账户身份由**后端进程内的活动绑定**决定，
+//! 不由前端在 IPC 中任意指定。
 //!
-//! 目录布局（P0，迁移见 P0-4）：
+//! 目录布局：
 //!
 //! ```text
 //! APPDATA/
@@ -15,16 +15,19 @@
 //!     └── astra-home/            # 账户私有 astra home（config.toml / pastes）
 //! ```
 //!
-//! 未带 `--account` 启动时保持 legacy 模式：所有落盘仍走原 app_data_dir /
-//! `resolve_astra_home()`，旧版本行为完全不变（P0-4 再做数据迁移与强制选户）。
+//! 未登录任何账户时保持 legacy 模式：所有落盘仍走原 app_data_dir /
+//! `resolve_astra_home()`，旧版本行为完全不变。
 //!
-//! 冷切换（账户切换 = 换数据目录 + 重启进程）：`account_launch` 释放实例锁 →
-//! spawn 自身带 `--account=<id>` → 退出当前进程。进程内所有全局态
-//! （AgentState / store / 事件监听）随进程消亡，不存在热切换的清理问题。
+//! 热切换（账户切换 = 进程内换绑 + 前端重载）：`account_switch` 验证密码
+//! → 取消运行中 Run / 清理会话缓存与扩展连接 / 关闭记忆宿主 → 重绑活动
+//! 账户（数据目录与 ASTRA_HOME 随之切换）→ 重建记忆宿主。所有落盘路径
+//! 都经 `data_dir()` / `astra_home()` 动态解析，换绑后自动指向新账户；
+//! 前端随后整页重载，全部 store 重建，不重启进程。
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
 use tauri::Manager;
 
 use super::secret;
@@ -55,7 +58,12 @@ pub(crate) struct AccountRuntime {
     pub astra_home: PathBuf,
 }
 
-static ACTIVE: OnceLock<Option<AccountRuntime>> = OnceLock::new();
+static ACTIVE: RwLock<Option<AccountRuntime>> = RwLock::new(None);
+
+/// 已登出标志：用户点了「切换用户」但尚未登录其他账户。此时保持旧绑定
+/// （避免后台写入落到 legacy 目录），account_status 返回 login 模式让
+/// 前端渲染账户选择器；下次 account_switch 成功后清除。
+static LOGGED_OUT: AtomicBool = AtomicBool::new(false);
 
 /// 从启动参数解析 `--account=<account_id>` 并绑定活动账户。
 /// 无参数 → legacy 模式（Ok(None)），保持旧版本行为。
@@ -96,15 +104,23 @@ fn resolve_account(
     }))
 }
 
-/// setup 阶段调用：绑定活动账户到进程级全局（之后只读）。
-/// 返回活动账户信息供日志使用。
+/// setup 阶段调用：绑定启动参数指定的活动账户（如有的话）。
 pub(crate) fn bind(runtime: Option<AccountRuntime>) {
-    let _ = ACTIVE.set(runtime);
+    if let Ok(mut guard) = ACTIVE.write() {
+        *guard = runtime;
+    }
 }
 
-/// 当前进程绑定的账户（legacy 模式为 None）
-pub(crate) fn active() -> Option<&'static AccountRuntime> {
-    ACTIVE.get().and_then(|o| o.as_ref())
+/// 热切换：替换活动账户绑定（account_switch 专用）。
+fn rebind(runtime: Option<AccountRuntime>) {
+    if let Ok(mut guard) = ACTIVE.write() {
+        *guard = runtime;
+    }
+}
+
+/// 当前绑定的账户（legacy 模式为 None）。快照式返回（内部 RwLock）。
+pub(crate) fn active() -> Option<AccountRuntime> {
+    ACTIVE.read().ok().and_then(|guard| guard.clone())
 }
 
 /// 账户私有数据目录。**这是全部账户私有落盘的唯一入口**——
@@ -210,23 +226,11 @@ impl InstanceLock {
         Ok(InstanceLock { path, held: true })
     }
 
-    /// 主动释放（冷切换 spawn 新进程前调用，避免新进程撞锁）。
-    /// 非测试构建经 InstanceLockState::release 间接使用（State 内 Mutex 包装）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 主动释放（仅测试使用；热切换架构下生产路径不再释放，进程退出时经 Drop 清理）。
+    #[cfg(test)]
     pub(crate) fn release(&mut self) {
         self.held = false;
         let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-impl InstanceLockState {
-    pub(crate) fn release(&self) {
-        // State 内部可变性：锁释放是一次性终态操作，用锁内标志保证幂等安全
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.held {
-            guard.held = false;
-            let _ = std::fs::remove_file(&guard.path);
-        }
     }
 }
 
@@ -274,7 +278,8 @@ fn pid_alive(pid: i32) -> bool {
 
 #[derive(Serialize)]
 pub struct AccountStatus {
-    /// account：已绑定账户启动；legacy：无账户启动（旧数据目录）；
+    /// account：已绑定账户；legacy：无账户启动（旧数据目录）；
+    /// login：登出态（切换用户中，前端渲染账户选择器）。
     /// 账户选择由前端依据 accounts 是否为空决定渲染创建页还是选择页。
     pub mode: String,
     pub account_id: Option<String>,
@@ -293,6 +298,8 @@ pub fn account_status(app: tauri::AppHandle) -> Result<AccountStatus, String> {
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
     let accounts = read_accounts(&root)?;
+    // 登出态（切换用户中）：保持旧绑定不写错目录，但让前端渲染选择器
+    let logged_out = LOGGED_OUT.load(Ordering::Relaxed);
     let dir = crate::app::accounts::data_dir(&app).ok();
     let (password_protected, locked) = match &dir {
         Some(dir) => (
@@ -301,30 +308,26 @@ pub fn account_status(app: tauri::AppHandle) -> Result<AccountStatus, String> {
         ),
         None => (false, false),
     };
-    match active() {
-        Some(rt) => {
-            let display_name = accounts
-                .iter()
-                .find(|a| a.account_id == rt.account_id)
-                .map(|a| a.display_name.clone());
-            Ok(AccountStatus {
-                mode: "account".into(),
-                account_id: Some(rt.account_id.clone()),
-                display_name,
-                accounts,
-                password_protected,
-                locked,
-            })
-        }
-        None => Ok(AccountStatus {
-            mode: "legacy".into(),
-            account_id: None,
-            display_name: None,
-            accounts,
-            password_protected,
-            locked,
-        }),
-    }
+    let mode = match (logged_out, active()) {
+        (true, _) => "login".to_string(),
+        (false, Some(_)) => "account".to_string(),
+        (false, None) => "legacy".to_string(),
+    };
+    let current = if logged_out { None } else { active() };
+    let display_name = current.as_ref().and_then(|rt| {
+        accounts
+            .iter()
+            .find(|a| a.account_id == rt.account_id)
+            .map(|a| a.display_name.clone())
+    });
+    Ok(AccountStatus {
+        mode,
+        account_id: current.map(|rt| rt.account_id),
+        display_name,
+        accounts,
+        password_protected,
+        locked: locked && !logged_out,
+    })
 }
 
 #[tauri::command]
@@ -400,11 +403,10 @@ pub fn account_create(
     Ok(account)
 }
 
-/// 冷切换前的进程收尾：取消运行中 Run + 终止 dev 服务器进程树。
-/// account_launch / account_logout 共用（子进程不随进程退出自动消亡）。
-fn cold_switch_cleanup(app: &tauri::AppHandle) {
-    let agent_state = app.state::<crate::agent::AgentState>();
-    let _cancelled = crate::agent::commands::agent_cancel(agent_state, None);
+/// 热切换的进程收尾：取消运行中 Run + 终止 dev 服务器进程树。
+/// account_switch / account_logout 共用（dev 服务器属于旧账户的项目会话，
+/// 换用户后不应存活；子进程不会随状态重置自动消亡）。
+fn switch_cleanup_processes(app: &tauri::AppHandle) {
     let dev_state = app.state::<crate::app::dev_mode::DevServerState>();
     let mut servers = dev_state.lock().unwrap_or_else(|e| e.into_inner());
     for (_, mut server) in servers.drain() {
@@ -416,123 +418,31 @@ fn cold_switch_cleanup(app: &tauri::AppHandle) {
     }
 }
 
-/// 冷切换 spawn 自身。stdio 重定向到 null：若继承旧进程的终端管道，
-/// 旧进程退出后管道关闭，子进程里任何 eprintln! 都会因 EPIPE panic
-/// （曾导致登录后新进程启动即崩）。返回子进程句柄供 dev 模式驻留等待。
-fn spawn_self(exe: &std::path::Path, account: Option<&str>) -> Result<std::process::Child, String> {
-    use std::process::Stdio;
-    let mut cmd = std::process::Command::new(exe);
-    if let Some(id) = account {
-        cmd.arg(format!("--account={id}"));
-    }
-    // 标记：本进程是应用自身 relaunch 的子进程（区别于 tauri dev CLI 启动的根进程）
-    cmd.arg(RELAUNCH_ARG);
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    cmd.spawn().map_err(|e| format!("启动新进程失败: {e}"))
-}
-
-/// dev 冷切换链标记参数。带此参数的进程由应用自身 relaunch，
-/// 冷切换时直接退出；无此参数的进程是 `tauri dev` CLI 直接跟踪的
-/// 根进程，退出会导致 CLI 关闭 vite dev server，必须驻留
-/// （见 finish_cold_switch）。init_from_args 只识别 --account=，此参数无副作用。
-const RELAUNCH_ARG: &str = "--astra-relaunch";
-
-fn is_relaunched() -> bool {
-    std::env::args().any(|a| a == RELAUNCH_ARG)
-}
-
-/// 会话 PID 文件：当前活动进程启动时写入自身 PID。dev 冷切换的
-/// 驻留根进程据此跟随进程链的最新 PID（每次换手即被覆盖）。
-fn session_pid_file(app_data_root: &std::path::Path) -> std::path::PathBuf {
-    app_data_root.join("session.pid")
-}
-
-/// 启动时声明会话归属（写 PID）。仅 dev 冷切换驻留使用，失败静默。
-pub(crate) fn claim_session(app_data_root: &std::path::Path) {
-    let _ = std::fs::write(
-        session_pid_file(app_data_root),
-        std::process::id().to_string(),
-    );
-}
-
-fn read_session_pid(app_data_root: &std::path::Path) -> Option<u32> {
-    std::fs::read_to_string(session_pid_file(app_data_root))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-}
-
-/// 冷切换收尾。release：旧进程立即退出，完成真正的冷切换。
-/// dev：只有 `tauri dev` CLI 直接跟踪的根进程需要驻留（它退出会触发
-/// CLI 关闭 vite dev server，新进程从 devUrl 加载前端会白屏）；由应用
-/// relaunch 的进程（带 RELAUNCH_ARG）直接退出。驻留进程隐藏窗口、
-/// 降为 Accessory（不留 Dock 图标），跟随会话 PID 文件等待进程链结束——
-/// 全程仅此一个驻留进程，其余全部干净退出。
-
-fn finish_cold_switch(app: &tauri::AppHandle, mut child: std::process::Child) {
-    // release 或 relaunch 的子进程：无 dev server 依赖，立即退出
-    if !tauri::is_dev() || is_relaunched() {
-        app.exit(0);
-        return;
-    }
-    // dev 且本进程是 CLI 跟踪的根进程：驻留等待进程链结束
-    #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-    use tauri::Manager;
-    let root = app.path().app_data_dir().ok();
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let mut current = child.id();
-        loop {
-            if let Some(root) = &root {
-                if let Some(pid) = read_session_pid(root) {
-                    current = pid;
-                }
-            }
-            if !pid_alive(current as i32) {
-                // 宽限重查：新进程可能正在启动、尚未写入 PID
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                if let Some(root) = &root {
-                    if let Some(pid) = read_session_pid(root) {
-                        current = pid;
-                    }
-                }
-                if !pid_alive(current as i32) {
-                    break;
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
-        app.exit(0);
-    });
-}
-
-/// 冷切换：以目标账户重启进程。验证密码 → 交接 KEK（token 文件）→
-/// 取消运行中任务 → 释放实例锁 → spawn 自身（--account=<id>）→ 退出。
-/// dev 模式下旧进程驻留等待新进程（见 finish_cold_switch），
-/// 正式验证以打包产物为准。
+/// 热切换：进程内换绑到目标账户，不重启进程。
+///
+/// 验证密码 → 取消运行中 Run / 清理会话缓存与扩展连接 / 关闭记忆宿主 →
+/// 重绑活动账户（data_dir / astra_home / ASTRA_HOME 随之切换）→
+/// 缓存新 KEK → 日志重定向 → 重建记忆宿主。前端收到 Ok 后整页重载，
+/// 全部 store 重建；会话存储在下次 open 时自动指向新账户目录。
 ///
 /// 老账户（无登录凭据，legacy 时期创建）兼容：首次登录即设置初始密码
 /// （auth_init 承接其现有文件 KEK，旧密文不受影响）。
 #[tauri::command]
-pub fn account_launch(
+pub async fn account_switch(
     app: tauri::AppHandle,
     account_id: String,
     password: String,
-    lock: tauri::State<'_, InstanceLockState>,
 ) -> Result<(), String> {
     let root = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
     let accounts = read_accounts(&root)?;
-    if !accounts.iter().any(|a| a.account_id == account_id) {
-        return Err(format!("账户不存在: {account_id}"));
-    }
+    let account = accounts
+        .iter()
+        .find(|a| a.account_id == account_id)
+        .cloned()
+        .ok_or_else(|| format!("账户不存在: {account_id}"))?;
     let data_dir = account_dir(&root, &account_id).join("data");
     // 登录验证：已有凭据 → 验证密码取 KEK；无凭据（老账户）→ 首次登录设初始密码
     let kek = if secret::has_auth(&data_dir) {
@@ -540,35 +450,60 @@ pub fn account_launch(
     } else {
         secret::auth_init(&data_dir, &password)?
     };
-    // 登录态交接：KEK 经一次性 token 文件交给新进程（0600，即读即删），
-    // 新进程 setup 消费后免二次输密码
-    secret::auth_token_write(&root, &account_id, &kek)?;
-    let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
-    cold_switch_cleanup(&app);
-    // 先释放锁再 spawn：新进程启动时会尝试获取同一把锁
-    lock.release();
-    let child = spawn_self(&exe, Some(&account_id))?;
-    finish_cold_switch(&app, child);
+
+    // 1. 清理旧账户的进程内状态（Run / 会话缓存 / 扩展连接 / 记忆宿主）
+    let agent_state = app.state::<crate::agent::AgentState>();
+    crate::agent::state::reset_for_account_switch(&agent_state).await;
+    switch_cleanup_processes(&app);
+
+    // 2. 换绑活动账户：所有 data_dir()/astra_home() 调用从此指向新账户
+    let runtime = AccountRuntime {
+        data_dir: data_dir.clone(),
+        astra_home: account_dir(&root, &account_id).join("astra-home"),
+        account_id: account_id.clone(),
+    };
+    rebind(Some(runtime));
+    std::env::set_var(
+        "ASTRA_HOME",
+        account_dir(&root, &account_id).join("astra-home"),
+    );
+
+    // 3. 新账户的密钥与宿主初始化
+    secret::cache_kek(kek);
+    LOGGED_OUT.store(false, Ordering::Relaxed);
+    if let Ok(dir) = crate::app::accounts::data_dir(&app) {
+        crate::logging::init(&dir);
+    }
+    crate::init_memory_host(&app);
+    app_log!(
+        info,
+        "accounts",
+        "account switched: {} ({})",
+        account.display_name,
+        account.account_id
+    );
     Ok(())
 }
 
-/// 退出登录（冷切换回登录列表）：spawn 自身不带 --account → legacy 模式
-/// 启动，账户门渲染用户列表。不写交接 token（切换用户必须重新输密码）。
+/// 退出登录（切换用户）：清理当前账户的进程内状态并清除 KEK 缓存，
+/// 登出态下 account_status 返回 login 模式，前端重载后渲染账户选择器。
+/// 不换绑（保持旧目录绑定，避免后台写入落到 legacy 目录）；
+/// 下次 account_switch 成功后清除登出标志。
 #[tauri::command]
-pub fn account_logout(
-    app: tauri::AppHandle,
-    lock: tauri::State<'_, InstanceLockState>,
-) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
-    cold_switch_cleanup(&app);
-    lock.release();
-    let child = spawn_self(&exe, None)?;
-    finish_cold_switch(&app, child);
+pub async fn account_logout(app: tauri::AppHandle) -> Result<(), String> {
+    let agent_state = app.state::<crate::agent::AgentState>();
+    crate::agent::state::reset_for_account_switch(&agent_state).await;
+    switch_cleanup_processes(&app);
+    secret::clear_kek();
+    LOGGED_OUT.store(true, Ordering::Relaxed);
+    app_log!(info, "accounts", "account logged out, showing selector");
     Ok(())
 }
 
 /// InstanceLock 的 Tauri State 包装（setup 阶段 acquire 后 manage）。
-/// Mutex 允许冷切换命令在 &self 上释放锁。
+/// 热切换架构下锁终生持有（退出时 Drop 清理），Mutex 包装保留以便未来
+/// 扩展锁定/恢复流程，字段本身暂无读取方。
+#[allow(dead_code)]
 pub(crate) struct InstanceLockState(pub(crate) std::sync::Mutex<InstanceLock>);
 
 // ===== 账户登录密码（praxis 式登录：选用户 → 输密码 → 进应用） =====

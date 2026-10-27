@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 
 use agent_core::RunHandle;
 
-
 use super::*;
 // ===== 全局状态 =====
 
@@ -47,7 +46,8 @@ pub struct AgentState {
     pub(crate) generation: crate::agent_generation::GenerationStack,
     /// 记忆宿主（astra-memory 集成）：setup 阶段初始化（需要 app_data_dir），
     /// 失败降级为 memory-off（agent 照常运行，无 recall 注入）。
-    pub(crate) memory: Arc<std::sync::OnceLock<crate::memory::host::MemoryHost>>,
+    /// 热切换账户时整体替换（ RwLock<Option>，None = memory-off）。
+    pub(crate) memory: Arc<std::sync::RwLock<Option<crate::memory::host::MemoryHost>>>,
 }
 
 /// 一次会话装配产生的扩展 manager 句柄（Arc 保活）。
@@ -89,7 +89,29 @@ impl Default for AgentState {
             ),
             mcp_tasks,
             generation,
-            memory: Arc::new(std::sync::OnceLock::new()),
+            memory: Arc::new(std::sync::RwLock::new(None)),
         }
+    }
+}
+
+/// 热切换账户的状态重置：取消运行中 Run、丢弃旧账户的会话缓存与
+/// 扩展连接、关闭记忆宿主。之后由 account_switch 重新绑定数据目录、
+/// 重建记忆宿主；会话存储在下次 open 时自动指向新账户目录。
+pub(crate) async fn reset_for_account_switch(state: &AgentState) {
+    // 取消所有运行中 Run（含持久化尾部 drain）
+    let _ = crate::agent::commands::agent_cancel_ref(state, None);
+    // 会话缓存/存储句柄归零：store 回到 None，下次 open 指向新账户目录
+    *state.threads.lock().await = crate::agent::threads::AgentThreads::default();
+    state.session_files.lock().await.clear();
+    state
+        .persistence_errors
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    // 丢弃旧账户的 MCP/ACP 连接
+    state.extensions.lock().await.clear();
+    // 关闭旧账户的记忆宿主（Drop 关闭加密 SQLite）
+    if let Ok(mut guard) = state.memory.write() {
+        *guard = None;
     }
 }

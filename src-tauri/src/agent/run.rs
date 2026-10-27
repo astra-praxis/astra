@@ -266,7 +266,7 @@ pub async fn agent_start_run(
             // 项目绑定：core 的 recall 恒传 scope=None（冻结接口），这里用
             // ProjectBoundProvider 把本次 Run 的项目绑定进搜索范围
             // （全局偏好 + 本项目记忆），项目私有记忆不会跨项目串线。
-            if let Some(memory) = state.memory.get() {
+            if let Some(memory) = state.memory.read().unwrap().as_ref() {
                 config.memory = Some(Arc::new(astra_memory_provider::ProjectBoundProvider::new(
                     memory.provider(),
                     bound_project.clone(),
@@ -312,7 +312,12 @@ pub async fn agent_start_run(
                 Arc::clone(&state.processes),
                 Arc::clone(&state.tasks),
                 generation,
-                state.memory.get().map(|m| m.engine().clone()),
+                state
+                    .memory
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .map(|m| m.engine().clone()),
             );
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
             // ~/.astra/config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
@@ -435,8 +440,10 @@ pub async fn agent_start_run(
     // 助手最终回答和已完成的工具结果 ingest 进 CME 待处理队列，达到阈值时
     // 压缩会话并提炼长期记忆。提炼是确定性规则，无模型调用；异步 spawn，
     // 不阻塞 Run 结束路径。任何失败只记日志：记忆故障永不阻断 agent（D21）。
-    let observe_engine = state.memory.get().map(|m| m.engine().clone());
-    let observe_reviewer = state.memory.get().and_then(|m| m.supersede_reviewer());
+    let memory_read = state.memory.read().unwrap();
+    let observe_engine = memory_read.as_ref().map(|m| m.engine().clone());
+    let observe_reviewer = memory_read.as_ref().and_then(|m| m.supersede_reviewer());
+    drop(memory_read);
     let observe_text = user_text.clone();
     let observe_project = bound_project.clone();
     tokio::spawn(async move {

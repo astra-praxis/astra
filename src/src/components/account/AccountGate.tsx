@@ -3,14 +3,14 @@
  *
  * 应用启动时先查询账户状态，四种渲染分支：
  * 1. locked（绑定账户启动但尚未解锁）：输入该账户密码解锁
- * 2. legacy 且已有账户：头像选择器——点选用户 → 输密码 → 冷切换登录
+ * 2. legacy 且已有账户：头像选择器——点选用户 → 输密码 → 热切换登录
  *    （老账户无凭据：首次登录只输一次，该密码即设为登录密码）
  * 3. legacy 且无账户：首次使用——创建账户（名称 + 登录密码）后自动登录
  * 4. account 且未锁定：放行主应用
  *
- * 登录 = 冷切换：后端验证密码 → KEK 写一次性交接 token →
- * 释放实例锁 → spawn 自身带 --account=<id> → 当前进程退出。
- * 前端不传递身份，账户归属由进程参数决定（见 src-tauri/src/app/accounts.rs）。
+ * 登录 = 热切换：后端验证密码 → 进程内换绑账户（重置 AgentState、
+ * 重绑数据目录与 KEK）→ 前端整页 reload 重新拉取状态。
+ * 前端不传递身份，账户归属由后端 ACTIVE 状态决定（见 src-tauri/src/app/accounts.rs）。
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -190,9 +190,9 @@ function UnlockForm() {
 
 /**
  * 点选用户后的密码表单（单密码框）。
- * - has_auth：验证密码 → 冷切换
+ * - has_auth：验证密码 → 热切换
  * - 老账户无凭据：输入的密码即设为该账户的登录密码（只输一次）
- * 成功时后端 spawn 新进程并 exit(0)，Promise 不会 resolve。
+ * 成功时后端进程内换绑账户，前端整页 reload。
  */
 function LoginForm({ account, onBack }: { account: Account; onBack: () => void }) {
   const [password, setPassword] = useState('');
@@ -206,8 +206,9 @@ function LoginForm({ account, onBack }: { account: Account; onBack: () => void }
     setBusy(true);
     setError('');
     try {
-      await invoke('account_launch', { accountId: account.account_id, password });
-      // 成功时进程已退出，走不到这里
+      await invoke('account_switch', { accountId: account.account_id, password });
+      // 热切换成功：进程内已换绑账户，整页 reload 以新账户身份重建前端
+      window.location.reload();
     } catch (err) {
       setError(String(err));
       setBusy(false);
@@ -264,8 +265,9 @@ function FirstAccountForm() {
         displayName: trimmed,
         password,
       });
-      await invoke('account_launch', { accountId: account.account_id, password });
-      // 成功时进程已退出，走不到这里
+      await invoke('account_switch', { accountId: account.account_id, password });
+      // 热切换成功：进程内已换绑账户，整页 reload 以新账户身份重建前端
+      window.location.reload();
     } catch (err) {
       setError(String(err));
       setBusy(false);

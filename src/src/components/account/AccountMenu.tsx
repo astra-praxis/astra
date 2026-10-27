@@ -1,7 +1,7 @@
 /**
  * 侧栏底部用户入口（praxis 式）：头像 + 名称，点击弹出菜单。
  * 菜单：账户设置（深链 /settings/accounts）、更换登录密码（弹窗）、
- * 切换用户（account_logout 冷切换回登录列表）。
+ * 切换用户（account_logout 热切换回登录列表）。
  * legacy 模式（无绑定账户）不渲染。
  */
 import { useEffect, useState } from 'react';
@@ -43,8 +43,9 @@ export default function AccountMenu({ collapsed }: { collapsed: boolean }) {
     if (switching) return;
     setSwitching(true);
     try {
-      // 成功时后端 spawn 新进程并 exit(0)，Promise 不会 resolve
+      // 热切换登出：进程内清理上下文，成功后整页 reload 回登录选择器
       await invoke('account_logout');
+      window.location.reload();
     } catch (e) {
       console.error('account_logout failed', e);
       setSwitching(false);

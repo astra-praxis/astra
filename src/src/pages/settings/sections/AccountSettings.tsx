@@ -54,8 +54,9 @@ export default function AccountSettings() {
   async function launch(accountId: string, password: string) {
     setError('');
     try {
-      // 成功时后端 spawn 新进程并 exit(0)，Promise 不会 resolve
-      await invoke('account_launch', { accountId, password });
+      // 热切换：进程内换绑目标账户，成功后整页 reload 以新账户身份重建
+      await invoke('account_switch', { accountId, password });
+      window.location.reload();
     } catch (e) {
       setError(String(e));
       throw e; // 让弹窗保持打开并显示错误

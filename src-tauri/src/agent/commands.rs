@@ -1,7 +1,5 @@
-
 use agent_core::Decision;
 use tauri::State;
-
 
 use super::*;
 
@@ -12,6 +10,11 @@ use super::*;
 /// 操作，前端据此给出可见反馈而不是静默失败。
 #[tauri::command]
 pub fn agent_cancel(state: State<'_, AgentState>, session_id: Option<String>) -> bool {
+    agent_cancel_ref(&state, session_id)
+}
+
+/// agent_cancel 的纯引用版本（热切换账户时由 accounts 模块调用）。
+pub(crate) fn agent_cancel_ref(state: &AgentState, session_id: Option<String>) -> bool {
     // Do not clear active until the receiver has drained the persistence tail.
     let active = state.active.lock().unwrap_or_else(|e| e.into_inner());
     match session_id {

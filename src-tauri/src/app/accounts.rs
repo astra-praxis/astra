@@ -276,10 +276,11 @@ fn pid_alive(pid: i32) -> bool {
                 return false;
             }
             let mut exit_code: u32 = 0;
-            let alive =
-                windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut exit_code)
+            let alive = windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut exit_code)
                     != 0
-                    && exit_code == STILL_ACTIVE;
+                    // STILL_ACTIVE 在 windows-sys 0.59 里是 NTSTATUS(i32)，而
+                    // GetExitCodeProcess 写的是 u32，显式转类型再比较
+                    && exit_code == STILL_ACTIVE as u32;
             CloseHandle(handle);
             alive
         }

@@ -522,9 +522,16 @@ mod tests {
         fs::write(dir.join("image.png"), "binary").unwrap();
 
         let files = scan_files(&dir).unwrap();
+        // rel 路径统一斜杠：Windows 上 PathBuf 展示为反斜杠，
+        // 索引库与匹配逻辑均按 POSIX 风格斜杠存取
         let names: Vec<String> = files
             .iter()
-            .map(|f| f.strip_prefix(&dir).unwrap().to_string_lossy().to_string())
+            .map(|f| {
+                f.strip_prefix(&dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
             .collect();
 
         assert!(names.contains(&"src/main.rs".to_string()));

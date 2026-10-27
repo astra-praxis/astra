@@ -402,13 +402,20 @@ mod tests {
     #[test]
     fn upsert_then_list_roundtrip() {
         let (_dir, path) = temp_config();
+        // command 必须是本机存在的路径（upsert 有 fail-fast 校验）；
+        // Windows 上没有 /bin/echo，用解释器路径代之，POSIX 下路径固定
+        let echo = if cfg!(windows) {
+            std::env::var("ComSpec").unwrap_or_else(|_| "cmd".into())
+        } else {
+            "/bin/echo".into()
+        };
         let out = write_servers(
             &path,
             "upsert",
             write_args(
                 "upsert",
                 "blender",
-                json!({ "command": "/bin/echo", "args": ["mcp-for-blender"], "allow": ["look"] }),
+                json!({ "command": echo, "args": ["/c", "echo", "mcp-for-blender"], "allow": ["look"] }),
             ),
         )
         .unwrap();
@@ -426,15 +433,22 @@ mod tests {
     #[test]
     fn upsert_preserves_comments_and_existing_sections() {
         let (_dir, path) = temp_config();
+        let echo = if cfg!(windows) {
+            std::env::var("ComSpec").unwrap_or_else(|_| "cmd".into())
+        } else {
+            "/bin/echo".into()
+        };
         std::fs::write(
             &path,
-            "# my precious comment\n[mcp.servers.browser]\nenabled = true\ncommand = \"/bin/echo\"\n",
+            format!(
+                "# my precious comment\n[mcp.servers.browser]\nenabled = true\ncommand = '''{echo}'''\n"
+            ),
         )
         .unwrap();
         write_servers(
             &path,
             "upsert",
-            write_args("upsert", "new", json!({ "command": "/bin/echo" })),
+            write_args("upsert", "new", json!({ "command": echo })),
         )
         .unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -446,10 +460,15 @@ mod tests {
     #[test]
     fn set_enabled_and_remove_roundtrip() {
         let (_dir, path) = temp_config();
+        let echo = if cfg!(windows) {
+            std::env::var("ComSpec").unwrap_or_else(|_| "cmd".into())
+        } else {
+            "/bin/echo".into()
+        };
         write_servers(
             &path,
             "upsert",
-            write_args("upsert", "blender", json!({ "command": "/bin/echo" })),
+            write_args("upsert", "blender", json!({ "command": echo })),
         )
         .unwrap();
 

@@ -15,6 +15,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, LogIn } from 'lucide-react';
+import { formatAccountName } from '../../lib/format';
 import './AccountGate.scss';
 
 interface Account {
@@ -67,7 +68,9 @@ export default function AccountGate({ children }: { children: ReactNode }) {
   // 绑定账户启动但处于锁定态：输入该账户密码解锁
   if (status.mode === 'account' && status.locked) {
     return (
-      <GateShell subtitle={`「${status.display_name ?? '当前账户'}」已加密，输入登录密码解锁`}>
+      <GateShell
+        subtitle={`「${formatAccountName(status.display_name)}」已加密，输入登录密码解锁`}
+      >
         <UnlockForm />
       </GateShell>
     );
@@ -76,7 +79,7 @@ export default function AccountGate({ children }: { children: ReactNode }) {
   // legacy 模式 + 已有账户：praxis 式头像选择器
   if (status.accounts.length > 0) {
     return selected ? (
-      <GateShell subtitle={`以「${selected.display_name}」身份登录`}>
+      <GateShell subtitle={`以「${formatAccountName(selected.display_name)}」身份登录`}>
         <div className="account-gate__picked">
           <UserAvatar name={selected.display_name} size={64} />
           <LoginForm
@@ -100,7 +103,7 @@ export default function AccountGate({ children }: { children: ReactNode }) {
               onClick={() => setSelected(a)}
             >
               <UserAvatar name={a.display_name} size={64} />
-              <span className="account-gate__user-name">{a.display_name}</span>
+              <span className="account-gate__user-name">{formatAccountName(a.display_name)}</span>
               {a.has_auth !== true && <span className="account-gate__user-flag">首次登录</span>}
             </button>
           ))}
@@ -132,7 +135,7 @@ function GateShell({ subtitle, children }: { subtitle: string; children: ReactNo
   );
 }
 
-/** 圆形用户头像：品牌渐变底 + 首字 */
+/** 圆形用户头像：品牌渐变底 + 首字（首字母大写） */
 function UserAvatar({ name, size }: { name: string; size: number }) {
   return (
     <span
@@ -140,7 +143,7 @@ function UserAvatar({ name, size }: { name: string; size: number }) {
       style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
       aria-hidden
     >
-      {name.slice(0, 1)}
+      {formatAccountName(name).slice(0, 1)}
     </span>
   );
 }

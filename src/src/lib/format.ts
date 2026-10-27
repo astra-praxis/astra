@@ -9,6 +9,13 @@ function pad2(n: number): string {
 
 // ===== 文件大小 =====
 
+/** 账户名展示：首字母大写（仅 ASCII 字母，中文不受影响），空名兜底「账户」 */
+export function formatAccountName(name: string | null | undefined): string {
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return '账户';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 /** 文件大小（2 位小数），用于项目源码大小、node_modules 大小等 */
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';

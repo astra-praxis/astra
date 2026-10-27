@@ -425,33 +425,90 @@ fn spawn_self(exe: &std::path::Path, account: Option<&str>) -> Result<std::proce
     if let Some(id) = account {
         cmd.arg(format!("--account={id}"));
     }
+    // 标记：本进程是应用自身 relaunch 的子进程（区别于 tauri dev CLI 启动的根进程）
+    cmd.arg(RELAUNCH_ARG);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     cmd.spawn().map_err(|e| format!("启动新进程失败: {e}"))
 }
 
+/// dev 冷切换链标记参数。带此参数的进程由应用自身 relaunch，
+/// 冷切换时直接退出；无此参数的进程是 `tauri dev` CLI 直接跟踪的
+/// 根进程，退出会导致 CLI 关闭 vite dev server，必须驻留
+/// （见 finish_cold_switch）。init_from_args 只识别 --account=，此参数无副作用。
+const RELAUNCH_ARG: &str = "--astra-relaunch";
+
+fn is_relaunched() -> bool {
+    std::env::args().any(|a| a == RELAUNCH_ARG)
+}
+
+/// 会话 PID 文件：当前活动进程启动时写入自身 PID。dev 冷切换的
+/// 驻留根进程据此跟随进程链的最新 PID（每次换手即被覆盖）。
+fn session_pid_file(app_data_root: &std::path::Path) -> std::path::PathBuf {
+    app_data_root.join("session.pid")
+}
+
+/// 启动时声明会话归属（写 PID）。仅 dev 冷切换驻留使用，失败静默。
+pub(crate) fn claim_session(app_data_root: &std::path::Path) {
+    let _ = std::fs::write(
+        session_pid_file(app_data_root),
+        std::process::id().to_string(),
+    );
+}
+
+fn read_session_pid(app_data_root: &std::path::Path) -> Option<u32> {
+    std::fs::read_to_string(session_pid_file(app_data_root))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
 /// 冷切换收尾。release：旧进程立即退出，完成真正的冷切换。
-/// dev（is_dev）：`tauri dev` CLI 以其跟踪的应用进程退出为信号关闭
-/// vite dev server，而新进程仍需从 devUrl 加载前端——旧进程若立即退出，
-/// 新进程必然白屏（Failed to load resource）。故旧进程仅隐藏窗口、
-/// 保留进程与 dev server，等新进程退出后再随之退出（切换链会形成
-/// 若干驻留祖先进程，最终进程退出时逐级疏散；仅存在于 dev，可接受）。
+/// dev：只有 `tauri dev` CLI 直接跟踪的根进程需要驻留（它退出会触发
+/// CLI 关闭 vite dev server，新进程从 devUrl 加载前端会白屏）；由应用
+/// relaunch 的进程（带 RELAUNCH_ARG）直接退出。驻留进程隐藏窗口、
+/// 降为 Accessory（不留 Dock 图标），跟随会话 PID 文件等待进程链结束——
+/// 全程仅此一个驻留进程，其余全部干净退出。
 
 fn finish_cold_switch(app: &tauri::AppHandle, mut child: std::process::Child) {
-    if tauri::is_dev() {
-        use tauri::Manager;
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.hide();
-        }
-        let app = app.clone();
-        std::thread::spawn(move || {
-            let _ = child.wait();
-            app.exit(0);
-        });
-    } else {
+    // release 或 relaunch 的子进程：无 dev server 依赖，立即退出
+    if !tauri::is_dev() || is_relaunched() {
         app.exit(0);
+        return;
     }
+    // dev 且本进程是 CLI 跟踪的根进程：驻留等待进程链结束
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    use tauri::Manager;
+    let root = app.path().app_data_dir().ok();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut current = child.id();
+        loop {
+            if let Some(root) = &root {
+                if let Some(pid) = read_session_pid(root) {
+                    current = pid;
+                }
+            }
+            if !pid_alive(current as i32) {
+                // 宽限重查：新进程可能正在启动、尚未写入 PID
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if let Some(root) = &root {
+                    if let Some(pid) = read_session_pid(root) {
+                        current = pid;
+                    }
+                }
+                if !pid_alive(current as i32) {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        app.exit(0);
+    });
 }
 
 /// 冷切换：以目标账户重启进程。验证密码 → 交接 KEK（token 文件）→

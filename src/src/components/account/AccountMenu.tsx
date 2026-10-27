@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router';
 import { invoke } from '@tauri-apps/api/core';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { KeyRound, LogOut, Settings2 } from 'lucide-react';
+import { formatAccountName } from '../../lib/format';
 import ChangePasswordModal from './ChangePasswordModal';
 import './AccountMenu.scss';
 
@@ -36,7 +37,7 @@ export default function AccountMenu({ collapsed }: { collapsed: boolean }) {
 
   if (!status || status.mode !== 'account') return null;
 
-  const name = status.display_name ?? '账户';
+  const name = formatAccountName(status.display_name);
 
   async function switchUser() {
     if (switching) return;

@@ -15,6 +15,7 @@ import SettingsSection from '../components/SettingsSection';
 import SettingsRow from '../components/SettingsRow';
 import Modal from '@/components/ui/Modal';
 import ChangePasswordModal from '@/components/account/ChangePasswordModal';
+import { formatAccountName } from '@/lib/format';
 import './AccountSettings.scss';
 
 interface Account {
@@ -73,7 +74,7 @@ export default function AccountSettings() {
           }
         >
           <span className={`acct-mode acct-mode--${status.mode}`}>
-            {status.mode === 'account' ? status.display_name ?? '账户' : 'legacy'}
+            {status.mode === 'account' ? formatAccountName(status.display_name) : 'legacy'}
           </span>
         </SettingsRow>
       )}
@@ -102,9 +103,9 @@ export default function AccountSettings() {
           <ul className="acct-list">
             {status.accounts.map((a) => (
               <li key={a.account_id} className="acct-list__item">
-                <span className="acct-list__avatar">{a.display_name.slice(0, 1)}</span>
+                <span className="acct-list__avatar">{formatAccountName(a.display_name).slice(0, 1)}</span>
                 <span className="acct-list__name">
-                  {a.display_name}
+                  {formatAccountName(a.display_name)}
                   {status.account_id === a.account_id && (
                     <span className="acct-list__badge">
                       <ShieldCheck size={12} strokeWidth={2} /> 当前
@@ -350,7 +351,7 @@ function LaunchAccountModal({
     <Modal
       open
       onClose={onClose}
-      title={`启动「${account.display_name}」`}
+      title={`启动「${formatAccountName(account.display_name)}」`}
       closeOnOverlay={false}
       closeDisabled={busy}
       footer={

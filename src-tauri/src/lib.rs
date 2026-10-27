@@ -225,6 +225,9 @@ pub fn run() {
                 }
             }
 
+            // dev 冷切换驻留根进程需要跟随会话 PID（见 finish_cold_switch）
+            app::accounts::claim_session(&app_root);
+
             // 功能点落盘日志：Windows GUI 无控制台，关键事件写
             // %APPDATA%\com.astra.app\astra.log，用户可直接反馈该文件。
             // 账户模式下写账户私有数据目录。

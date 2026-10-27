@@ -418,8 +418,8 @@ fn cold_switch_cleanup(app: &tauri::AppHandle) {
 
 /// 冷切换 spawn 自身。stdio 重定向到 null：若继承旧进程的终端管道，
 /// 旧进程退出后管道关闭，子进程里任何 eprintln! 都会因 EPIPE panic
-/// （曾导致登录后新进程启动即崩）。
-fn spawn_self(exe: &std::path::Path, account: Option<&str>) -> Result<(), String> {
+/// （曾导致登录后新进程启动即崩）。返回子进程句柄供 dev 模式驻留等待。
+fn spawn_self(exe: &std::path::Path, account: Option<&str>) -> Result<std::process::Child, String> {
     use std::process::Stdio;
     let mut cmd = std::process::Command::new(exe);
     if let Some(id) = account {
@@ -428,13 +428,35 @@ fn spawn_self(exe: &std::path::Path, account: Option<&str>) -> Result<(), String
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    cmd.spawn().map_err(|e| format!("启动新进程失败: {e}"))?;
-    Ok(())
+    cmd.spawn().map_err(|e| format!("启动新进程失败: {e}"))
+}
+
+/// 冷切换收尾。release：旧进程立即退出，完成真正的冷切换。
+/// dev（is_dev）：`tauri dev` CLI 以其跟踪的应用进程退出为信号关闭
+/// vite dev server，而新进程仍需从 devUrl 加载前端——旧进程若立即退出，
+/// 新进程必然白屏（Failed to load resource）。故旧进程仅隐藏窗口、
+/// 保留进程与 dev server，等新进程退出后再随之退出（切换链会形成
+/// 若干驻留祖先进程，最终进程退出时逐级疏散；仅存在于 dev，可接受）。
+
+fn finish_cold_switch(app: &tauri::AppHandle, mut child: std::process::Child) {
+    if tauri::is_dev() {
+        use tauri::Manager;
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.hide();
+        }
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            app.exit(0);
+        });
+    } else {
+        app.exit(0);
+    }
 }
 
 /// 冷切换：以目标账户重启进程。验证密码 → 交接 KEK（token 文件）→
 /// 取消运行中任务 → 释放实例锁 → spawn 自身（--account=<id>）→ 退出。
-/// dev 模式下 current_exe 是调试二进制，行为依赖 devUrl 可达，
+/// dev 模式下旧进程驻留等待新进程（见 finish_cold_switch），
 /// 正式验证以打包产物为准。
 ///
 /// 老账户（无登录凭据，legacy 时期创建）兼容：首次登录即设置初始密码
@@ -468,8 +490,8 @@ pub fn account_launch(
     cold_switch_cleanup(&app);
     // 先释放锁再 spawn：新进程启动时会尝试获取同一把锁
     lock.release();
-    spawn_self(&exe, Some(&account_id))?;
-    app.exit(0);
+    let child = spawn_self(&exe, Some(&account_id))?;
+    finish_cold_switch(&app, child);
     Ok(())
 }
 
@@ -483,8 +505,8 @@ pub fn account_logout(
     let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
     cold_switch_cleanup(&app);
     lock.release();
-    spawn_self(&exe, None)?;
-    app.exit(0);
+    let child = spawn_self(&exe, None)?;
+    finish_cold_switch(&app, child);
     Ok(())
 }
 

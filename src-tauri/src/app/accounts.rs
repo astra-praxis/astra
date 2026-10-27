@@ -285,9 +285,12 @@ fn pid_alive(pid: i32) -> bool {
     }
     #[cfg(windows)]
     {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
         use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
         use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            QueryFullProcessImageNameW,
         };
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
@@ -295,11 +298,38 @@ fn pid_alive(pid: i32) -> bool {
                 return false;
             }
             let mut exit_code: u32 = 0;
-            let alive = windows_sys::Win32::System::Threading::GetExitCodeProcess(handle, &mut exit_code)
-                    != 0
-                    // STILL_ACTIVE 在 windows-sys 0.59 里是 NTSTATUS(i32)，而
-                    // GetExitCodeProcess 写的是 u32，显式转类型再比较
-                    && exit_code == STILL_ACTIVE as u32;
+            let alive = GetExitCodeProcess(handle, &mut exit_code) != 0
+                // STILL_ACTIVE 在 windows-sys 0.59 里是 NTSTATUS(i32)，而
+                // GetExitCodeProcess 写的是 u32，显式转类型再比较
+                && exit_code == STILL_ACTIVE as u32;
+            if !alive {
+                CloseHandle(handle);
+                return false;
+            }
+            // pid 会被系统复用给无关进程：镜像名与当前进程一致才认定是本应用实例
+            let mut buf = [0u16; 1024];
+            let mut len = buf.len() as u32;
+            let alive = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len) != 0
+                && (|| {
+                    let end = buf[..len as usize]
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(len as usize);
+                    let queried = OsString::from_wide(&buf[..end])
+                        .to_string_lossy()
+                        .to_ascii_lowercase();
+                    match std::env::current_exe()
+                        .ok()
+                        .as_deref()
+                        .and_then(std::path::Path::file_name)
+                    {
+                        // 拿不到自身镜像名时退回存活语义，避免误判实例已死
+                        Some(self_name) => {
+                            queried == self_name.to_string_lossy().to_ascii_lowercase()
+                        }
+                        None => true,
+                    }
+                })();
             CloseHandle(handle);
             alive
         }
@@ -701,27 +731,41 @@ mod tests {
         lock.release();
     }
 
+    /// unix：kill(pid, 0) 只能判断存活，无法区分镜像名——任何存活的外来
+    /// pid 都拒绝拿锁（防止实例并发）。
     #[test]
+    #[cfg(unix)]
     fn instance_lock_live_foreign_pid_is_rejected() {
         let root = tmp_root("live");
-        // spawn 一个真实存活短命进程，其 pid 一定存活
-        let mut child = std::process::Command::new(
-            #[cfg(unix)]
-            "/bin/sleep",
-            #[cfg(not(unix))]
-            "cmd",
-        )
-        .args(
-            #[cfg(unix)]
-            ["0.3"],
-            #[cfg(not(unix))]
-            ["/c", "ping", "-n", "1", "127.0.0.1"],
-        )
-        .spawn()
-        .unwrap();
+        let mut child = std::process::Command::new("/bin/sleep")
+            .args(["0.3"])
+            .spawn()
+            .unwrap();
         std::fs::write(root.join(".astra-instance.lock"), child.id().to_string()).unwrap();
         let err = InstanceLock::acquire(&root).unwrap_err();
         assert!(err.contains("已在运行"));
+        let _ = child.wait();
+    }
+
+    /// Windows：pid 存活（exit_code 命中 STILL_ACTIVE）且镜像名比对通过才
+    /// 认定本应用实例。锁文件指向存活的外来进程（cmd.exe）时，属于 pid
+    /// 复用的陈旧锁，应当可抢回——这正是实例锁误报修复的语义。
+    #[test]
+    #[cfg(windows)]
+    fn instance_lock_foreign_image_pid_is_reclaimed() {
+        let root = tmp_root("live");
+        // ping -n 2 让子进程存活约 1 秒，保证探测时仍存活且 exit_code
+        // 命中 STILL_ACTIVE（ping -n 1 有即刻退出的竞态）
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping", "-n", "2", "127.0.0.1"])
+            .spawn()
+            .unwrap();
+        std::fs::write(root.join(".astra-instance.lock"), child.id().to_string()).unwrap();
+        let mut lock = InstanceLock::acquire(&root).unwrap();
+        // 锁已被重写为本进程 pid：证明是「抢回」而非「沿用旧锁」
+        let written = std::fs::read_to_string(root.join(".astra-instance.lock")).unwrap();
+        assert_eq!(written, std::process::id().to_string());
+        lock.release();
         let _ = child.wait();
     }
 }

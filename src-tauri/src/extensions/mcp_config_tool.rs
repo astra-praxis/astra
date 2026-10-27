@@ -313,7 +313,7 @@ impl AgentTool for McpConfigWrite {
         "mcp_config_write"
     }
     fn description(&self) -> &str {
-        "管理用户的 MCP server 配置（写入 ~/.astra/config.toml，需用户确认）。\
+        "管理用户的 MCP server 配置（写入账户对应的 config.toml，需用户确认）。\
          action=upsert 安装或更新（id + command 必填，args/env/allow/required 可选；\
          env 传环境变量名，值从本机环境读取）；action=set_enabled 启停；action=remove 移除。\
          用户说「帮我装 / 接入某个 MCP」时用这里；command 尽量用绝对路径（GUI 下 PATH 净化）"

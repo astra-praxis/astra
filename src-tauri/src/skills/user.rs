@@ -1,4 +1,4 @@
-//! 用户技能库：app_data_dir/skills/<技能名>/ 目录管理。
+//! 用户技能库：<账户 astra-home>/skills/<技能名>/ 目录管理。
 //!
 //! 与 ~/.agents/skills（全局 Git 技能）不同，这里是应用自有的技能库，
 //! 供「我的 Skills」页面导入/新建/多文件编辑，并供 Agent 通过
@@ -356,11 +356,10 @@ pub fn delete_skill_dir(dir: &Path, name: &str) -> Result<(), String> {
 
 // ===== Tauri 命令薄包装 =====
 
-/// 应用技能库目录（app_data_dir/skills，不存在则创建）。
+/// 应用技能库目录（账户模式为 accounts/<id>/astra-home/skills，
+/// legacy 回退 ~/.config/astra/skills；不存在则创建）。
+/// 用户技能是用户自持内容，与 ~/.agents/skills（全局 Git 技能）心智模型一致；
 /// agent.rs 也用它来注册技能发现/读取工具。
-/// 应用技能库目录：~/.config/astra/skills（不存在则创建）。
-/// 用户技能是用户自持内容，放 ~/.config 便于用户在访达中直接查看与编辑；
-/// 与 ~/.agents/skills（全局 Git 技能）心智模型一致。agent.rs 也用它注册技能工具。
 pub fn app_skills_dir(_app: &AppHandle) -> Result<PathBuf, String> {
     // 账户模式下为 accounts/<id>/astra-home/skills（用户技能随账户隔离）；
     // legacy 模式保持 ~/.config/astra/skills 旧位置不变

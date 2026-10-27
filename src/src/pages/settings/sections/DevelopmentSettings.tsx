@@ -42,7 +42,7 @@ export default function DevelopmentSettings() {
     const command = draft?.editorCommand.trim();
     if (!command) return;
     try {
-      // 打开临时目录测试（当前用户目录）
+      // 打开用户主目录测试（~ 由 Rust 侧 expand_tilde 展开为主目录）
       await invoke('open_in_editor', { path: '~', editorCommand: command });
       setTestResult('success');
       setTestMessage(`${command} 启动成功！`);

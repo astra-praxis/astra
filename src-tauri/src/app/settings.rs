@@ -293,11 +293,16 @@ fn powershell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "''"))
 }
 
-/// 路径解析：绝对路径原样返回；相对路径以 base_dir 为基准 join 并做词法
-/// 规范化（处理 . 与 ..，不触碰文件系统，目标不存在也返回预期绝对路径）。
-/// 无 base_dir 的相对路径拒绝解析——静默落在进程/编辑器 cwd 的行为不可预测，
-/// 由调用方传入明确基准（当前工作空间根目录等）。
+/// 路径解析：绝对路径原样返回；`~` / `~/…` 展开为用户主目录；相对路径以
+/// base_dir 为基准 join 并做词法规范化（处理 . 与 ..，不触碰文件系统，目标
+/// 不存在也返回预期绝对路径）。无 base_dir 的相对路径拒绝解析——静默落在
+/// 进程/编辑器 cwd 的行为不可预测，由调用方传入明确基准（当前工作空间根目录等）。
 pub(crate) fn resolve_open_path(path: &str, base_dir: Option<&str>) -> Result<String, String> {
+    // `~` / `~/…` 是 shell 惯例，GUI 进程没有 shell 代为展开，手动展开为主目录；
+    // `~user` 用户名形式不支持，按普通相对路径走后续逻辑
+    if let Some(abs) = expand_tilde(path) {
+        return Ok(abs);
+    }
     // Windows 盘符 C:\、UNC \\server\share、POSIX / 开头都由 std 判定，不手写字符串判断
     if std::path::Path::new(path).is_absolute() {
         return Ok(path.to_string());
@@ -325,6 +330,24 @@ pub(crate) fn resolve_open_path(path: &str, base_dir: Option<&str>) -> Result<St
         }
     }
     Ok(normalized.to_string_lossy().into_owned())
+}
+
+/// `~` 与 `~/…`（含 Windows 的 `~\`）展开为用户主目录绝对路径；
+/// 不是 `~` 开头或主目录不可用时返回 None（`~user` 用户名形式不支持）。
+fn expand_tilde(path: &str) -> Option<String> {
+    let rest = if path == "~" {
+        ""
+    } else {
+        path.strip_prefix("~/")
+            .or_else(|| path.strip_prefix("~\\"))?
+    };
+    let home = dirs::home_dir()?;
+    let buf = if rest.is_empty() {
+        home
+    } else {
+        home.join(rest)
+    };
+    Some(buf.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -523,6 +546,32 @@ mod tests {
         assert!(resolve_open_path("src/main.rs", None).is_err());
         assert!(resolve_open_path("src/main.rs", Some("")).is_err());
         assert!(resolve_open_path("src/main.rs", Some("  ")).is_err());
+    }
+
+    #[test]
+    fn resolve_open_path_expands_tilde_home() {
+        let home = dirs::home_dir().expect("test machine has home dir");
+        // 裸 ~ 展开为主目录，无需 base_dir
+        assert_eq!(
+            resolve_open_path("~", None).unwrap(),
+            home.to_string_lossy().into_owned()
+        );
+        // ~/ 前缀接子路径（Unix 风格）
+        let got = resolve_open_path("~/src/main.rs", None).unwrap();
+        assert_eq!(
+            std::path::Path::new(&got),
+            home.join("src/main.rs").as_path()
+        );
+        // ~/ 优先于 base_dir：即使给了基准也展开到主目录
+        let got2 = resolve_open_path("~/notes.txt", Some("/tmp")).unwrap();
+        assert_eq!(
+            std::path::Path::new(&got2),
+            home.join("notes.txt").as_path()
+        );
+        // ~user 用户名形式不支持：按相对路径处理，无基准时报错
+        assert!(resolve_open_path("~someone/x", None).is_err());
+        // 路径中间的 ~ 不是前缀，不展开
+        assert!(resolve_open_path("a/~b", None).is_err());
     }
 
     #[test]

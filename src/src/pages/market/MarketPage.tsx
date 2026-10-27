@@ -349,8 +349,7 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                       想安装新扩展？
                     </span>
                     <span className="mcp-guide-desc">
-                      回到 Agent 对话直接说，例如：「帮我安装 Playwright 浏览器 MCP」，AI 会下载依赖并写好
-                      {installed?.configPath || 'config.toml'} 配置，保存后回到对话即可使用（当前对话下一句生效，无需新建会话）。
+                      回到 Agent 对话直接说，例如：「帮我安装 Playwright 浏览器 MCP」。
                     </span>
                   </div>
                   <button className="btn-install" onClick={goAgentInstall}>
@@ -487,8 +486,7 @@ export default function MarketPage({ kind }: { kind: 'mcp' | 'skill' }) {
                       想安装新技能？
                     </span>
                     <span className="mcp-guide-desc">
-                      回到 Agent 对话直接说，例如：「帮我安装 docx 技能」，AI 会从 GitHub /
-                      skills.sh 下载并装进技能库目录（{status?.skillsDir || '见技能详情'}），装完用 /技能名 调用。
+                      回到 Agent 对话直接说，例如：「帮我安装 docx 技能」。
                     </span>
                   </div>
                   <button className="btn-install" onClick={goAgentInstall}>

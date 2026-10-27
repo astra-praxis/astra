@@ -27,10 +27,7 @@ pub fn terminate_process_tree(child: &mut Child) {
     let _ = child.wait();
 }
 
-#[cfg(not(unix))]
-pub fn terminate_process_tree(child: &mut Child) {
-    let _ = child.kill();
-}
+// Windows 版本见文件下方（taskkill /T 杀整棵进程树）
 
 /// 按端口强制结束占用进程（兜底措施）
 ///
@@ -56,8 +53,65 @@ pub fn kill_processes_on_port(port: u16) {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 pub fn kill_processes_on_port(_port: u16) {}
+
+/// 终止进程树（Windows）：taskkill /T /F 连同子孙进程（npm→node 等）一起杀；
+/// child.kill() 只杀直接子进程，会漏掉脱离的孙进程。CREATE_NO_WINDOW
+/// 避免闪现控制台窗口。
+#[cfg(windows)]
+pub fn terminate_process_tree(child: &mut Child) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let pid = child.id();
+    if pid > 1 {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    let _ = child.wait();
+}
+
+/// 按端口强制结束占用进程（Windows 兜底）：netstat -ano 找出 LISTENING
+/// 状态占用该端口的 pid，taskkill 整树强杀。
+#[cfg(windows)]
+pub fn kill_processes_on_port(port: u16) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(out) = Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        // 形如：TCP    0.0.0.0:8787    0.0.0.0:0    LISTENING    1234
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() >= 5
+            && cols[0].eq_ignore_ascii_case("TCP")
+            && cols[3].eq_ignore_ascii_case("LISTENING")
+        {
+            let local = cols[1];
+            if local
+                .rsplit_once(':')
+                .map(|(_, p)| p == port.to_string())
+                .unwrap_or(false)
+            {
+                if let Ok(pid) = cols[4].parse::<u32>() {
+                    if pid > 1 {
+                        let _ = Command::new("taskkill")
+                            .args(["/PID", &pid.to_string(), "/T", "/F"])
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .output();
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// 让子进程独立成进程组（Unix），便于后续整组终止
 #[cfg(unix)]

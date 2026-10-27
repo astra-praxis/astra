@@ -7,12 +7,16 @@
 //!
 //! KEK 解析优先级（进程内缓存，每进程至多读一次盘）：
 //! 1. 进程内缓存（登录/解锁后写入）
-//! 2. `.astra-auth.json` 存在 → 锁定态，未验证密码前拒绝一切解密/加密
+//! 2. `.astra-auth.json` 存在 → 锁定态，未验证密码前拒绝一切解密/加密；
+//!    但若 30 天信任凭据有效（验证过一次密码，见下）则免密自动解锁
 //! 3. 本地文件 `<dir>/.astra-kek`（0600，legacy/dev 兜底，零弹窗）
 //!
-//! 冷切换登录态交接：验证成功后 KEK 经一次性 token 文件（APPDATA 根，
-//! 0600，即读即删）交给 `--account` 启动的新进程，避免在 argv/环境变量里
-//! 传秘密，也免去新进程二次输密码。
+//! 30 天免密信任凭据（`.astra-trust.json`，账户 data 目录内）：
+//! 验证过一次密码后，用**设备密钥**（`APPDATA/.astra-device.key`，跨账户
+//! 共享、不在任何账户目录内）包装一份 KEK + 过期时间落盘；有效期内重启/
+//! 切换免密。边界说明：设备密钥与本凭据同属当前 OS 用户可读，这是便利性
+//! 功能，不改变「不抵御同 OS 用户恶意代码」的既有边界；账户目录单独被
+//! 拷走时因缺设备密钥无法解出 KEK。
 //!
 //! 边界说明：**不使用 OS keychain**（会反复弹授权框，用户明确要求弃用）；
 //! 密码仅本地验证，不做云同步；防"敏感数据明文落盘"，不宣称能抵御同一
@@ -24,6 +28,7 @@ use chacha20poly1305::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::RwLock;
 
 /// XChaCha20-Poly1305 nonce 长度
 pub(crate) type XNonceSize = U24;
@@ -150,8 +155,16 @@ pub fn machine_kek(dir: &Path) -> Result<[u8; 32], String> {
 }
 
 fn machine_kek_uncached(dir: &Path) -> Result<[u8; 32], String> {
-    // 锁定态：有登录凭据但本进程未验证密码，拒绝解密/加密
+    // 锁定态：有登录凭据但本进程未验证密码。若 30 天信任凭据有效，
+    // 免密自动解锁（登出态除外——用户已明确要换账户）。
     if auth_file(dir).exists() {
+        if !super::accounts::logged_out() {
+            if let Some(kek) = trust_load(dir) {
+                cache_kek(kek);
+                app_log!(info, "secret", "trust credential accepted, auto-unlocked");
+                return Ok(kek);
+            }
+        }
         return Err("账户处于锁定状态（等待登录）".into());
     }
     // legacy/dev 兜底：本地文件密钥（0600，零弹窗）
@@ -220,13 +233,14 @@ pub fn has_auth(dir: &Path) -> bool {
     auth_file(dir).exists()
 }
 
-/// 是否处于锁定态：设了登录密码且本进程尚未验证
+/// 是否处于锁定态：设了登录密码、本进程尚未验证，且无有效的 30 天信任凭据
 pub fn is_locked(dir: &Path) -> bool {
     has_auth(dir)
         && KEK_CACHE
             .read()
             .map(|guard| guard.is_none())
             .unwrap_or(true)
+        && !trust_valid(dir)
 }
 
 /// Argon2id 派生 32 字节密钥（Params::default：m=19MiB, t=2, p=1）。
@@ -316,11 +330,11 @@ pub fn auth_verify(dir: &Path, password: &str) -> Result<[u8; 32], String> {
     Ok(kek)
 }
 
-/// 登录/解锁：验证密码，KEK 写入进程内缓存。
-pub fn account_unlock(dir: &Path, password: &str) -> Result<(), String> {
+/// 登录/解锁：验证密码，KEK 写入进程内缓存，返回 KEK 供调用方落信任凭据。
+pub fn account_unlock(dir: &Path, password: &str) -> Result<[u8; 32], String> {
     let kek = auth_verify(dir, password)?;
     cache_kek(kek);
-    Ok(())
+    Ok(kek)
 }
 
 /// 更换登录密码：验证旧密码后按新密码重新包装同一 KEK（数据不动）。
@@ -335,6 +349,125 @@ pub fn password_change(dir: &Path, old: &str, new: &str) -> Result<(), String> {
     })?;
     write_auth_file(dir, &kek, new)?;
     Ok(())
+}
+
+// ===== 30 天免密信任凭据 =====
+
+/// 设备密钥路径（APPDATA 根，跨账户共享）。启动时由 lib.rs 设置；
+/// 未设置（如单测）则信任凭据功能整体停用，回退为每次输密码。
+static DEVICE_KEY_PATH: RwLock<Option<std::path::PathBuf>> = RwLock::new(None);
+
+const TRUST_FILE: &str = ".astra-trust.json";
+pub(crate) const DEVICE_KEY_FILE: &str = ".astra-device.key";
+const TRUST_SECS: u64 = 30 * 24 * 3600;
+
+pub fn set_device_key_path(path: std::path::PathBuf) {
+    if let Ok(mut guard) = DEVICE_KEY_PATH.write() {
+        *guard = Some(path);
+    }
+}
+
+fn device_key_path() -> Option<std::path::PathBuf> {
+    DEVICE_KEY_PATH.read().ok().and_then(|guard| guard.clone())
+}
+
+#[derive(Serialize, Deserialize)]
+struct TrustFile {
+    v: u32,
+    /// Unix 秒，过期后免密失效
+    exp: u64,
+    /// KEK 的信封加密（用设备密钥包装）
+    wrapped_kek: String,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn load_or_create_device_key(path: &Path) -> Result<[u8; 32], String> {
+    if let Ok(bytes) = std::fs::read(path) {
+        if bytes.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&bytes);
+            return Ok(key);
+        }
+        return Err(format!(
+            "{} exists but has {} bytes, expected 32",
+            path.display(),
+            bytes.len()
+        ));
+    }
+    let key = random_bytes_32();
+    write_kek_file(path, &key)?; // 同样的 0600 写法，复用
+    Ok(key)
+}
+
+fn load_device_key(path: &Path) -> Option<[u8; 32]> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&bytes);
+    Some(key)
+}
+
+/// 验证成功后落信任凭据：设备密钥包装 KEK + 30 天过期。失败不阻断登录，
+/// 由调用方记录日志。
+pub fn trust_save(dir: &Path, kek: &[u8; 32]) -> Result<(), String> {
+    let Some(dk_path) = device_key_path() else {
+        return Ok(()); // 未配置设备密钥路径：信任凭据功能停用
+    };
+    let dk = load_or_create_device_key(&dk_path)?;
+    let file = TrustFile {
+        v: 1,
+        exp: now_secs() + TRUST_SECS,
+        wrapped_kek: encrypt_to_envelope(&dk, kek)?,
+    };
+    let json = serde_json::to_string(&file).map_err(|e| format!("serialize trust file: {e}"))?;
+    let path = dir.join(TRUST_FILE);
+    std::fs::write(&path, json).map_err(|e| format!("write {TRUST_FILE}: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// 读信任凭据：过期/损坏/设备密钥不符 → None（过期时顺带清理文件）
+pub fn trust_load(dir: &Path) -> Option<[u8; 32]> {
+    let dk_path = device_key_path()?;
+    let path = dir.join(TRUST_FILE);
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let file: TrustFile = serde_json::from_str(&raw).ok()?;
+    if now_secs() >= file.exp {
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+    let dk = load_device_key(&dk_path)?;
+    let plain = decrypt_envelope(&dk, &file.wrapped_kek)?;
+    if plain.len() != 32 {
+        return None;
+    }
+    let mut kek = [0u8; 32];
+    kek.copy_from_slice(&plain);
+    Some(kek)
+}
+
+/// 有效性检查（含解包验证）：供 is_locked / 账户列表使用。
+/// 不做只查过期时间的廉价版——设备密钥不符时凭据不可用，锁定态必须
+/// 如实上报，否则会出现「未锁定但解密全失败」的坏 UI 状态。
+pub fn trust_valid(dir: &Path) -> bool {
+    trust_load(dir).is_some()
+}
+
+/// 清除信任凭据（更换密码后强制重登一次）
+pub fn trust_clear(dir: &Path) {
+    let _ = std::fs::remove_file(dir.join(TRUST_FILE));
 }
 
 #[cfg(test)]
@@ -434,5 +567,80 @@ mod tests {
         assert!(auth_init(dir.path(), "12345").is_err()); // < 6
         assert!(auth_init(dir.path(), &"x".repeat(129)).is_err()); // > 128
         assert!(!has_auth(dir.path()));
+    }
+
+    // ===== 30 天信任凭据 =====
+
+    /// 设置进程级设备密钥路径并在测试结束后还原（全局状态，串行风险低：
+    /// 其他测试的临时目录内无信任文件，设备路径值对它们无影响）
+    fn with_device_path(dir: &Path) {
+        set_device_key_path(dir.join(DEVICE_KEY_FILE));
+    }
+
+    #[test]
+    fn trust_roundtrip_and_validity() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        with_device_path(root.path());
+
+        let kek = test_kek();
+        trust_save(dir.path(), &kek).unwrap();
+        assert!(trust_valid(dir.path()));
+        assert_eq!(trust_load(dir.path()).unwrap(), kek);
+
+        // 未设过信任的目录 → None
+        let other = tempfile::tempdir().unwrap();
+        assert!(trust_load(other.path()).is_none());
+        assert!(!trust_valid(other.path()));
+    }
+
+    #[test]
+    fn trust_expired_is_none_and_cleaned() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        with_device_path(root.path());
+
+        let kek = test_kek();
+        trust_save(dir.path(), &kek).unwrap();
+        // 手工改写过期时间
+        let path = dir.path().join(TRUST_FILE);
+        let mut file: TrustFile =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        file.exp = now_secs().saturating_sub(1);
+        std::fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+
+        assert!(!trust_valid(dir.path()));
+        assert!(trust_load(dir.path()).is_none());
+        assert!(!path.exists(), "过期凭据应被顺带清理");
+    }
+
+    #[test]
+    fn trust_rejected_with_wrong_device_key() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        with_device_path(root.path());
+        let kek = test_kek();
+
+        trust_save(dir.path(), &kek).unwrap();
+        assert_eq!(trust_load(dir.path()).unwrap(), kek);
+
+        // 设备密钥被更换（如重置）：已落盘的凭据解不开，回退到密码登录
+        let dk_path = root.path().join(DEVICE_KEY_FILE);
+        std::fs::write(&dk_path, random_bytes_32()).unwrap();
+        assert!(trust_load(dir.path()).is_none());
+        assert!(!trust_valid(dir.path()));
+    }
+
+    #[test]
+    fn trust_cleared_forces_relogin() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        with_device_path(root.path());
+
+        let kek = test_kek();
+        trust_save(dir.path(), &kek).unwrap();
+        trust_clear(dir.path());
+        assert!(!trust_valid(dir.path()));
+        assert!(trust_load(dir.path()).is_none());
     }
 }

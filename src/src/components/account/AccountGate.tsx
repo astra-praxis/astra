@@ -8,6 +8,9 @@
  * 3. legacy 且无账户：首次使用——创建账户（名称 + 登录密码）后自动登录
  * 4. account 且未锁定：放行主应用
  *
+ * 「记住 30 天」：验证过一次密码的账户在 30 天信任凭据有效期内为 trusted，
+ * 选择器点选后免密直接进入（后端用设备密钥解包 KEK）；失效则回退密码表单。
+ *
  * 登录 = 热切换：后端验证密码 → 进程内换绑账户（重置 AgentState、
  * 重绑数据目录与 KEK）→ 前端整页 reload 重新拉取状态。
  * 前端不传递身份，账户归属由后端 ACTIVE 状态决定（见 src-tauri/src/app/accounts.rs）。
@@ -24,6 +27,8 @@ interface Account {
   created_at: number;
   status: string;
   has_auth?: boolean;
+  /** 30 天信任凭据有效：点选后免密直接进入 */
+  trusted?: boolean;
 }
 
 interface AccountStatus {
@@ -39,6 +44,8 @@ export default function AccountGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AccountStatus | null>(null);
   // 登录选择器里点选的用户（null = 显示头像网格）
   const [selected, setSelected] = useState<Account | null>(null);
+  // 正在免密进入的账户（trusted 快速通道，失败时回退密码表单）
+  const [autoEntering, setAutoEntering] = useState<Account | null>(null);
 
   useEffect(() => {
     invoke<AccountStatus>('account_status')
@@ -92,21 +99,42 @@ export default function AccountGate({ children }: { children: ReactNode }) {
       </GateShell>
     ) : (
       <GateShell subtitle="选择账户，数据各自独立">
-        <div className="account-gate__picker" role="listbox" aria-label="选择账户">
-          {status.accounts.map((a) => (
-            <button
-              key={a.account_id}
-              type="button"
-              className="account-gate__user"
-              role="option"
-              aria-selected={false}
-              onClick={() => setSelected(a)}
-            >
-              <UserAvatar name={a.display_name} size={64} />
-              <span className="account-gate__user-name">{formatAccountName(a.display_name)}</span>
-            </button>
-          ))}
-        </div>
+        {autoEntering ? (
+          <div className="account-gate__picked">
+            <UserAvatar name={autoEntering.display_name} size={64} />
+            <p className="account-gate__entering">正在进入…</p>
+          </div>
+        ) : (
+          <div className="account-gate__picker" role="listbox" aria-label="选择账户">
+            {status.accounts.map((a) => (
+              <button
+                key={a.account_id}
+                type="button"
+                className="account-gate__user"
+                role="option"
+                aria-selected={false}
+                onClick={() => {
+                  // 受信账户（30 天内验证过密码）：免密直接进入；
+                  // 失败（凭据被删/解包失败等）回退到密码表单
+                  if (a.trusted) {
+                    setAutoEntering(a);
+                    invoke('account_switch', { accountId: a.account_id })
+                      .then(() => window.location.reload())
+                      .catch(() => {
+                        setAutoEntering(null);
+                        setSelected(a);
+                      });
+                  } else {
+                    setSelected(a);
+                  }
+                }}
+              >
+                <UserAvatar name={a.display_name} size={64} />
+                <span className="account-gate__user-name">{formatAccountName(a.display_name)}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </GateShell>
     );
   }

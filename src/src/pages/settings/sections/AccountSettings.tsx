@@ -1,8 +1,9 @@
 /**
- * 设置中心「账户」分区：本地多账户（praxis 式登录，冷切换架构）。
+ * 设置中心「账户」分区：本地多账户（praxis 式登录，热切换架构）。
  *
  * - 显示当前启动模式（账户 / legacy）与当前账户
- * - 已有账户列表：「启动」弹窗输密码 → 冷切换（老账户首次启动设初始密码）
+ * - 已有账户列表：「启动」→ 验证密码热切换；30 天内验证过密码的账户
+ *   （trusted）免密直接进入
  * - 「创建账户」/「更换登录密码」均为弹窗，不在页面平铺表单
  *
  * legacy 模式用户经此进入多账户体系（账户门在 legacy 模式渲染登录选择器，
@@ -24,6 +25,8 @@ interface Account {
   created_at: number;
   status: string;
   has_auth?: boolean;
+  /** 30 天信任凭据有效：启动时免密直接进入 */
+  trusted?: boolean;
 }
 
 interface AccountStatus {
@@ -51,11 +54,16 @@ export default function AccountSettings() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  async function launch(accountId: string, password: string) {
+  async function launch(accountId: string, password?: string) {
     setError('');
     try {
-      // 热切换：进程内换绑目标账户，成功后整页 reload 以新账户身份重建
-      await invoke('account_switch', { accountId, password });
+      // 热切换：进程内换绑目标账户，成功后整页 reload 以新账户身份重建。
+      // 无 password = 走 30 天信任凭据免密通道（trusted 账户）
+      if (password === undefined) {
+        await invoke('account_switch', { accountId });
+      } else {
+        await invoke('account_switch', { accountId, password });
+      }
       window.location.reload();
     } catch (e) {
       setError(String(e));
@@ -84,7 +92,7 @@ export default function AccountSettings() {
         title="已有账户"
         desc={
           status && status.accounts.length > 0
-            ? '启动需输入该账户的登录密码；老账户首次启动时设置初始密码'
+            ? '30 天内登录过的账户免密直接进入；其余需输入登录密码'
             : '还没有账户，创建后以独立身份使用'
         }
       >
@@ -113,12 +121,20 @@ export default function AccountSettings() {
                     </span>
                   )}
                 </span>
-                {a.has_auth !== true && <span className="acct-list__initial">首次登录设密码</span>}
                 {status.account_id !== a.account_id && (
                   <button
                     type="button"
                     className="acct-list__launch"
-                    onClick={() => setDialog({ kind: 'launch', account: a })}
+                    onClick={() => {
+                      // 受信账户免密直接启动；失败（凭据失效等）回退弹窗输密码
+                      if (a.trusted) {
+                        launch(a.account_id).catch(() => {
+                          setDialog({ kind: 'launch', account: a });
+                        });
+                      } else {
+                        setDialog({ kind: 'launch', account: a });
+                      }
+                    }}
                   >
                     <UserRoundCog size={13} strokeWidth={2} />
                     启动
@@ -227,7 +243,7 @@ function CreateAccountModal({
       onCreated();
       reset();
       onClose();
-      // 创建成功即冷切换进入新账户（首个账户自动迁移 legacy 数据）
+      // 创建成功即热切换进入新账户（首个账户自动迁移 legacy 数据）
       await onLaunch(account.account_id, password);
     } catch (err) {
       setError(String(err));
@@ -326,7 +342,7 @@ function LaunchAccountModal({
 }: {
   account: Account;
   onClose: () => void;
-  onLaunch: (accountId: string, password: string) => Promise<void>;
+  onLaunch: (accountId: string, password?: string) => Promise<void>;
 }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -340,7 +356,7 @@ function LaunchAccountModal({
     setError('');
     try {
       await onLaunch(account.account_id, password);
-      // 成功时进程已退出，走不到这里
+      // 成功时整页 reload，走不到这里
     } catch {
       // onLaunch 已 setError 并抛出，这里恢复可编辑
     } finally {
@@ -366,29 +382,28 @@ function LaunchAccountModal({
             className="btn-save"
             disabled={busy || !password}
           >
-            {busy ? '启动中…' : needInit ? '设置并启动' : '启动'}
+            {busy ? '启动中…' : '启动'}
           </button>
         </>
       }
     >
       <form id="launch-account-form" className="acct-modal-form" onSubmit={submit}>
         <label className="acct-modal-form__field">
-          <span>{needInit ? '设置登录密码' : '登录密码'}</span>
+          <span>登录密码</span>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={needInit ? '6-128 位' : '输入该账户的登录密码'}
+            placeholder="输入该账户的登录密码"
             maxLength={128}
             autoFocus
             disabled={busy}
           />
         </label>
         {needInit && (
-          <p className="acct-modal-form__hint">该账户还没有登录密码，此次输入的密码即设为其登录密码</p>
+          <p className="acct-modal-form__hint">该账户还没有登录密码，此次输入的密码将设为其登录密码</p>
         )}
         {error && <p className="acct-modal-form__error">{error}</p>}
-        <p className="acct-modal-form__hint">启动会退出当前进程并以该账户重新进入</p>
       </form>
     </Modal>
   );

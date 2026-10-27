@@ -188,6 +188,14 @@
     animation: gate-enter 0.22s ease-out both;
   }
 
+  // 免密进入中的提示文案
+  &__entering {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+    animation: gate-enter 0.22s ease-out both;
+  }
+
   &__form {
     display: flex;
     flex-direction: column;

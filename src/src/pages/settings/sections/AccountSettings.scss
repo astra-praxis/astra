@@ -80,12 +80,6 @@
     font-size: 11px;
   }
 
-  // 老账户（无凭据）首次启动需设初始密码的提示角标
-  &__initial {
-    font-size: 11px;
-    color: var(--warning-text, #f59e0b);
-  }
-
   &__launch {
     display: inline-flex;
     align-items: center;

@@ -192,6 +192,9 @@ pub fn run() {
                     std::process::exit(1);
                 }
             };
+            // 设备密钥用于「记住 30 天」信任凭据（包装 KEK），路径进程级全局；
+            // 必须在 init_from_args 之前设置好，启动自动解锁才能吃到
+            app::secret::set_device_key_path(app_root.join(app::secret::DEVICE_KEY_FILE));
             match app::accounts::init_from_args(&app_root) {
                 Ok(runtime) => {
                     // 账户模式：ASTRA_HOME 指向账户私有 astra-home，

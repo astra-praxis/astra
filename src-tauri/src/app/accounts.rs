@@ -46,6 +46,9 @@ pub struct Account {
     /// false 的账户首次登录时需设置初始密码。
     #[serde(default, skip_serializing)]
     pub has_auth: bool,
+    /// 30 天免密信任凭据是否有效（读取时动态计算，不落盘）
+    #[serde(default, skip_serializing)]
+    pub trusted: bool,
 }
 
 /// 进程绑定的活动账户上下文（setup 阶段初始化一次，之后只读）
@@ -64,6 +67,11 @@ static ACTIVE: RwLock<Option<AccountRuntime>> = RwLock::new(None);
 /// （避免后台写入落到 legacy 目录），account_status 返回 login 模式让
 /// 前端渲染账户选择器；下次 account_switch 成功后清除。
 static LOGGED_OUT: AtomicBool = AtomicBool::new(false);
+
+/// 登出态查询（secret.rs 自动解锁时用：登出中不得免密重新拿到 KEK）
+pub(crate) fn logged_out() -> bool {
+    LOGGED_OUT.load(Ordering::Relaxed)
+}
 
 /// 从启动参数解析 `--account=<account_id>` 并绑定活动账户。
 /// 无参数 → legacy 模式（Ok(None)），保持旧版本行为。
@@ -167,9 +175,12 @@ fn read_accounts(app_data_root: &std::path::Path) -> Result<Vec<Account>, String
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取账户列表失败: {e}"))?;
     let mut accounts: Vec<Account> =
         serde_json::from_str(&raw).map_err(|e| format!("解析账户列表失败: {e}"))?;
-    // has_auth 是运行时状态（登录密码凭据文件是否存在），不落盘、每次读取时计算
+    // has_auth / trusted 是运行时状态（凭据文件是否存在 / 信任凭据是否有效），
+    // 不落盘、每次读取时计算
     for a in accounts.iter_mut() {
-        a.has_auth = secret::has_auth(&account_dir(app_data_root, &a.account_id).join("data"));
+        let data = account_dir(app_data_root, &a.account_id).join("data");
+        a.has_auth = secret::has_auth(&data);
+        a.trusted = a.has_auth && secret::trust_valid(&data);
     }
     Ok(accounts)
 }
@@ -369,6 +380,7 @@ pub fn account_create(
         created_at: now_ms(),
         status: "active".into(),
         has_auth: false,
+        trusted: false,
     };
     accounts.push(account.clone());
     write_accounts(&root, &accounts)?;
@@ -397,9 +409,13 @@ pub fn account_create(
             Err(e) => app_log!(error, "accounts", "legacy migration failed: {e}"),
         }
     }
-    // 设置登录密码：承接 legacy KEK（若有）或生成新 KEK，密码包装后落 auth 文件
+    // 设置登录密码：承接 legacy KEK（若有）或生成新 KEK，密码包装后落 auth 文件；
+    // 同时落 30 天信任凭据（创建即免密进入）
     let data_dir = dir.join("data");
-    secret::auth_init(&data_dir, &password)?;
+    let kek = secret::auth_init(&data_dir, &password)?;
+    if let Err(e) = secret::trust_save(&data_dir, &kek) {
+        app_log!(error, "accounts", "trust save failed: {e}");
+    }
     Ok(account)
 }
 
@@ -420,10 +436,10 @@ fn switch_cleanup_processes(app: &tauri::AppHandle) {
 
 /// 热切换：进程内换绑到目标账户，不重启进程。
 ///
-/// 验证密码 → 取消运行中 Run / 清理会话缓存与扩展连接 / 关闭记忆宿主 →
-/// 重绑活动账户（data_dir / astra_home / ASTRA_HOME 随之切换）→
-/// 缓存新 KEK → 日志重定向 → 重建记忆宿主。前端收到 Ok 后整页重载，
-/// 全部 store 重建；会话存储在下次 open 时自动指向新账户目录。
+/// 验证密码（或 30 天信任凭据免密）→ 取消运行中 Run / 清理会话缓存与扩展
+/// 连接 / 关闭记忆宿主 → 重绑活动账户（data_dir / astra_home / ASTRA_HOME
+/// 随之切换）→ 缓存新 KEK → 日志重定向 → 重建记忆宿主。前端收到 Ok 后
+/// 整页重载，全部 store 重建；会话存储在下次 open 时自动指向新账户目录。
 ///
 /// 老账户（无登录凭据，legacy 时期创建）兼容：首次登录即设置初始密码
 /// （auth_init 承接其现有文件 KEK，旧密文不受影响）。
@@ -431,7 +447,7 @@ fn switch_cleanup_processes(app: &tauri::AppHandle) {
 pub async fn account_switch(
     app: tauri::AppHandle,
     account_id: String,
-    password: String,
+    password: Option<String>,
 ) -> Result<(), String> {
     let root = app
         .path()
@@ -444,12 +460,24 @@ pub async fn account_switch(
         .cloned()
         .ok_or_else(|| format!("账户不存在: {account_id}"))?;
     let data_dir = account_dir(&root, &account_id).join("data");
-    // 登录验证：已有凭据 → 验证密码取 KEK；无凭据（老账户）→ 首次登录设初始密码
+    // 登录验证：已有凭据 → 验证密码或 30 天信任凭据免密；
+    // 无凭据（老账户）→ 首次登录必须输密码（设初始密码）
     let kek = if secret::has_auth(&data_dir) {
-        secret::auth_verify(&data_dir, &password)?
+        match password.as_deref().filter(|p| !p.is_empty()) {
+            Some(p) => secret::auth_verify(&data_dir, p)?,
+            None => secret::trust_load(&data_dir).ok_or("此账户需要输入密码登录")?,
+        }
     } else {
-        secret::auth_init(&data_dir, &password)?
+        let p = password
+            .as_deref()
+            .filter(|p| !p.is_empty())
+            .ok_or("此账户首次登录需设置密码")?;
+        secret::auth_init(&data_dir, p)?
     };
+    // 记住 30 天：设备密钥包装 KEK 落信任凭据（失败仅记录，不影响登录）
+    if let Err(e) = secret::trust_save(&data_dir, &kek) {
+        app_log!(error, "accounts", "trust save failed: {e}");
+    }
 
     // 1. 清理旧账户的进程内状态（Run / 会话缓存 / 扩展连接 / 记忆宿主）
     let agent_state = app.state::<crate::agent::AgentState>();
@@ -489,6 +517,8 @@ pub async fn account_switch(
 /// 登出态下 account_status 返回 login 模式，前端重载后渲染账户选择器。
 /// 不换绑（保持旧目录绑定，避免后台写入落到 legacy 目录）；
 /// 下次 account_switch 成功后清除登出标志。
+/// 信任凭据保留：30 天内切回该账户免密（登出态下 machine_kek 不会
+/// 自动解锁，免密仅发生在用户显式点选该账户时）。
 #[tauri::command]
 pub async fn account_logout(app: tauri::AppHandle) -> Result<(), String> {
     let agent_state = app.state::<crate::agent::AgentState>();
@@ -508,12 +538,15 @@ pub(crate) struct InstanceLockState(pub(crate) std::sync::Mutex<InstanceLock>);
 
 // ===== 账户登录密码（praxis 式登录：选用户 → 输密码 → 进应用） =====
 
-/// 解锁：验证密码，KEK 进程内缓存；随后补做被锁定跳过的初始化
-/// （记忆宿主）。前端解锁成功后刷新页面即可正常使用。
+/// 解锁：验证密码，KEK 进程内缓存并落 30 天信任凭据；随后补做被锁定
+/// 跳过的初始化（记忆宿主）。前端解锁成功后刷新页面即可正常使用。
 #[tauri::command]
 pub fn account_unlock(app: tauri::AppHandle, password: String) -> Result<(), String> {
     let dir = crate::app::accounts::data_dir(&app)?;
-    crate::app::secret::account_unlock(&dir, &password)?;
+    let kek = crate::app::secret::account_unlock(&dir, &password)?;
+    if let Err(e) = crate::app::secret::trust_save(&dir, &kek) {
+        app_log!(error, "accounts", "trust save failed: {e}");
+    }
     app_log!(info, "accounts", "account unlocked");
     crate::init_memory_host(&app);
     Ok(())
@@ -529,6 +562,8 @@ pub fn account_password_change(
 ) -> Result<(), String> {
     let dir = crate::app::accounts::data_dir(&app)?;
     crate::app::secret::password_change(&dir, &old_password, &new_password)?;
+    // 旧信任凭据作废：换密码后强制重登一次（下次登录重新建立）
+    crate::app::secret::trust_clear(&dir);
     app_log!(info, "accounts", "login password changed");
     Ok(())
 }
@@ -556,6 +591,7 @@ mod tests {
             created_at: 1,
             status: "active".into(),
             has_auth: false,
+            trusted: false,
         });
         write_accounts(&root, &accounts).unwrap();
         let got = read_accounts(&root).unwrap();
@@ -590,6 +626,7 @@ mod tests {
             created_at: 1,
             status: "active".into(),
             has_auth: false,
+            trusted: false,
         });
         write_accounts(&root, &accounts).unwrap();
         let rt = resolve_account(&root, Some("abc123".into()))

@@ -482,7 +482,6 @@ export default function AgentPage() {
                 : null,
             project_root: projectPath || null,
             system_prompt: systemPrompt.trim() || null,
-            max_turns: useAgentStore.getState().maxTurns,
             auto_compact_tokens: useAgentStore.getState().autoCompactTokens,
             image_recognition: useAgentStore.getState().imageRecognition,
             thinking_enabled: useAgentStore.getState().thinkingEnabled,
@@ -526,33 +525,32 @@ export default function AgentPage() {
     await doSend(raw + spilled.displaySuffix + withFiles.displaySuffix, parsed.skill, withFiles.text);
   }, [input, running, fireCatInteraction, parseSendInput, doSend, takeSpill, takePastedFiles]);
 
-  /** 失败卡片「重试 / 编辑后重发」：回退到出错前（含工作区还原）后重发或回填。
-   *  找不到快照时降级为仅回退对话（非 git 项目 / 本功能上线前的会话） */
+  /** 失败卡片「重试 / 编辑后重发」：不做回档、不产生归档，完整对话记录保持显示。
+   *  重试 = 同一消息原样追加重发；编辑后重发 = 回填输入框改完再发。
+   *  两者都是追加到当前对话末尾，模型上下文保留失败尝试的现场 */
   const handleFailureRewind = useCallback(
     async (mode: 'retry' | 'edit') => {
       if (running || settling) return;
-      const lastUser = [...entries].reverse().find(
-        (e): e is Extract<Entry, { kind: 'user' }> => e.kind === 'user',
-      );
-      if (!lastUser) return;
+      let lastUserIdx = -1;
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].kind === 'user') {
+          lastUserIdx = i;
+          break;
+        }
+      }
+      if (lastUserIdx < 0) return;
+      const lastUser = entries[lastUserIdx];
+      if (lastUser.kind !== 'user') return;
       setEditing(null);
-      try {
-        const result = await rewindToUserTurn(1, true);
-        if (!result.workspace_restored) {
-          setError('已回退对话（项目文件未还原：找不到该轮的快照）');
-        }
-        if (mode === 'edit') {
-          setInput(lastUser.text);
-          requestAnimationFrame(() => composerRef.current?.focusEnd());
-        } else {
-          const parsed = parseSendInput(lastUser.text);
-          if (parsed) await doSend(lastUser.text, parsed.skill, parsed.text);
-        }
-      } catch (e) {
-        setError(`回退失败：${String(e)}`);
+      if (mode === 'edit') {
+        setInput(lastUser.text);
+        requestAnimationFrame(() => composerRef.current?.focusEnd());
+      } else {
+        const parsed = parseSendInput(lastUser.text);
+        if (parsed) await doSend(lastUser.text, parsed.skill, parsed.text);
       }
     },
-    [running, settling, sessionId, entries, rewindToUserTurn, setError, setInput, parseSendInput, doSend],
+    [running, settling, entries, setInput, parseSendInput, doSend],
   );
 
   /** 历史用户消息「编辑重发」：只记回退意图并回填输入框（真正回退发生在发送时，

@@ -495,8 +495,6 @@ interface AgentState extends RunWindow {
   sessions: AgentSessionMeta[];
   /** 多级放权：off 全部弹卡 / project 项目内自动批准 / workspace 工作空间内自动批准 / all 全部自动批准 */
   autoMode: AutoMode;
-  /** Agent 最大续轮数（防无限工具循环预算，默认 50） */
-  maxTurns: number;
   /** 上下文自动压缩阈值（估算 token 数，默认 60000，0 = 关闭） */
   autoCompactTokens: number;
   /** Local preference; existing sessions retain their backend-bound consent. */
@@ -521,8 +519,6 @@ interface AgentState extends RunWindow {
   setProjectPath: (v: string) => void;
   /** 切换多级放权级别（同步到后端 + localStorage 持久化） */
   setAutoMode: (v: AutoMode) => void;
-  /** 设置最大续轮数（localStorage 持久化，新会话生效） */
-  setMaxTurns: (v: number) => void;
   /** 设置自动压缩阈值（localStorage 持久化，0 = 关闭） */
   setAutoCompactTokens: (v: number) => void;
   setRunState: (running: boolean, status: string | null) => void;
@@ -594,7 +590,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     typeof localStorage === 'undefined' ? null : localStorage.getItem('astra-agent-automode'),
     typeof localStorage === 'undefined' ? null : localStorage.getItem('astra-agent-autoapprove'),
   ),
-  maxTurns: Number(localStorage?.getItem('astra-agent-maxturns')) || 50,
   autoCompactTokens: parseAutoCompact(localStorage?.getItem('astra-agent-autocompact')),
   imageRecognition: typeof localStorage !== 'undefined' && localStorage.getItem('astra-agent-image-recognition') === '1',
   setImageRecognition: (enabled) => {
@@ -636,11 +631,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return { queue: [...s.queue, item] };
     }),
   removeQueued: (id) => set((s) => ({ queue: s.queue.filter((q) => q.id !== id) })),
-  setMaxTurns: (v) => {
-    const n = Number.isFinite(v) && v >= 1 ? Math.floor(v) : 50;
-    set({ maxTurns: n });
-    localStorage.setItem('astra-agent-maxturns', String(n));
-  },
   setAutoCompactTokens: (v) => {
     const n = Number.isFinite(v) && v >= 0 ? Math.floor(v) : 60000;
     set({ autoCompactTokens: n });

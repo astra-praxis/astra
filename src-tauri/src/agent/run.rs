@@ -5,7 +5,7 @@ use agent_core::model::ImageContent;
 use agent_core::skill_tools::truncate_desc;
 use agent_core::{
     Envelope, MessageContent, ModelBackend, PermissionBridge, RigBackend, ThreadConfig,
-    DEFAULT_AUTO_COMPACT_TOKENS, DEFAULT_MAX_TURNS,
+    DEFAULT_AUTO_COMPACT_TOKENS,
 };
 use base64::Engine as _;
 use serde::Deserialize;
@@ -26,6 +26,11 @@ pub struct AgentImageInput {
     pub height: u32,
 }
 
+/// 轮数兑底（对齐 Zed agent 循环：工具调用不设次数上限，失控循环由上下文压缩、
+/// 模型 token 上限与用户取消自然刹车，这里只留轮数一道最后防线）。
+/// 不向用户暴露配置；特殊场景仍可经 AgentStartReq 覆盖
+const LOOP_GUARD_MAX_TURNS: u32 = 9999;
+
 #[derive(Debug, Deserialize)]
 pub struct AgentStartReq {
     /// API 来源：provider_id 与 model_port 二选一
@@ -38,6 +43,8 @@ pub struct AgentStartReq {
     pub system_prompt: Option<String>,
     /// 最大续轮数（不传用 agent-core 默认）
     pub max_turns: Option<u32>,
+    /// 单次任务工具调用预算（0 = 不限制；不传用 agent-core 默认 200）
+    pub max_tool_calls: Option<u32>,
     /// 上下文自动压缩阈值（估算 token 数；0 或 None = 关闭）
     pub auto_compact_tokens: Option<u64>,
     /// 用户通过 /技能名 指定的技能（内容注入本次用户消息）
@@ -314,7 +321,12 @@ pub async fn agent_start_run(
             }
             let mut config = ThreadConfig::new(session_id.clone(), system_prompt);
             config.project_root = project_root.clone();
-            config.max_turns = req.max_turns.unwrap_or(DEFAULT_MAX_TURNS);
+            config.max_turns = req.max_turns.unwrap_or(LOOP_GUARD_MAX_TURNS);
+            // 工具调用不设次数上限（对齐 Zed）：隐性预算 = 上下文窗口
+            // （auto_compact 压缩 → 撞模型 token 上限自然终止）+ 用户取消；
+            // 轮数 9999 兑底。AgentStartReq.max_tool_calls 保留配置口子：
+            // >0 显式设限，0 / 不传 = 不限制
+            config.max_tool_calls = req.max_tool_calls.filter(|&n| n > 0);
             config.auto_compact_tokens = req
                 .auto_compact_tokens
                 .or(Some(DEFAULT_AUTO_COMPACT_TOKENS))

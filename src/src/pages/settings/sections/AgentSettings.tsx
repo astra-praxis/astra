@@ -1,7 +1,8 @@
 /**
- * Agent 行为：多级放权 / 最大轮数 / 自动压缩 / 图片识别。
+ * Agent 行为：多级放权 / 自动压缩 / 图片识别。
  * 全部经 agent store 即时生效（localStorage 持久化，放权级别同步后端），
  * 不走底部保存栏 —— 与主题同属「即时生效」类。
+ * 轮数 / 工具调用等防循环预算不在此暴露：后端内部兑底 9999，避免任务被预算报错打断。
  */
 import SettingsSection from '../components/SettingsSection';
 import SettingsRow from '../components/SettingsRow';
@@ -48,8 +49,6 @@ function Switch({ on, onToggle, title }: { on: boolean; onToggle: () => void; ti
 export default function AgentSettings() {
   const autoMode = useAgentStore((s) => s.autoMode);
   const setAutoMode = useAgentStore((s) => s.setAutoMode);
-  const maxTurns = useAgentStore((s) => s.maxTurns);
-  const setMaxTurns = useAgentStore((s) => s.setMaxTurns);
   const autoCompactTokens = useAgentStore((s) => s.autoCompactTokens);
   const setAutoCompactTokens = useAgentStore((s) => s.setAutoCompactTokens);
   const imageRecognition = useAgentStore((s) => s.imageRecognition);
@@ -81,23 +80,6 @@ export default function AgentSettings() {
             {AUTO_MODE_OPTIONS.find((o) => o.value === autoMode)?.desc}
           </p>
         </div>
-      </SettingsRow>
-
-      <SettingsRow
-        title="最大执行轮数"
-        desc="Agent 单次任务内「模型请求 → 工具执行」的最大循环次数，防止无限工具循环。超出后任务报错结束，修改后新会话生效。"
-      >
-        <input
-          type="number"
-          min={1}
-          max={200}
-          value={maxTurns}
-          className="agent-perm-input"
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (Number.isFinite(n) && n >= 1) setMaxTurns(n);
-          }}
-        />
       </SettingsRow>
 
       <SettingsRow

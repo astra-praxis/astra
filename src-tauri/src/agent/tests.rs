@@ -1321,3 +1321,187 @@ async fn truncation_real_model_large_file() {
     eprintln!("[trunc-run] output.md ITEM lines: {written_lines}/400");
     eprintln!("[trunc-run] OK: no silent completion; tool work was done");
 }
+
+// ===== 子 Agent 委托端到端（SUBAGENT_SPEC 步骤③3.3）=====
+// 复刻 agent_start_run 的协调器装配：build_registry → 协调器（快照=MCP
+// attach 前的基础注册表）→ delegate_task 工具注册 → 白名单 Confirm。
+// 全程走真实宿主装配，mock 只替换模型流；验证任务创建/查询/取消收口
+// 与「父取消不留孤儿子任务」。
+
+async fn subagent_registry_fixture() -> agent_core::ToolRegistry {
+    // 真实宿主注册表（无项目根：chat 形态，工具集最全）
+    build_registry(
+        "sess-subagent",
+        None,
+        None,
+        Arc::new(NoQuestions),
+        agent_core::net_tools::SearchEngine::default(),
+        Arc::new(agent_core::shell_background::ProcessManager::new()),
+        Arc::new(agent_core::TaskManager::new(8, None)),
+        None,
+        None,
+    )
+}
+
+#[tokio::test]
+async fn delegate_task_end_to_end_via_host_registry_and_policy() {
+    let base_registry = subagent_registry_fixture().await;
+    #[derive(Default)]
+    struct TurnCounter {
+        calls: Mutex<Vec<agent_core::ModelRequest>>,
+    }
+    #[async_trait::async_trait]
+    impl ModelBackend for TurnCounter {
+        fn capabilities(&self) -> agent_core::ModelCapability {
+            agent_core::ModelCapability {
+                tool_call: true,
+                ..agent_core::ModelCapability::default()
+            }
+        }
+        async fn stream_completion(
+            &self,
+            request: agent_core::ModelRequest,
+        ) -> agent_core::Result<agent_core::model::DeltaStream> {
+            self.calls.lock().unwrap().push(request);
+            Ok(Box::pin(futures_util::stream::iter(vec![Ok(
+                agent_core::Delta::Text {
+                    text: "子任务结论".into(),
+                },
+            )])))
+        }
+    }
+    let backend = Arc::new(TurnCounter::default());
+    let child_backend = Arc::new(agent_core::subagent::ChildRunBackend::new());
+    let global_tasks = Arc::new(
+        agent_core::TaskManager::new(16, None)
+            .with_backend(Arc::clone(&child_backend) as Arc<dyn agent_core::TaskBackend>),
+    );
+
+    // agent_start_run 的装配顺序：快照（attach 前）→ 协调器 → 注册工具
+    let coordinator = Arc::new(
+        agent_core::subagent::DelegationCoordinator::new(
+            "sess-subagent",
+            backend.clone(),
+            base_registry.clone(),
+            global_tasks.clone(),
+            child_backend,
+        )
+        .with_policy(host_tool_policy())
+        .with_texts(Arc::new(agent_core::TextPack::zh()))
+        .with_prompt_template(super::prompts::subagent_child_system_prompt())
+        .with_summary_hint("\n\n[完整结果可通过 task_result 查询，task_id: {task_id}]"),
+    );
+    let registry = base_registry.register(agent_core::subagent::DelegateTaskTool::new(coordinator));
+
+    // 白名单一致性：delegate_task 必须列入 host_tool_policy（Confirm）
+    let policy = host_tool_policy();
+    assert!(policy.confirm_tools.iter().any(|n| n == "delegate_task"));
+
+    let tool = registry
+        .get("delegate_task")
+        .expect("delegate_task registered");
+    let parent = tokio_util::sync::CancellationToken::new();
+    let ctx = agent_core::ToolContext {
+        project_root: None,
+        bridge: Arc::new(agent_core::AutoBridge(agent_core::Decision::Allow)),
+        cancelled: parent.clone(),
+        deadline: None,
+        run_id: Some("run_host_parent".into()),
+    };
+
+    let out = tool
+        .call(json!({"goal": "自包含的子任务目标"}), &ctx)
+        .await
+        .unwrap();
+    assert!(out.content.contains("completed"), "got: {}", out.content);
+    assert!(out.content.contains("子任务结论"));
+    assert!(out.content.contains("task_result 查询"));
+    // 子 Run 确实跑了一轮模型请求
+    assert_eq!(backend.calls.lock().unwrap().len(), 1);
+
+    // 任务收口：唯一子任务、终态、结果可查
+    let views = global_tasks.list().await;
+    assert_eq!(views.len(), 1);
+    let id = views[0].id.clone();
+    assert_eq!(
+        global_tasks.refresh(&id).await.unwrap(),
+        agent_core::TaskStatus::Completed
+    );
+    let result = global_tasks.result(&id).await.unwrap();
+    assert!(result.ok);
+    assert_eq!(result.text, "子任务结论");
+}
+
+#[tokio::test]
+async fn parent_cancel_leaves_no_running_child() {
+    struct GatedBackend {
+        entered: Arc<std::sync::atomic::AtomicBool>,
+    }
+    #[async_trait::async_trait]
+    impl ModelBackend for GatedBackend {
+        async fn stream_completion(
+            &self,
+            _request: agent_core::ModelRequest,
+        ) -> agent_core::Result<agent_core::model::DeltaStream> {
+            self.entered
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(Box::pin(futures_util::stream::pending::<
+                agent_core::Result<agent_core::Delta>,
+            >()))
+        }
+    }
+
+    let child_backend = Arc::new(agent_core::subagent::ChildRunBackend::new());
+    let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let global_tasks = Arc::new(
+        agent_core::TaskManager::new(16, None)
+            .with_backend(Arc::clone(&child_backend) as Arc<dyn agent_core::TaskBackend>),
+    );
+    let coordinator = Arc::new(
+        agent_core::subagent::DelegationCoordinator::new(
+            "sess-cancel",
+            Arc::new(GatedBackend {
+                entered: entered.clone(),
+            }),
+            agent_core::ToolRegistry::new(),
+            global_tasks.clone(),
+            child_backend,
+        )
+        .with_policy(host_tool_policy()),
+    );
+    let tool = agent_core::subagent::DelegateTaskTool::new(coordinator);
+    let tool: std::sync::Arc<dyn agent_core::AgentTool> = std::sync::Arc::new(tool);
+
+    let parent = tokio_util::sync::CancellationToken::new();
+    let ctx = agent_core::ToolContext {
+        project_root: None,
+        bridge: Arc::new(agent_core::AutoBridge(agent_core::Decision::Allow)),
+        cancelled: parent.clone(),
+        deadline: None,
+        run_id: Some("run_host_cancel".into()),
+    };
+
+    // 模型流挂起 → 父取消 → delegate_task 必须退出且任务收口，无孤儿
+    let entered2 = entered.clone();
+    let call = tokio::spawn(async move {
+        let _ = entered2;
+        tool.call(json!({"goal": "会挂起的子任务"}), &ctx).await
+    });
+    while !entered.load(std::sync::atomic::Ordering::SeqCst) {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    parent.cancel();
+    let out = tokio::time::timeout(std::time::Duration::from_secs(5), call)
+        .await
+        .expect("delegate_task must exit after parent cancel")
+        .unwrap()
+        .unwrap();
+    assert!(out.content.contains("cancelled"), "got: {}", out.content);
+
+    let views = global_tasks.list().await;
+    assert_eq!(views.len(), 1);
+    assert_eq!(
+        global_tasks.refresh(&views[0].id).await.unwrap(),
+        agent_core::TaskStatus::Cancelled
+    );
+}

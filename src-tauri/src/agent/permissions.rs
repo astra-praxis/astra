@@ -1,14 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use agent_core::{
-    Decision, PermissionBridge,
-    PermissionRequest,
-};
+use agent_core::{Decision, PermissionBridge, PermissionRequest};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
-
 
 // ===== 权限 hub：前端决定 → 运行循环 =====
 
@@ -85,7 +81,11 @@ impl PermissionHub {
         AutoMode::from_u8(self.auto_mode.load(Ordering::Relaxed))
     }
 
-    pub(crate) fn register(&self, session_id: &str, tool_call_id: String) -> oneshot::Receiver<Decision> {
+    pub(crate) fn register(
+        &self,
+        session_id: &str,
+        tool_call_id: String,
+    ) -> oneshot::Receiver<Decision> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(
             tool_call_id,
@@ -144,7 +144,8 @@ pub(crate) struct HubBridge {
 /// 已知携带路径参数的工具参数键（覆盖宿主注册的全部路径类工具：
 /// fs_tools 的 path/from/to、doc_tools 的 path/output）。MCP 等外部
 /// 工具的任意参数不在内：含未知键时回退确认，保守不放行。
-pub(crate) const PATH_ARG_KEYS: &[&str] = &["path", "from", "to", "output", "file_path", "directory"];
+pub(crate) const PATH_ARG_KEYS: &[&str] =
+    &["path", "from", "to", "output", "file_path", "directory"];
 
 /// 提取工具参数中的候选路径（只取已知键下的字符串值；无路径参数返回空）
 pub(crate) fn candidate_paths(args: &serde_json::Value) -> Vec<String> {
@@ -359,5 +360,80 @@ impl PermissionBridge for HubBridge {
             );
         }
         decision
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot::error::TryRecvError;
+
+    /// 交错批准/拒绝：结果只作用于各自的 tool_call_id，不误伤并发请求
+    #[test]
+    fn interleave_decisions_route_to_their_own_request() {
+        let hub = PermissionHub::default();
+        let mut rx_a = hub.register("s1", "call-a".into());
+        let mut rx_b = hub.register("s1", "call-b".into());
+
+        hub.decide("call-a", Decision::Allow).unwrap();
+        hub.decide("call-b", Decision::Deny).unwrap();
+
+        assert_eq!(rx_a.try_recv(), Ok(Decision::Allow));
+        assert_eq!(rx_b.try_recv(), Ok(Decision::Deny));
+    }
+
+    /// 决定 A 后 B 仍在等待用户：oneshot 处于 Empty 而非被误清理
+    #[test]
+    fn deciding_one_request_leaves_the_other_pending() {
+        let hub = PermissionHub::default();
+        let _rx_a = hub.register("s1", "call-a".into());
+        let mut rx_b = hub.register("s1", "call-b".into());
+
+        hub.decide("call-a", Decision::Allow).unwrap();
+
+        assert!(matches!(rx_b.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    /// drop_session 只清该会话：其他会话的挂起请求不受影响且仍可决策
+    #[test]
+    fn drop_session_only_clears_that_session() {
+        let hub = PermissionHub::default();
+        let mut rx_a = hub.register("s1", "call-a".into());
+        let mut rx_b = hub.register("s2", "call-b".into());
+
+        hub.drop_session("s1");
+
+        assert!(matches!(rx_a.try_recv(), Err(TryRecvError::Closed)));
+        assert!(matches!(rx_b.try_recv(), Err(TryRecvError::Empty)));
+        hub.decide("call-b", Decision::Allow).unwrap();
+        assert_eq!(rx_b.try_recv(), Ok(Decision::Allow));
+    }
+
+    /// drop_all：receiver 断开，HubBridge 侧将 Err 映射为 Deny，运行循环不会挂死
+    #[test]
+    fn drop_all_disconnects_receivers_as_deny_fallback() {
+        let hub = PermissionHub::default();
+        let mut rx = hub.register("s1", "call-a".into());
+
+        hub.drop_all();
+
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Closed)));
+    }
+
+    /// 前端回执不存在的请求 → 报错，不 panic
+    #[test]
+    fn decide_unknown_id_is_an_error() {
+        let hub = PermissionHub::default();
+        assert!(hub.decide("nope", Decision::Allow).is_err());
+    }
+
+    /// receiver 已被 drop（如会话取消）：sender 发送失败被忽略，decide 正常返回
+    #[test]
+    fn deciding_after_receiver_dropped_does_not_panic() {
+        let hub = PermissionHub::default();
+        let rx = hub.register("s1", "call-a".into());
+        drop(rx);
+
+        assert!(hub.decide("call-a", Decision::Deny).is_ok());
     }
 }

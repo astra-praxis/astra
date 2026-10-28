@@ -24,6 +24,12 @@ pub fn agent_skills_section() -> String {
     )
 }
 
+/// 子 Agent 委托的子任务系统提示词模板（SUBAGENT_SPEC，宿主注入，
+/// core 不硬编码 prompt）。经 DelegationCoordinator 与执行约束合并。
+pub fn subagent_child_system_prompt() -> String {
+    render(include_str!("../../prompts/subagent_child_prompt.md"))
+}
+
 /// 模板渲染：填充 {app_name} 占位符，并去掉模板文件首尾多余空白
 fn render(template: &str) -> String {
     template

@@ -501,6 +501,7 @@ async fn shell_background_adopts_into_task_tools_end_to_end() {
         bridge: Arc::new(AllowBridge),
         cancelled: tokio_util::sync::CancellationToken::new(),
         deadline: None,
+        run_id: None,
     };
 
     // 1. shell_background 启动短命令

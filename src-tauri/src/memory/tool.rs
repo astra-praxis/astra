@@ -308,6 +308,7 @@ mod tests {
             bridge: Arc::new(AutoBridge(Decision::Allow)),
             cancelled: CancellationToken::new(),
             deadline: None,
+            run_id: None,
         }
     }
 

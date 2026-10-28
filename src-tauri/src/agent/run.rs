@@ -379,6 +379,25 @@ pub async fn agent_start_run(
                     .as_ref()
                     .map(|m| m.engine().clone()),
             );
+            // 子 Agent 委托（SUBAGENT_SPEC §2）：协调器在此装配。注册表快照
+            // 取 MCP/ACP attach 之前的基础集——子注册表 = 快照克隆并移除
+            // delegate_task，构造性保证子集关系且外部扩展不下放（§2.4）。
+            // 模型与父 Run 同源（v1 不做模型路由，§7）；子任务预算钳制在
+            // 协调器上限内（new() 默认：50 turns / 10min / 16KiB summary）。
+            let coordinator = Arc::new(
+                agent_core::subagent::DelegationCoordinator::new(
+                    session_id.clone(),
+                    Arc::clone(&backend),
+                    registry.clone(),
+                    Arc::clone(&state.tasks),
+                    Arc::clone(&state.subagent_backend),
+                )
+                .with_policy(host_tool_policy())
+                .with_texts(Arc::clone(&config.texts))
+                .with_prompt_template(crate::agent::prompts::subagent_child_system_prompt())
+                .with_summary_hint("\n\n[完整结果可通过 task_result 查询，task_id: {task_id}]"),
+            );
+            registry = registry.register(agent_core::subagent::DelegateTaskTool::new(coordinator));
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：
             // 账户感知的 config.toml 的 [mcp]/[acp] 段加载外部能力并注册进本次
             // registry；required 失败阻断启动，其余失败降级（工具不出现）。

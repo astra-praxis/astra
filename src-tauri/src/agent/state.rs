@@ -44,6 +44,10 @@ pub struct AgentState {
     /// 运行中的扩展 manager（每会话一份，attach_extensions 时登记）：
     /// 保活让 ACP 崩溃降级 / 懒重连继续可用，并支撑运行状态查询。
     pub(crate) extensions: Arc<tokio::sync::Mutex<HashMap<String, SessionExtensions>>>,
+    /// 子 Agent 委托（SUBAGENT_SPEC）："subagent" 后端，一次性注册进
+    /// tasks（kind 路由），协调器在 agent_start_run 按 Run 装配时引用
+    /// 同一实例——任务查询/取消跨会话可用，执行真相在 backend。
+    pub(crate) subagent_backend: Arc<agent_core::subagent::ChildRunBackend>,
     /// 多模态 M5（MULTIMODAL_SPEC §10）：generation 栈。backend 在构造期
     /// 一次性注册进 tasks；provider 按配置懒构建/懒切换（agent_start_run
     /// 每次 sync，新会话生效），disabled 时工具不注册、不阻塞会话。
@@ -70,6 +74,7 @@ impl Default for AgentState {
             Arc::new(agent_core::shell_background::ProcessManager::new().with_scope(scope.clone()));
         let mcp_tasks = Arc::new(astra_mcp::McpTaskBackend::new());
         let generation = crate::agent_generation::GenerationStack::new();
+        let subagent_backend = Arc::new(agent_core::subagent::ChildRunBackend::new());
         Self {
             hub: Arc::new(PermissionHub::default()),
             questions: Arc::new(QuestionHub::default()),
@@ -81,22 +86,28 @@ impl Default for AgentState {
             session_files: tokio::sync::Mutex::new(std::collections::HashSet::new()),
             extensions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             processes: Arc::clone(&processes),
-            tasks: Arc::new(
-                agent_core::TaskManager::new(agent_core::task::DEFAULT_MAX_TASKS, None)
-                    .with_scope(scope)
-                    .with_backend(Arc::clone(&mcp_tasks) as Arc<dyn agent_core::TaskBackend>)
-                    .with_backend(Arc::new(agent_core::ShellTaskBackend::new(
-                        // root only serves direct backend.start (host path is
-                        // adoption via shell_background); temp dir is a safe stub.
-                        std::env::temp_dir(),
-                        processes,
-                    )))
-                    // 多模态 M5：generation 后端一次性注册（TASK_SOURCE kind
-                    // "generation" 路由）；provider 是否可用由配置决定，
-                    // disabled 时无工具入口，后端闲置不产生任何任务。
-                    .with_backend(generation.task_backend() as Arc<dyn agent_core::TaskBackend>),
-            ),
+            tasks:
+                Arc::new(
+                    agent_core::TaskManager::new(agent_core::task::DEFAULT_MAX_TASKS, None)
+                        .with_scope(scope)
+                        .with_backend(Arc::clone(&mcp_tasks) as Arc<dyn agent_core::TaskBackend>)
+                        .with_backend(Arc::new(agent_core::ShellTaskBackend::new(
+                            // root only serves direct backend.start (host path is
+                            // adoption via shell_background); temp dir is a safe stub.
+                            std::env::temp_dir(),
+                            processes,
+                        )))
+                        // 多模态 M5：generation 后端一次性注册（TASK_SOURCE kind
+                        // "generation" 路由）；provider 是否可用由配置决定，
+                        // disabled 时无工具入口，后端闲置不产生任何任务。
+                        .with_backend(generation.task_backend() as Arc<dyn agent_core::TaskBackend>)
+                        // 子 Agent 委托（SUBAGENT_SPEC）：kind "subagent" 路由。
+                        .with_backend(
+                            Arc::clone(&subagent_backend) as Arc<dyn agent_core::TaskBackend>
+                        ),
+                ),
             mcp_tasks,
+            subagent_backend,
             generation,
             mcp_config_fps: Mutex::new(HashMap::new()),
             memory: Arc::new(std::sync::RwLock::new(None)),

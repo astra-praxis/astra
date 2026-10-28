@@ -38,6 +38,10 @@ pub(crate) fn host_tool_policy() -> ToolPolicy {
     policy.allowed_readonly.push("task_status".into());
     policy.allowed_readonly.push("task_result".into());
     policy.confirm_tools.push("task_cancel".into());
+    // 子 Agent 委托（SUBAGENT_SPEC）：发起委托有副作用（创建子 Run、
+    // 消耗预算），走 Confirm；工具参数里没有权限入口，父身份只来自
+    // ToolContext.run_id
+    policy.confirm_tools.push("delegate_task".into());
     // 付费生成（MULTIMODAL_SPEC §10）：循环层直接放行，付费确认由
     // 工具内部 request_permission 完成（批准仅针对固定请求，换参数
     // 会重新弹窗）——避免循环层 Confirm + 工具内确认双重弹窗。

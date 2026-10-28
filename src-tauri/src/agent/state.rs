@@ -38,6 +38,11 @@ pub struct AgentState {
     /// 配置变更后，会话的下一次 agent_start_run 检测到不匹配即卸载重建，
     /// 实现「当前对话下一句生效」而无需新建会话。
     pub(crate) mcp_config_fps: std::sync::Mutex<HashMap<String, u64>>,
+    /// 会话 id → 本次 Run 使用的模型名（agent_start_run 每次刷新，与
+    /// bind_image_config 同源）。子任务胶囊展示模型名用：v1 子 Agent 与
+    /// 父 Run 同模型（SUBAGENT_SPEC §0 模型选择），按 activity.session_id
+    /// （= 父会话）查这里即可。
+    pub(crate) session_models: std::sync::Mutex<HashMap<String, String>>,
     /// MCP 任务后端（TASK_SPEC D6 修订版）：MCP server 物化的任务经
     /// adapter 收编进 tasks，路由回各会话的 McpManager 连接轮询。
     pub(crate) mcp_tasks: Arc<astra_mcp::McpTaskBackend>,
@@ -110,6 +115,7 @@ impl Default for AgentState {
             subagent_backend,
             generation,
             mcp_config_fps: Mutex::new(HashMap::new()),
+            session_models: Mutex::new(HashMap::new()),
             memory: Arc::new(std::sync::RwLock::new(None)),
         }
     }
@@ -126,6 +132,12 @@ pub(crate) async fn reset_for_account_switch(state: &AgentState) {
     // 配置指纹随会话缓存一同失效（账户切换后 config.toml 已指向新账户）
     state
         .mcp_config_fps
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    // 会话 → 模型名记录同样随账户切换失效
+    state
+        .session_models
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clear();

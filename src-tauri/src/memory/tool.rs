@@ -309,6 +309,7 @@ mod tests {
             cancelled: CancellationToken::new(),
             deadline: None,
             run_id: None,
+            tool_call_id: None,
         }
     }
 

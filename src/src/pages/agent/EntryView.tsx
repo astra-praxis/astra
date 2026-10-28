@@ -3,7 +3,7 @@
  * EntryView 按 entry.kind 分发到用户气泡 / Markdown / 思考块 / 工具卡 / 提问卡 / 权限卡 / 终态卡。
  * EntriesFooter + VIRTUOSO_COMPONENTS 供 AgentPage 的 Virtuoso 列表使用。
  */
-import { forwardRef, memo, useCallback, useState, type HTMLAttributes } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useState, type HTMLAttributes } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Brain,
@@ -42,6 +42,19 @@ const STATUS_LABEL: Record<string, string> = {
   compacting: '压缩上下文',
   persisting: '保存上下文',
 };
+
+/** agent_tasks_running 里的子 Agent 任务条目（delegate_task 卡实时活动用） */
+interface SubagentLiveTask {
+  kind: string;
+  id: string;
+  label: string;
+  elapsed_secs: number;
+  detail?: string | null;
+  last_tool?: string | null;
+  session_id?: string | null;
+  /** 发起本次委托的 delegate_task 调用 id（v1.6 精确卡片关联） */
+  parent_tool_call_id?: string | null;
+}
 
 // 权限确认卡文案按工具区分（未收录的工具用兜底文案）
 const PERM_ACTION_LABEL: Record<string, string> = {
@@ -659,6 +672,48 @@ function ToolEntry({
       setPreviewHint(String(e).replace(/^.*错误:/, '').trim());
     }
   }, [bgTaskId]);
+
+  // delegate_task 阻塞等子任务完成（可达数分钟），运行中结果为空、卡片不可展开。
+  // 轮询运行中子任务清单，把本会话的子 Agent 实时状态（阶段 + 最近工具调用）
+  // 内联到卡片上，让用户随时知道子任务在干嘛、不是死等。等待确认阶段还没有
+  // 子任务，不展示。
+  const isDelegate = entry.toolName === 'delegate_task';
+  const delegateLive =
+    isDelegate && entry.status === 'running' && perm?.state !== 'pending';
+  const [subTask, setSubTask] = useState<SubagentLiveTask | null>(null);
+  useEffect(() => {
+    if (!delegateLive) {
+      setSubTask(null);
+      return;
+    }
+    let alive = true;
+    const poll = async () => {
+      try {
+        const list = await invoke<SubagentLiveTask[]>('agent_tasks_running');
+        if (!alive) return;
+        // v1.6 并行委托：按发起本次 delegate_task 的 tool_call_id 精确关联
+        // （后端 parent_tool_call_id），不做 session 模糊匹配——同一会话
+        // 可能有多个子任务同时跑。后端没带 id 时保持无实时信息（显式，
+        // 不静默回退到错误关联）。
+        setSubTask(
+          list.find(
+            (t) =>
+              t.kind === 'subagent' &&
+              !!t.parent_tool_call_id &&
+              t.parent_tool_call_id === entry.callId,
+          ) ?? null,
+        );
+      } catch {
+        // 纯 web 调试等后端不可用场景：静默
+      }
+    };
+    void poll();
+    const timer = setInterval(poll, 2000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [delegateLive, entry.callId]);
   return (
     <div
       className={`aentry aentry--tool is-${entry.status}${perm?.state === 'pending' ? ' is-perm' : ''}`}
@@ -722,6 +777,27 @@ function ToolEntry({
           done={previewDone}
           diff={toolKind === 'edit' && entry.toolName === 'edit_file'}
         />
+      )}
+      {delegateLive && (
+        <div className="aentry__subtask">
+          <Loader2 size={11} strokeWidth={2} className="aentry__spin" />
+          <span className="aentry__subtask-status">
+            {subTask?.detail ? (STATUS_LABEL[subTask.detail] ?? subTask.detail) : '子任务执行中'}
+          </span>
+          {subTask?.last_tool && (() => {
+            // last_tool = "tool_name · args_summary"（core observer 拼装）：
+            // 拆开分层展示——工具名强调、参数弱化省略；title 保留完整内容
+            const sep = subTask.last_tool.indexOf(' · ');
+            const name = sep >= 0 ? subTask.last_tool.slice(0, sep) : subTask.last_tool;
+            const args = sep >= 0 ? subTask.last_tool.slice(sep + 3) : '';
+            return (
+              <span className="aentry__subtask-tool" title={subTask.last_tool}>
+                <code className="aentry__subtask-tool-name">{name}</code>
+                {args && <span className="aentry__subtask-tool-args">{args}</span>}
+              </span>
+            );
+          })()}
+        </div>
       )}
       {/* Confirm 工具的批准/拒绝直接内嵌在卡片里 */}
       {perm?.state === 'pending' && (

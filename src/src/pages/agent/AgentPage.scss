@@ -747,6 +747,62 @@ body .content:has(.agent-root) {
     gap: 8px;
   }
 
+  // delegate_task 卡的内联实时活动：子任务阶段 + 最近工具调用（子事件在
+  // core v1 被吞，前端轮询 agent_tasks_running 拿最新一步快照）。
+  // flex 布局：spinner + 阶段固定，工具 chip 占余空间；chip 内部长参数
+  // ellipsis 收缩，不会把行撑出边界
+  .aentry__subtask {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--divider, var(--border-color));
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    min-width: 0;
+
+    .aentry__spin {
+      flex-shrink: 0;
+      color: var(--brand-500);
+    }
+  }
+  .aentry__subtask-status {
+    flex-shrink: 0;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  // 最近工具调用 chip：与卡片头部状态胶囊同语言（圆角 + 软底 + 细边框）
+  .aentry__subtask-tool {
+    flex: 1;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    background: var(--bg-surface-soft, var(--bg-surface));
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .aentry__subtask-tool-name {
+    flex-shrink: 0;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10.5px;
+    color: var(--brand-600);
+  }
+  .aentry__subtask-tool-args {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10.5px;
+    color: var(--text-muted, var(--text-secondary));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   // 内嵌确认区命令摘要：与独立权限卡同款（自带 surface 底，深色终端卡上也可读）
   .aentry__perm-summary {
     display: block;
@@ -899,6 +955,10 @@ body .content:has(.agent-root) {
     background: var(--agent-tool-edit-head, var(--bg-surface-soft));
     margin: -8px -12px 0;
     border-radius: var(--agent-tool-radius, 12px) var(--agent-tool-radius, 12px) 0 0;
+    // 基础样式的 width:100% 与负 margin 过约束（LTR 下右侧 margin 被忽略），
+    // 背景条右边会留下两侧 padding 之和的空白；width:auto 让块级元素
+    // 随负 margin 自然撑满到卡片左右边缘
+    width: auto;
 
     .aentry__tool-name {
       color: var(--agent-tool-edit-accent, var(--accent));
@@ -1665,6 +1725,84 @@ body .content:has(.agent-root) {
     &.is-hot .agent-dock__usage-pct {
       color: var(--danger-600);
       font-weight: 600;
+    }
+  }
+
+  // 运行中子任务胶囊：类型 + 执行时间 + 取消
+  &__subtasks {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    // 可收缩：多个子任务同时跑时裁剪溢出胶囊，不把右侧栏其它控件顶出可视区
+    //（完整信息在各 chip 的 title tooltip 里）
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  &__subtask-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 320px;
+    min-width: 0;
+    padding: 2px 4px 2px 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    white-space: nowrap;
+    // 空间紧张时胶囊整体等比压缩（kind/模型名文本 ellipsis），而不是被容器硬裁
+    flex-shrink: 1;
+    overflow: hidden;
+  }
+
+  &__subtask-kind {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+  }
+
+  &__subtask-model {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+    font-size: 10.5px;
+    color: var(--text-tertiary, var(--text-muted));
+    // 与类型标签之间细分隔，避免「子 Agentclaude-xxx」连读
+    border-left: 1px solid var(--divider, var(--border-color));
+    padding-left: 5px;
+  }
+
+  &__subtask-time {
+    font-variant-numeric: tabular-nums;
+    color: var(--brand-600);
+  }
+
+  &__subtask-spin {
+    flex-shrink: 0;
+    color: var(--brand-500);
+    animation: spin 1.2s linear infinite;
+  }
+
+  &__subtask-stop {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+
+    &:hover {
+      color: var(--danger-600);
+      background: var(--danger-500);
     }
   }
 

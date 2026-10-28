@@ -227,6 +227,14 @@ pub async fn agent_start_run(
             &model_name,
         )
         .await?;
+    // 记录本次 Run 的模型名（供 agent_tasks_running 给子任务胶囊标模型）:
+    // 每次 Run 刷新，与会话可自由切换模型语义一致；v1 子 Agent 与父 Run
+    // 同模型，查父会话 id 即可
+    state
+        .session_models
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(session_id.clone(), model_name.clone());
 
     // 2.6 多模态 M5（MULTIMODAL_SPEC §10）：读取生成配置并按需构建 provider。
     // enabled 且配置完整 → build_registry 注册 generate_image；
@@ -407,7 +415,12 @@ pub async fn agent_start_run(
                 .with_policy(host_tool_policy())
                 .with_texts(Arc::clone(&config.texts))
                 .with_prompt_template(crate::agent::prompts::subagent_child_system_prompt())
-                .with_summary_hint("\n\n[完整结果可通过 task_result 查询，task_id: {task_id}]"),
+                .with_summary_hint("\n\n[完整结果可通过 task_result 查询，task_id: {task_id}]")
+                // v1.6 有界并发：桌面端对齐 Zed 的多子 Agent 并行。8 =
+                // run.rs 单轮工具并发上限（MAX_CONCURRENT_TOOL_CALLS），即
+                // 委托不再受额外限制，实际顶点由工具并发槽决定；槽位不足时
+                // 排队（受父 Run 剩余时间与取消约束）。
+                .with_max_concurrent_delegations(8),
             );
             registry = registry.register(agent_core::subagent::DelegateTaskTool::new(coordinator));
             // MCP/ACP 装配（MCP_SPEC §14 / ACP_SPEC §11 宿主清单）：

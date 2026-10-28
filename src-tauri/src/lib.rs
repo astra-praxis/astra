@@ -409,6 +409,9 @@ pub fn run() {
             // Agent Preview（后台任务预览窗口）
             agent::preview::agent_preview_tasks,
             agent::preview::agent_open_preview,
+            // 运行中子任务（Agent 页执行时间胶囊）
+            agent::preview::agent_tasks_running,
+            agent::preview::agent_task_cancel,
             // User Skills
             skills::user::list_user_skills,
             skills::user::create_user_skill,

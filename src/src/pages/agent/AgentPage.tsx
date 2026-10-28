@@ -20,7 +20,7 @@ import { useAgentStore, ensureAgentListeners, refreshAgentStatus, nextQueuedFor,
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter } from '@/hooks/useMention';
 import { EntryView, EntriesFooter, userMsgPreview, VIRTUOSO_COMPONENTS } from './EntryView';
-import { ThinkingButton, ContextUsage } from './StatusWidgets';
+import { ThinkingButton, ContextUsage, RunningSubtasks } from './StatusWidgets';
 
 /** 运行中状态行的哨兵条目：占据列表最后一项（见 AgentPage 内 items 处注释） */
 const STATUS_ITEM = Symbol('statusline');
@@ -1224,6 +1224,7 @@ export default function AgentPage() {
                   />
                 </div>
                 <div className="agent-dock__bar-right">
+                  <RunningSubtasks />
                   <ContextUsage usage={usage} />
                   <ModelPicker />
                   {running ? (

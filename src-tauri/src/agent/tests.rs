@@ -502,6 +502,7 @@ async fn shell_background_adopts_into_task_tools_end_to_end() {
         cancelled: tokio_util::sync::CancellationToken::new(),
         deadline: None,
         run_id: None,
+        tool_call_id: None,
     };
 
     // 1. shell_background 启动短命令
@@ -1407,6 +1408,7 @@ async fn delegate_task_end_to_end_via_host_registry_and_policy() {
         cancelled: parent.clone(),
         deadline: None,
         run_id: Some("run_host_parent".into()),
+        tool_call_id: None,
     };
 
     let out = tool
@@ -1479,6 +1481,7 @@ async fn parent_cancel_leaves_no_running_child() {
         cancelled: parent.clone(),
         deadline: None,
         run_id: Some("run_host_cancel".into()),
+        tool_call_id: None,
     };
 
     // 模型流挂起 → 父取消 → delegate_task 必须退出且任务收口，无孤儿

@@ -743,7 +743,6 @@ function ToolEntry({
           </span>
         )}
         <code className="aentry__tool-name">{entry.toolName}</code>
-        <span className="aentry__tool-args"><FilePathText text={entry.argsSummary} /></span>
         <span className="aentry__tool-status">
           {perm?.state === 'pending'
             ? '等待确认'
@@ -778,27 +777,22 @@ function ToolEntry({
           diff={toolKind === 'edit' && entry.toolName === 'edit_file'}
         />
       )}
-      {delegateLive && (
-        <div className={`aentry__subtask${subTask?.last_tool ? ' has-tool' : ''}`}>
-          <Loader2 size={11} strokeWidth={2} className="aentry__spin" />
-          <span className="aentry__subtask-status">
-            {subTask?.detail ? (STATUS_LABEL[subTask.detail] ?? subTask.detail) : '子任务执行中'}
-          </span>
-          {subTask?.last_tool && (() => {
-            // last_tool = "tool_name · args_summary"（core observer 拼装）：
-            // 拆开分层展示——工具名强调、参数弱化省略；title 保留完整内容
-            const sep = subTask.last_tool.indexOf(' · ');
-            const name = sep >= 0 ? subTask.last_tool.slice(0, sep) : subTask.last_tool;
-            const args = sep >= 0 ? subTask.last_tool.slice(sep + 3) : '';
-            return (
-              <span className="aentry__subtask-tool" title={subTask.last_tool}>
-                <code className="aentry__subtask-tool-name">{name}</code>
-                {args && <span className="aentry__subtask-tool-args">{args}</span>}
-              </span>
-            );
-          })()}
-        </div>
-      )}
+      {delegateLive && subTask?.last_tool && (() => {
+        // last_tool = "tool_name · args_summary"（core observer 拼装）：
+        // 拆开分层展示——工具名强调、参数弱化省略；title 保留完整内容。
+        // 无工具活动时整行不渲染：头部已有 loading，左下角不再放 spinner
+        const sep = subTask.last_tool.indexOf(' · ');
+        const name = sep >= 0 ? subTask.last_tool.slice(0, sep) : subTask.last_tool;
+        const args = sep >= 0 ? subTask.last_tool.slice(sep + 3) : '';
+        return (
+          <div className="aentry__subtask has-tool">
+            <span className="aentry__subtask-tool" title={subTask.last_tool}>
+              <code className="aentry__subtask-tool-name">{name}</code>
+              {args && <span className="aentry__subtask-tool-args">{args}</span>}
+            </span>
+          </div>
+        );
+      })()}
       {/* Confirm 工具的批准/拒绝直接内嵌在卡片里 */}
       {perm?.state === 'pending' && (
         <div className="aentry__perm-inline">

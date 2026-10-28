@@ -617,7 +617,6 @@ body .content:has(.agent-root) {
 
   .aentry__tool-chev {
     flex-shrink: 0;
-    margin-left: auto;
     color: var(--text-muted);
     transition: transform 0.15s ease;
 
@@ -670,19 +669,9 @@ body .content:has(.agent-root) {
     flex-shrink: 0;
   }
 
-  .aentry__tool-args {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 11.5px;
-    color: var(--text-muted);
-  }
-
   .aentry__tool-status {
     flex-shrink: 0;
+    margin-left: auto;
     font-size: 11px;
     padding: 1px 8px;
     border-radius: 999px;
@@ -747,39 +736,19 @@ body .content:has(.agent-root) {
     gap: 8px;
   }
 
-  // delegate_task 卡的内联实时活动：子任务阶段 + 最近工具调用（子事件在
-  // core v1 被吞，前端轮询 agent_tasks_running 拿最新一步快照）。
-  // flex 布局：spinner + 阶段固定，工具 chip 占余空间；chip 内部长参数
-  // ellipsis 收缩，不会把行撑出边界
+  // delegate_task 卡的内联实时活动：最近工具调用 chip（子事件在 core v1
+  // 被吞，前端轮询 agent_tasks_running 拿最新一步快照）。仅在拿到工具
+  // 活动时渲染；无活动时整行不出现——头部已有 loading 不重复提示。
+  // chip 内部长参数 ellipsis 收缩，不会把行撑出边界
   .aentry__subtask {
     margin-top: 8px;
     padding-top: 8px;
+    padding-bottom: 4px;
     border-top: 1px dashed var(--divider, var(--border-color));
     display: flex;
     align-items: center;
-    gap: 8px;
     max-width: 100%;
     min-width: 0;
-
-    // 有工具调用内容（chip 行存在）时，底部多留一点呼吸空间，
-    // 避免 chip 贴着卡片底边
-    &.has-tool {
-      padding-bottom: 4px;
-    }
-
-    .aentry__spin {
-      flex-shrink: 0;
-      color: var(--brand-500);
-    }
-  }
-  .aentry__subtask-status {
-    flex-shrink: 0;
-    // 阶段提示与 spinner 之间再留一点字距
-    padding-left: 3px;
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    white-space: nowrap;
   }
   // 最近工具调用 chip：与卡片头部状态胶囊同语言（圆角 + 软底 + 细边框）
   .aentry__subtask-tool {
@@ -791,7 +760,7 @@ body .content:has(.agent-root) {
     padding: 2px 8px;
     background: var(--bg-surface-soft, var(--bg-surface));
     border: 1px solid var(--border-color);
-    border-radius: 999px;
+    border-radius: 6px;
     overflow: hidden;
   }
   .aentry__subtask-tool-name {
@@ -927,10 +896,6 @@ body .content:has(.agent-root) {
 
   .aentry__tool-name {
     color: var(--agent-tool-term-name, #7ee787);
-  }
-
-  .aentry__tool-args {
-    color: var(--agent-tool-term-args, rgba(255, 255, 255, 0.55));
   }
 
   .aentry__tool-status {
@@ -1780,11 +1745,6 @@ body .content:has(.agent-root) {
     // 与类型标签之间细分隔，避免「子 Agentclaude-xxx」连读
     border-left: 1px solid var(--divider, var(--border-color));
     padding-left: 5px;
-  }
-
-  &__subtask-time {
-    font-variant-numeric: tabular-nums;
-    color: var(--brand-600);
   }
 
   &__subtask-spin {

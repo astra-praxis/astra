@@ -157,24 +157,13 @@ const KIND_LABEL: Record<string, string> = {
   mcp: 'MCP',
 };
 
-function fmtElapsed(secs: number): string {
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  const mm = String(m).padStart(2, '0');
-  const ss = String(s).padStart(2, '0');
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
-
 /**
  * 运行中子任务胶囊：Agent 拉起的子进程 / 子 Agent 委托 / 生成 / MCP 任务，
- * 每个显示「类型 + 已运行时间」+ 小 × 取消按钮。拉取锚定 elapsed，本地每秒
- * 递增、每 3s 重拉校准；无运行中任务不渲染。
+ * 每个「类型 + 取消」小按钮。执行耗时在对应工具卡片头部展示，这里不再重复。
+ * 无运行中任务不渲染。
  */
 export function RunningSubtasks() {
   const [tasks, setTasks] = useState<RunningTask[]>([]);
-  const fetchedAt = useRef(0);
-  const [, forceTick] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -182,7 +171,6 @@ export function RunningSubtasks() {
       try {
         const list = await invoke<RunningTask[]>('agent_tasks_running');
         if (!alive) return;
-        fetchedAt.current = Date.now();
         setTasks(list);
       } catch {
         // 后端不可用（纯 web 调试）时静默，不打扰对话
@@ -190,16 +178,13 @@ export function RunningSubtasks() {
     };
     void poll();
     const poller = setInterval(poll, 3000);
-    const ticker = setInterval(() => forceTick((t) => t + 1), 1000);
     return () => {
       alive = false;
       clearInterval(poller);
-      clearInterval(ticker);
     };
   }, []);
 
   if (tasks.length === 0) return null;
-  const localElapsed = Math.floor((Date.now() - fetchedAt.current) / 1000);
 
   const cancel = async (t: RunningTask) => {
     setTasks((list) => list.filter((x) => !(x.kind === t.kind && x.id === t.id)));
@@ -218,7 +203,6 @@ export function RunningSubtasks() {
           <Loader2 size={11} strokeWidth={2} className="agent-dock__subtask-spin" />
           <span className="agent-dock__subtask-kind">{KIND_LABEL[t.kind] ?? t.kind}</span>
           {t.model && <span className="agent-dock__subtask-model" title={t.model}>{t.model}</span>}
-          <span className="agent-dock__subtask-time">{fmtElapsed(t.elapsed_secs + localElapsed)}</span>
           <button
             type="button"
             className="agent-dock__subtask-stop"

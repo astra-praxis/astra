@@ -761,6 +761,12 @@ body .content:has(.agent-root) {
     max-width: 100%;
     min-width: 0;
 
+    // 有工具调用内容（chip 行存在）时，底部多留一点呼吸空间，
+    // 避免 chip 贴着卡片底边
+    &.has-tool {
+      padding-bottom: 4px;
+    }
+
     .aentry__spin {
       flex-shrink: 0;
       color: var(--brand-500);
@@ -768,6 +774,8 @@ body .content:has(.agent-root) {
   }
   .aentry__subtask-status {
     flex-shrink: 0;
+    // 阶段提示与 spinner 之间再留一点字距
+    padding-left: 3px;
     font-size: 11.5px;
     font-weight: 600;
     color: var(--text-secondary);

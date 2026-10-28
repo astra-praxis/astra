@@ -779,7 +779,7 @@ function ToolEntry({
         />
       )}
       {delegateLive && (
-        <div className="aentry__subtask">
+        <div className={`aentry__subtask${subTask?.last_tool ? ' has-tool' : ''}`}>
           <Loader2 size={11} strokeWidth={2} className="aentry__spin" />
           <span className="aentry__subtask-status">
             {subTask?.detail ? (STATUS_LABEL[subTask.detail] ?? subTask.detail) : '子任务执行中'}

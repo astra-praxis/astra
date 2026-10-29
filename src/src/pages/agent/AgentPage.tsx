@@ -869,6 +869,9 @@ export default function AgentPage() {
               data={items}
               initialTopMostItemIndex={items.length - 1}
               followOutput={follow ? 'auto' : false}
+              // "在底部"判定加容差：默认 4px 太苛刻，流式渲染/亚像素抖动差几像素
+              // 就会误判为离开底部、断掉粘底跟随（follow→false）。64px 内都算在底部。
+              atBottomThreshold={64}
               atBottomStateChange={setFollow}
               rangeChanged={handleRangeChanged}
               increaseViewportBy={{ top: 480, bottom: 480 }}

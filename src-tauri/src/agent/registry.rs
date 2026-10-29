@@ -190,6 +190,7 @@ pub(crate) async fn attach_extensions(
     session_id: &str,
     mcp_tasks: Arc<astra_mcp::McpTaskBackend>,
     tasks: Arc<agent_core::TaskManager>,
+    cwd: Option<std::path::PathBuf>,
 ) -> Result<ToolRegistry, String> {
     let cfg = match agent_core::astra_config::load() {
         Ok(c) => c,
@@ -207,6 +208,13 @@ pub(crate) async fn attach_extensions(
         let manager = astra_mcp::McpManager::new(cfg.mcp.to_manager_configs())
             .map_err(|e| format!("MCP 配置无效: {e}"))?
             .with_task_tracking(session_id.to_string(), tasks);
+        // 会话工作区作为 MCP 子进程 cwd：GUI 启动下宿主 cwd 是 "/"（不可写），
+        // 相对路径写文件的服务（如 Playwright 快照目录）会全部失败。无项目时
+        // 落到用户主目录（可写、语义中性）。
+        let manager = match cwd {
+            Some(dir) => manager.with_default_cwd(dir),
+            None => manager,
+        };
         let manager = std::sync::Arc::new(manager);
         mcp_tasks.register_session(session_id, &manager).await;
         let (reg, report) = manager.load_and_register(registry).await;

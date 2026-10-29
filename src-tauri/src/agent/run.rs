@@ -452,6 +452,9 @@ pub async fn agent_start_run(
             // registry；required 失败阻断启动，其余失败降级（工具不出现）。
             // manager 句柄登记到 state.extensions：运行状态查询 + ACP 懒重连。
             let mut ext = SessionExtensions::default();
+            // MCP/ACP 子进程 cwd：项目会话绑项目根，纯聊天绑主目录（GUI 下
+            // 宿主 cwd 是 "/"，不可继承）。
+            let ext_cwd = project_root.clone().or_else(dirs::home_dir);
             registry = attach_extensions(
                 registry,
                 &mut config,
@@ -459,6 +462,7 @@ pub async fn agent_start_run(
                 &session_id,
                 Arc::clone(&state.mcp_tasks),
                 Arc::clone(&state.tasks),
+                ext_cwd,
             )
             .await?;
             state

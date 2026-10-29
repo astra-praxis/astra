@@ -148,6 +148,10 @@ interface RunningTask {
   session_id?: string | null;
   /** 子 Agent：父会话当前模型名（v1 子 Agent 与父 Run 同模型） */
   model?: string | null;
+  /** 进程：工作目录（胶囊显示目录名，tooltip 显示全路径） */
+  root?: string | null;
+  /** 进程：日志中检测到的本地服务地址（如 http://localhost:5173/） */
+  urls?: string[];
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -157,10 +161,21 @@ const KIND_LABEL: Record<string, string> = {
   mcp: 'MCP',
 };
 
+/** 从本地服务地址提取短标识：http://localhost:5173/ → :5173 */
+function urlBadge(url: string): string | null {
+  const m = url.match(/:(\d{2,5})(?:[/?#]|$)/);
+  return m ? `:${m[1]}` : null;
+}
+
+/** 路径短标识：只取最后一段目录名 */
+function rootBadge(root: string): string {
+  const parts = root.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? root;
+}
+
 /**
- * 运行中子任务胶囊：Agent 拉起的子进程 / 子 Agent 委托 / 生成 / MCP 任务，
- * 每个「类型 + 取消」小按钮。执行耗时在对应工具卡片头部展示，这里不再重复。
- * 无运行中任务不渲染。
+ * 运行中子任务胶囊条：显示在输入框上方（对话框外），每个胶囊 =
+ * 类型 + 标识（进程：端口/目录；子 Agent：模型）+ 取消。无任务不渲染。
  */
 export function RunningSubtasks() {
   const [tasks, setTasks] = useState<RunningTask[]>([]);
@@ -197,23 +212,43 @@ export function RunningSubtasks() {
   };
 
   return (
-    <span className="agent-dock__subtasks">
-      {tasks.map((t) => (
-        <span key={`${t.kind}:${t.id}`} className="agent-dock__subtask-chip" title={t.last_tool ? `${t.label} · ${t.last_tool}` : t.label}>
-          <Loader2 size={11} strokeWidth={2} className="agent-dock__subtask-spin" />
-          <span className="agent-dock__subtask-kind">{KIND_LABEL[t.kind] ?? t.kind}</span>
-          {t.model && <span className="agent-dock__subtask-model" title={t.model}>{t.model}</span>}
-          <button
-            type="button"
-            className="agent-dock__subtask-stop"
-            aria-label={`取消 ${KIND_LABEL[t.kind] ?? t.kind}任务`}
-            title="取消该任务"
-            onClick={() => void cancel(t)}
-          >
-            <X size={11} strokeWidth={2} />
-          </button>
-        </span>
-      ))}
-    </span>
+    <div className="agent-subtasks">
+      <span className="agent-subtasks__label">运行中</span>
+      {tasks.map((t) => {
+        const kind = KIND_LABEL[t.kind] ?? t.kind;
+        // 进程标识优先级：端口 > 目录名；tooltip 给全量信息
+        const badge =
+          t.kind === 'process'
+            ? (t.urls?.length ? urlBadge(t.urls[0]) : null) ??
+              (t.root ? rootBadge(t.root) : null)
+            : null;
+        const title = [
+          t.label,
+          t.root,
+          t.urls?.join(' '),
+          t.kind === 'subagent' ? t.detail : null,
+          t.kind === 'subagent' ? t.last_tool : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return (
+          <span key={`${t.kind}:${t.id}`} className="agent-subtasks__chip" title={title}>
+            <Loader2 size={11} strokeWidth={2} className="agent-subtasks__spin" />
+            <span className="agent-subtasks__kind">{kind}</span>
+            {badge && <span className="agent-subtasks__badge" title={t.urls?.join(' ')}>{badge}</span>}
+            {t.model && <span className="agent-subtasks__model" title={t.model}>{t.model}</span>}
+            <button
+              type="button"
+              className="agent-subtasks__stop"
+              aria-label={`取消 ${kind}任务`}
+              title="取消该任务"
+              onClick={() => void cancel(t)}
+            >
+              <X size={11} strokeWidth={2} />
+            </button>
+          </span>
+        );
+      })}
+    </div>
   );
 }

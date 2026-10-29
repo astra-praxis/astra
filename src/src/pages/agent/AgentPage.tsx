@@ -927,6 +927,7 @@ export default function AgentPage() {
           )}
 
           {/* 输入区（@ 提及 / / 技能弹层内聚在 MentionInput 内，浮层绝对定位于输入框上方） */}
+          <RunningSubtasks />
           <div className="agent-dock-wrap">
             <Mascot onFocusInput={() => composerRef.current?.focusEnd()} />
             <div className="agent-dock">
@@ -1227,7 +1228,6 @@ export default function AgentPage() {
                   />
                 </div>
                 <div className="agent-dock__bar-right">
-                  <RunningSubtasks />
                   <ContextUsage usage={usage} />
                   <ModelPicker />
                   {running ? (

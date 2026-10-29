@@ -34,6 +34,12 @@ pub struct AgentRunningTask {
     /// 进程 / MCP 任务无模型概念，为 None）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// 进程：工作目录（路径标识，胶囊上显示目录名，tooltip 显示全路径）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    /// 进程：从日志检测到的本地服务地址（dev server 等；胶囊上显示端口）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub urls: Vec<String>,
 }
 
 /// 列出当前运行中的子任务：后台 shell 子进程（真相源 ProcessManager）+
@@ -48,16 +54,32 @@ pub async fn agent_tasks_running(
         .snapshot()
         .into_iter()
         .filter(|t| t.status == "running")
-        .map(|t| AgentRunningTask {
-            kind: "process".into(),
-            id: t.id.to_string(),
-            label: t.command.chars().take(48).collect(),
-            elapsed_secs: t.runtime_secs,
-            detail: None,
-            last_tool: None,
-            session_id: None,
-            parent_tool_call_id: None,
-            model: None,
+        .map(|t| {
+            // 进程标识：日志头部的本地服务地址（vite/uvicorn 等 banner）+
+            // 工作目录。只扫日志开头 64KB——banner 都在最前面，避免每个
+            // 轮询周期全量扫 256KB 日志缓冲。
+            let urls = state
+                .processes
+                .full_log(t.id)
+                .map(|log| {
+                    agent_core::shell_background::detect_local_urls(
+                        &log.chars().take(64 * 1024).collect::<String>(),
+                    )
+                })
+                .unwrap_or_default();
+            AgentRunningTask {
+                kind: "process".into(),
+                id: t.id.to_string(),
+                label: t.command.chars().take(48).collect(),
+                elapsed_secs: t.runtime_secs,
+                detail: None,
+                last_tool: None,
+                session_id: None,
+                parent_tool_call_id: None,
+                model: None,
+                root: Some(t.project_root.clone()),
+                urls,
+            }
         })
         .collect();
     for view in state.tasks.list().await {
@@ -132,6 +154,8 @@ pub async fn agent_tasks_running(
             session_id,
             parent_tool_call_id,
             model,
+            root: None,
+            urls: Vec::new(),
         });
     }
     Ok(out)

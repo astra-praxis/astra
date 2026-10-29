@@ -380,6 +380,7 @@ fn build_registry_registers_generate_image_only_when_enabled() {
             Arc::new(agent_core::TaskManager::new(8, None)),
             generation,
             None,
+            None,
         )
     };
 
@@ -426,6 +427,7 @@ fn every_registered_tool_is_listed_in_host_policy() {
         agent_core::net_tools::SearchEngine::default(),
         Arc::new(agent_core::shell_background::ProcessManager::new()),
         Arc::new(agent_core::TaskManager::new(8, None)),
+        None,
         None,
         None,
     );
@@ -483,6 +485,7 @@ async fn shell_background_adopts_into_task_tools_end_to_end() {
         agent_core::net_tools::SearchEngine::default(),
         Arc::clone(&state.processes),
         Arc::clone(&state.tasks),
+        None,
         None,
         None,
     );
@@ -936,6 +939,7 @@ async fn real_turn(
         Arc::new(agent_core::TaskManager::new(8, None)),
         None,
         None,
+        None,
     );
     threads
         .load_or_create(
@@ -1339,6 +1343,7 @@ async fn subagent_registry_fixture() -> agent_core::ToolRegistry {
         agent_core::net_tools::SearchEngine::default(),
         Arc::new(agent_core::shell_background::ProcessManager::new()),
         Arc::new(agent_core::TaskManager::new(8, None)),
+        None,
         None,
         None,
     )

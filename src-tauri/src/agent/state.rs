@@ -61,6 +61,11 @@ pub struct AgentState {
     /// 失败降级为 memory-off（agent 照常运行，无 recall 注入）。
     /// 热切换账户时整体替换（ RwLock<Option>，None = memory-off）。
     pub(crate) memory: Arc<std::sync::RwLock<Option<crate::memory::host::MemoryHost>>>,
+    /// 会话 → 变更追踪器（FileChanges 卡片的数据源）：建 Thread 时创建并
+    /// 注册，快照持久化在 data_dir/agent_changes/<session>/，重启后重新
+    /// open 同目录即可恢复历史记录。热切换账户时清空。
+    pub(crate) change_trackers:
+        std::sync::Mutex<HashMap<String, std::sync::Arc<agent_core::ChangeTracker>>>,
 }
 
 /// 一次会话装配产生的扩展 manager 句柄（Arc 保活）。
@@ -117,6 +122,7 @@ impl Default for AgentState {
             mcp_config_fps: Mutex::new(HashMap::new()),
             session_models: Mutex::new(HashMap::new()),
             memory: Arc::new(std::sync::RwLock::new(None)),
+            change_trackers: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -138,6 +144,12 @@ pub(crate) async fn reset_for_account_switch(state: &AgentState) {
     // 会话 → 模型名记录同样随账户切换失效
     state
         .session_models
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    // 变更追踪器随会话缓存失效（快照文件在账户目录内，不删）
+    state
+        .change_trackers
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clear();

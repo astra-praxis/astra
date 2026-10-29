@@ -1,0 +1,237 @@
+// 文件变更卡片（FileChangesCard）：BEM + 主题变量，对齐 ArtifactList 的视觉密度
+.fcard {
+  width: 100%;
+  min-width: 0;
+  margin: 8px 0;
+  padding: 4px 0;
+  border: 1px solid var(--divider, var(--border-color));
+  border-radius: 12px;
+  background: var(--bg-surface-soft, var(--bg-surface));
+  font-size: 12px;
+  color: var(--text-secondary);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover { color: var(--text-primary); }
+    &:focus-visible {
+      outline: 2px solid var(--brand-300);
+      outline-offset: 2px;
+      border-radius: 8px;
+    }
+  }
+
+  &__title { font-weight: 600; color: var(--text-primary); }
+
+  &__state {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--success, #2da44e) 12%, transparent);
+    color: var(--success, #2da44e);
+    font-size: 11px;
+  }
+
+  &__stats { margin-left: auto; display: inline-flex; gap: 6px; }
+  &__add { color: var(--success, #2da44e); font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+  &__del { color: var(--danger, #cf222e); font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+
+  &__list {
+    margin: 0;
+    padding: 2px 8px 6px;
+    list-style: none;
+    display: grid;
+    gap: 2px;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 6px;
+    border-radius: 8px;
+
+    &:hover { background: var(--bg-surface-hover, rgba(128, 128, 128, 0.08)); }
+  }
+
+  &__kind {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    &.is-created { color: var(--success, #2da44e); }
+    &.is-deleted { color: var(--danger, #cf222e); }
+  }
+
+  &__path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    color: var(--text-primary);
+  }
+
+  &__badge {
+    flex-shrink: 0;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-surface-hover, rgba(128, 128, 128, 0.08));
+    &.is-created { color: var(--success, #2da44e); }
+    &.is-deleted { color: var(--danger, #cf222e); }
+  }
+
+  &__row &__add,
+  &__row &__del {
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+
+  &__actions {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    .fcard__row:hover & { opacity: 1; }
+    @media (hover: none) { opacity: 1; }
+  }
+
+  &__act {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 6px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+
+    &:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-surface-hover, rgba(128, 128, 128, 0.1)); }
+    &:disabled { opacity: 0.5; cursor: default; }
+    &:focus-visible {
+      outline: 2px solid var(--brand-300);
+      outline-offset: 1px;
+    }
+  }
+
+  &__foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 12px 8px;
+  }
+
+  &__feedback {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    &.is-ok { color: var(--success, #2da44e); }
+    &.is-err { color: var(--danger, #cf222e); }
+  }
+
+  &__restore-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 3px 10px;
+    border: 1px solid var(--divider, var(--border-color));
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) { color: var(--text-primary); border-color: var(--brand-300); }
+    &:disabled { opacity: 0.5; cursor: default; }
+    &:focus-visible {
+      outline: 2px solid var(--brand-300);
+      outline-offset: 2px;
+    }
+  }
+
+  &__diff-loading,
+  &__diff-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 0;
+    color: var(--text-muted);
+  }
+  &__diff-error { color: var(--danger, #cf222e); }
+
+  &__diff {
+    max-height: 60vh;
+    margin: 0;
+    padding: 10px 12px;
+    overflow: auto;
+    border-radius: 8px;
+    background: var(--bg-surface-hover, rgba(128, 128, 128, 0.06));
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre;
+    color: var(--text-primary);
+  }
+
+  &__confirm {
+    ul {
+      margin: 8px 0;
+      padding-left: 18px;
+      li { margin: 2px 0; }
+    }
+    code {
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-size: 12px;
+    }
+  }
+
+  &__btn {
+    padding: 5px 14px;
+    border: 1px solid var(--divider, var(--border-color));
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+
+    &:hover:not(:disabled) { color: var(--text-primary); }
+    &.is-primary {
+      background: var(--brand-500, var(--brand));
+      border-color: transparent;
+      color: #fff;
+      &:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+    }
+    &:disabled { opacity: 0.5; cursor: default; }
+    &:focus-visible {
+      outline: 2px solid var(--brand-300);
+      outline-offset: 2px;
+    }
+  }
+}
+
+.is-spin { animation: fcard-spin 0.9s linear infinite; }
+@keyframes fcard-spin {
+  to { transform: rotate(360deg); }
+}

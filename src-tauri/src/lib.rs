@@ -396,6 +396,10 @@ pub fn run() {
             agent::checkpoints::agent_rewind_to_user_message,
             // Agent Artifacts（ARTIFACT_SPEC：产物元数据登记）
             agent::artifacts::agent_artifact_list,
+            // Agent ChangeSet（FileChanges 卡片：查询 / diff / 恢复）
+            agent::changes::agent_change_sets,
+            agent::changes::agent_change_diff,
+            agent::changes::agent_change_restore,
             // Memory（astra-memory 集成：recall 注入 + 显式管理）
             memory::host::memory_status,
             memory::host::memory_search,

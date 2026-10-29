@@ -5,6 +5,7 @@
  */
 import { forwardRef, memo, useCallback, useEffect, useState, type HTMLAttributes } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { FileChangesCard } from '@/components/agent/FileChangesCard';
 import {
   Brain,
   BrainCircuit,
@@ -378,6 +379,8 @@ export const EntryView = memo(function EntryView({
       );
     case 'tool':
       return <ToolEntry entry={entry} onDecide={onDecide} />;
+    case 'file_changes':
+      return <FileChangesCard runId={entry.runId} files={entry.files} />;
     case 'question':
       return <QuestionEntry entry={entry} onAnswer={onAnswer} />;
     case 'permission': {

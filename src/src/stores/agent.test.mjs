@@ -705,3 +705,99 @@ test('archiveSession calls agent_archive_session and refreshes; failure surfaces
   await store.getState().archiveSession('s', false);
   assert.match(store.getState().error, /取消归档失败.*disk full/);
 });
+
+// ===== 文件变更卡片（FileChanges）：Run 终态从工具 artifacts 聚合宿主事实 =====
+const fileArtifact = (path, mode, insertions, deletions, extraMeta = {}) => ({
+  id: `a-${path}-${mode}`,
+  kind: 'file_change',
+  location: path,
+  metadata: { mode, insertions, deletions, ...extraMeta },
+});
+
+function fileRunState() {
+  let s = { ...state(), running: true, entries: [] };
+  const drive = (type, sequence, extra = {}) => {
+    s = api.reduceAgentEvent(s, env(type, sequence, 'run-1', extra));
+  };
+  const startTool = (callId, toolName, sequence) =>
+    drive('tool_call_started', sequence, { tool_call_id: callId, tool_name: toolName, args_summary: '' });
+  const completeTool = (callId, artifacts, sequence) =>
+    drive('tool_call_completed', sequence, { tool_call_id: callId, artifacts });
+  return { get: () => s, drive, startTool, completeTool };
+}
+
+test('run_completed aggregates file artifacts into a file_changes card (host facts)', () => {
+  const f = fileRunState();
+  f.startTool('t1', 'write_file', 1);
+  f.completeTool('t1', [fileArtifact('src/new.rs', 'create', 35, 0)], 2);
+  f.startTool('t2', 'edit_file', 3);
+  f.completeTool('t2', [fileArtifact('src/agent.rs', 'edit', 18, 4)], 4);
+  f.drive('run_completed', 5);
+  const entries = f.get().entries;
+  const card = entries.find((e) => e.kind === 'file_changes');
+  assert.ok(card, 'run with file changes should append a card');
+  assert.equal(card.runId, 'run-1');
+  assert.deepEqual([...card.files.map((x) => [x.path, x.kind, x.insertions, x.deletions])], [
+    ['src/new.rs', 'created', 35, 0],
+    ['src/agent.rs', 'modified', 18, 4],
+  ]);
+});
+
+test('same path merged across tools: kind takes the last, line counts accumulate', () => {
+  const f = fileRunState();
+  f.startTool('t1', 'write_file', 1);
+  f.completeTool('t1', [fileArtifact('a.ts', 'create', 10, 0)], 2);
+  f.startTool('t2', 'edit_file', 3);
+  f.completeTool('t2', [fileArtifact('a.ts', 'edit', 3, 2)], 4);
+  f.startTool('t3', 'edit_file', 5);
+  f.completeTool('t3', [fileArtifact('a.ts', 'edit', 1, 1)], 6);
+  f.drive('run_completed', 7);
+  const card = f.get().entries.find((e) => e.kind === 'file_changes');
+  assert.equal(card.files.length, 1);
+  assert.equal(card.files[0].kind, 'modified');
+  assert.equal(card.files[0].insertions, 14);
+  assert.equal(card.files[0].deletions, 3);
+});
+
+test('failed run still shows its card; cancelled run stays silent', () => {
+  const failed = fileRunState();
+  failed.startTool('t1', 'edit_file', 1);
+  failed.completeTool('t1', [fileArtifact('x.rs', 'edit', 5, 1)], 2);
+  failed.drive('run_failed', 3, { error: 'boom' });
+  const failedEntries = failed.get().entries;
+  assert.equal(failedEntries.find((e) => e.kind === 'file_changes').files.length, 1);
+  assert.equal(failedEntries.at(-1).kind, 'terminal');
+
+  const cancelled = fileRunState();
+  cancelled.startTool('t1', 'edit_file', 1);
+  cancelled.completeTool('t1', [fileArtifact('x.rs', 'edit', 5, 1)], 2);
+  cancelled.drive('run_cancelled', 3);
+  assert.ok(!cancelled.get().entries.some((e) => e.kind === 'file_changes'));
+});
+
+test('no file artifacts: no card, and non-file artifacts are ignored', () => {
+  const f = fileRunState();
+  f.startTool('t1', 'read_file', 1);
+  f.completeTool('t1', [{ id: 'a', kind: 'document', location: 'doc.md' }], 2);
+  f.drive('run_completed', 3);
+  assert.ok(!f.get().entries.some((e) => e.kind === 'file_changes'));
+
+  const moved = fileRunState();
+  moved.startTool('t1', 'move_path', 1);
+  moved.completeTool('t1', [fileArtifact('b.ts', 'move', 0, 0, { from: 'a.ts' })], 2);
+  moved.drive('run_completed', 3);
+  const card = moved.get().entries.find((e) => e.kind === 'file_changes');
+  assert.equal(card.files[0].kind, 'moved');
+  assert.equal(card.files[0].from, 'a.ts');
+});
+
+test('collectFileChanges is a pure export usable without events', () => {
+  const entries = [
+    { kind: 'tool', callId: 't', toolName: 'write_file', status: 'completed', runId: 'r1',
+      artifacts: [fileArtifact('p1', 'create', 2, 0)] },
+    { kind: 'tool', callId: 't2', toolName: 'edit_file', status: 'failed', runId: 'r1',
+      artifacts: [fileArtifact('p2', 'edit', 9, 9)] },
+  ];
+  const files = api.collectFileChanges(entries, 'r1');
+  assert.deepEqual([...files.map((x) => x.path)], ['p1']);
+});

@@ -63,6 +63,18 @@ export type ToolStatus = 'running' | 'completed' | 'failed' | 'denied' | 'interr
 
 export type PermState = 'pending' | 'allowed' | 'denied' | 'expired';
 
+/** 文件变更卡片的单文件条目（从工具 artifacts 聚合，宿主事实） */
+export interface FileChangeItem {
+  path: string;
+  /** created | modified | deleted | moved */
+  kind: 'created' | 'modified' | 'deleted' | 'moved';
+  tool: string;
+  insertions: number;
+  deletions: number;
+  /** move/copy 的来源路径 */
+  from?: string;
+}
+
 /**
  * 条目稳定 ID：创建时生成、终身不变。
  * React key（及未来虚拟化列表的测量缓存）按它关联——数组下标在条目中间
@@ -109,6 +121,8 @@ export type Entry =
       perm?: { state: PermState; summary: string };
       /** 参数流式生成中的原始 JSON 累计（tool_call_args_delta 到来时更新） */
       argsStreaming?: string;
+      /** 产生该工具调用的 Run（文件变更卡片按 Run 聚合用） */
+      runId?: string;
     } & EntryIdent)
   | ({
       kind: 'permission';
@@ -127,6 +141,13 @@ export type Entry =
       answer?: string;
       /** 用户取消/拒绝回答 */
       declined?: boolean;
+    } & EntryIdent)
+  | ({
+      /** 文件变更卡片：Run 结束时从该 Run 的工具 artifacts 聚合生成，
+       *  只传 runId 引用，diff/恢复数据由宿主命令按需提供 */
+      kind: 'file_changes';
+      runId: string;
+      files: FileChangeItem[];
     } & EntryIdent)
   | ({ kind: 'terminal'; outcome: 'completed' | 'failed'; text?: string } & EntryIdent);
 
@@ -191,6 +212,60 @@ export function normalizeEntries(entries: Entry[]): Entry[] {
     if (e.kind === 'question' && e.answer === undefined && !e.declined) return { ...e, declined: true };
     return e;
   });
+}
+
+// ===== 文件变更卡片（FileChanges）：Run 终态时从工具 artifacts 聚合 =====
+
+/** metadata.mode（工具 artifact）→ 卡片 kind。未知/缺省 → modified。 */
+function modeToKind(mode: unknown): FileChangeItem['kind'] {
+  if (mode === 'create' || mode === 'copy') return 'created';
+  if (mode === 'move') return 'moved';
+  return 'modified';
+}
+
+/**
+ * 从条目流中聚合指定 Run 的文件变更（仅统计已成功完成的文件类工具）。
+ * 数据全部来自工具 artifacts（宿主事实），卡片不展示模型自述的数量。
+ * 同一路径多次修改合并为一行：kind 取最后一次，增删行数累加。
+ */
+export function collectFileChanges(entries: Entry[], runId: string): FileChangeItem[] {
+  const order: string[] = [];
+  const merged = new Map<string, FileChangeItem>();
+  for (const e of entries) {
+    if (e.kind !== 'tool' || e.status !== 'completed' || e.runId !== runId) continue;
+    for (const a of e.artifacts ?? []) {
+      const sdk = 'location' in a;
+      if (!['file_change', 'file_created', 'file_modified'].includes(a.kind)) continue;
+      const path = sdk ? a.location : a.path;
+      if (!path) continue;
+      const meta = sdk && a.metadata && typeof a.metadata === 'object' && !Array.isArray(a.metadata)
+        ? a.metadata as Record<string, unknown>
+        : {};
+      const kind = modeToKind(meta.mode);
+      const insertions = typeof meta.insertions === 'number' ? meta.insertions : 0;
+      const deletions = typeof meta.deletions === 'number' ? meta.deletions : 0;
+      const from = typeof meta.from === 'string' ? meta.from : undefined;
+      const existing = merged.get(path);
+      if (existing) {
+        existing.kind = kind;
+        existing.tool = e.toolName;
+        existing.insertions += insertions;
+        existing.deletions += deletions;
+        if (from) existing.from = from;
+      } else {
+        order.push(path);
+        merged.set(path, {
+          path,
+          kind,
+          tool: e.toolName,
+          insertions,
+          deletions,
+          from,
+        });
+      }
+    }
+  }
+  return order.map((p) => merged.get(p)!);
 }
 
 export interface RunWindow {
@@ -364,6 +439,7 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
           argsSummary: env.args_summary ?? '',
           args: env.args,
           status: 'running' as const,
+          runId: env.run_id,
         }),
       ];
     }
@@ -425,19 +501,32 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
     case 'run_failed':
     case 'run_cancelled': {
       const closed = normalizeEntries(prev);
+      // 文件变更卡片：Run 终态时从本 Run 的工具 artifacts 聚合一次（宿主
+      // 事实，不经模型），有变更才出卡；失败/取消的 Run 同样展示已落盘
+      // 的修改（用户需要知道哪些文件被改了）。仅 run_completed/run_failed
+      // 出卡——取消是用户主动停止且常伴随不完整语义，保持安静。
+      const changedFiles = env.type === 'run_cancelled' ? [] : collectFileChanges(closed, env.run_id);
+      const withCard = changedFiles.length > 0
+        ? [...closed, withId({ kind: 'file_changes' as const, runId: env.run_id, files: changedFiles })]
+        : closed;
       if (env.type === 'run_completed') {
-        const last = closed[closed.length - 1];
+        const last = withCard[withCard.length - 1];
         if (last && last.kind === 'assistant' && last.text.trim()) {
-          return closed;
+          return withCard;
         }
-        // 没有文本产出的 Run（如全部工具失败）：补一条终态
-        return [...closed, withId({ kind: 'terminal' as const, outcome: 'completed' as const })];
+        // 没有文本产出的 Run（如全部工具失败）：补一条终态。
+        // 注意卡片刚追加时末尾是卡片，跳过它再找 assistant。
+        const lastNonCard = [...withCard].reverse().find((e) => e.kind !== 'file_changes');
+        if (lastNonCard && lastNonCard.kind === 'assistant' && lastNonCard.text.trim()) {
+          return withCard;
+        }
+        return [...withCard, withId({ kind: 'terminal' as const, outcome: 'completed' as const })];
       }
       if (env.type === 'run_failed') {
-        return [...closed, withId({ kind: 'terminal' as const, outcome: 'failed' as const, text: env.error })];
+        return [...withCard, withId({ kind: 'terminal' as const, outcome: 'failed' as const, text: env.error })];
       }
       // run_cancelled：不追加“已取消”终态条目，直接收尾（用户主动停止无需提示）
-      return closed;
+      return withCard;
     }
     case 'compaction_completed':
       return [...prev, withId({ kind: 'notice' as const, text: '上下文已压缩' })];

@@ -13,21 +13,22 @@
 //! - `agent_reset_session` unloads memory only; SQLite owns restart history.
 
 pub(crate) mod artifacts;
-pub(crate) mod images;
-pub(crate) mod prompts;
-pub(crate) mod session_store;
-pub(crate) mod sessions;
-pub(crate) mod threads;
+pub(crate) mod changes;
 pub(crate) mod checkpoints;
 pub(crate) mod commands;
 pub(crate) mod events;
+pub(crate) mod images;
 pub(crate) mod permissions;
 pub(crate) mod preview;
+pub(crate) mod prompts;
 pub(crate) mod questions;
 pub(crate) mod registry;
 pub(crate) mod run;
+pub(crate) mod session_store;
+pub(crate) mod sessions;
 pub(crate) mod state;
 pub(crate) mod status;
+pub(crate) mod threads;
 
 #[cfg(test)]
 mod tests;

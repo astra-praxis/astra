@@ -24,6 +24,8 @@ pub(crate) fn host_tool_policy() -> ToolPolicy {
     policy.allowed_readonly.push("mcp_config_read".into());
     policy.confirm_tools.push("mcp_config_write".into());
     policy.confirm_tools.push("edit_file".into());
+    // undo_edit 是文件变更工具（恢复 edit_file 前快照），与 edit_file 同级走 Confirm
+    policy.confirm_tools.push("undo_edit".into());
     policy.confirm_tools.push("copy_path".into());
     policy.confirm_tools.push("move_path".into());
     policy.confirm_tools.push("create_directory".into());
@@ -79,6 +81,12 @@ pub(crate) fn build_registry(
             >,
         >,
     >,
+    // Shared file-state cache + run-level change tracker (FileChanges card).
+    // None = 降级：工具内部各建缓存，无变更记录。
+    fs_tracking: Option<(
+        Arc<agent_core::FileStateCache>,
+        Arc<agent_core::ChangeTracker>,
+    )>,
 ) -> ToolRegistry {
     // 网络工具 + ask_user 不依赖项目根，纯聊天也可用；任务查询工具同全局
     let reg = agent_core::net_tools::register_with_search(ToolRegistry::new(), search)
@@ -112,7 +120,22 @@ pub(crate) fn build_registry(
     };
     match project_root {
         Some(root) => {
-            let reg = agent_core::fs_basic::register(reg, root);
+            // fs 工具共享同一 FileStateCache（read 基线对 edit/write 生效，
+            // 官方 register_with_cache 的设计意图）并挂接变更追踪；降级时
+            // 保持旧路径：各自 register（内部各建缓存）。
+            let reg = if let Some((cache, _tracker)) = &fs_tracking {
+                let texts: agent_core::SharedTextPack = Arc::new(agent_core::TextPack::default());
+                let reg = agent_core::fs_basic::register_with_cache(
+                    reg,
+                    root,
+                    cache.clone(),
+                    texts.clone(),
+                );
+                agent_core::fs_tools::register_with_cache(reg, root, cache.clone(), texts)
+            } else {
+                let reg = agent_core::fs_basic::register(reg, root);
+                agent_core::fs_tools::register(reg, root)
+            };
             let reg = agent_core::doc_tools::register(reg, root);
             let reg = agent_core::shell_tool::register(reg, root);
             // Background task management (dev servers / watchers): manager is
@@ -120,8 +143,8 @@ pub(crate) fn build_registry(
             // Spawned processes are adopted into the unified task runtime
             // (TASK_SPEC §六: same TaskManager as task_status/task_result).
             let reg = agent_core::shell_background::register(reg, root, processes, Some(tasks));
-            // fs_tools（Zed 移植）：搜索/编辑/移动类
-            agent_core::fs_tools::register(reg, root)
+            // fs_tools（Zed 移植）：搜索/编辑/移动类（已在上方按共享缓存注册）
+            reg
         }
         None => {
             // Pure chat (no project): still grant file/shell tools, rooted at
@@ -130,11 +153,23 @@ pub(crate) fn build_registry(
             // to project mode (reads Allow, writes/shell Confirm); paths are
             // validated against home instead of a project root.
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            let reg = agent_core::fs_basic::register(reg, &home);
+            let reg = if let Some((cache, _tracker)) = &fs_tracking {
+                let texts: agent_core::SharedTextPack = Arc::new(agent_core::TextPack::default());
+                let reg = agent_core::fs_basic::register_with_cache(
+                    reg,
+                    &home,
+                    cache.clone(),
+                    texts.clone(),
+                );
+                agent_core::fs_tools::register_with_cache(reg, &home, cache.clone(), texts)
+            } else {
+                let reg = agent_core::fs_basic::register(reg, &home);
+                agent_core::fs_tools::register(reg, &home)
+            };
             let reg = agent_core::doc_tools::register(reg, &home);
             let reg = agent_core::shell_tool::register(reg, &home);
             let reg = agent_core::shell_background::register(reg, &home, processes, Some(tasks));
-            agent_core::fs_tools::register(reg, &home)
+            reg
         }
     }
 }

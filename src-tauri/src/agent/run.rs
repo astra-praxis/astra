@@ -383,6 +383,29 @@ pub async fn agent_start_run(
                     app: app.clone(),
                     session_id: session_id.clone(),
                 });
+            // FileChanges 卡片数据源：共享 FileStateCache + 变更追踪器，
+            // 快照持久化在 data_dir/agent_changes/<session>/（重启后重开同
+            // 目录恢复记录）。目录创建失败降级为 None：工具照常运行，无卡片。
+            let fs_tracking = match crate::app::accounts::data_dir(&app) {
+                Ok(dir) => {
+                    let tracker = agent_core::ChangeTracker::open(
+                        dir.join("agent_changes").join(&session_id),
+                    );
+                    let tracker = std::sync::Arc::new(tracker);
+                    let cache = std::sync::Arc::new(agent_core::FileStateCache::default());
+                    cache.set_change_tracker(std::sync::Arc::clone(&tracker));
+                    state
+                        .change_trackers
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(session_id.clone(), std::sync::Arc::clone(&tracker));
+                    Some((cache, tracker))
+                }
+                Err(e) => {
+                    app_log!(warn, "agent", "change tracker unavailable: {e}");
+                    None
+                }
+            };
             let mut registry = build_registry(
                 &session_id,
                 project_root.as_ref(),
@@ -398,6 +421,7 @@ pub async fn agent_start_run(
                     .unwrap()
                     .as_ref()
                     .map(|m| m.engine().clone()),
+                fs_tracking,
             );
             // 子 Agent 委托（SUBAGENT_SPEC §2）：协调器在此装配。注册表快照
             // 取 MCP/ACP attach 之前的基础集——子注册表 = 快照克隆并移除

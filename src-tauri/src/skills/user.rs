@@ -9,7 +9,7 @@
 //! （新建/导入/同步/删除）与目录级元数据（display_name/file_count）。
 
 pub use agent_core::skill_tools::{
-    read_skill_content, summary_in, validate_rel_path, validate_skill_name,
+    parse_frontmatter_field, read_skill_content, summary_in, validate_rel_path, validate_skill_name,
 };
 
 use serde::Serialize;
@@ -39,7 +39,7 @@ pub struct UserSkillFile {
     pub size: u64,
 }
 
-/// Agent 侧的轻量摘要类型由 agent-core::skill_tools 提供（见文件头 re-export）
+// Agent 侧的轻量摘要类型由 agent-core::skill_tools 提供（见文件头 re-export）
 
 /// 全局技能同步报告（~/.agents/skills → 应用技能库，覆盖语义）
 #[derive(Debug, Serialize)]
@@ -56,26 +56,8 @@ pub struct SyncReport {
 
 // ===== 目录级核心逻辑（可单测） =====
 
-/// 从 SKILL.md frontmatter 提取指定字段（name/description 等），单行、去可选引号
-fn parse_frontmatter_field(content: &str, field: &str) -> String {
-    let content = content.trim();
-    if !content.starts_with("---") {
-        return String::new();
-    }
-    let Some(rest) = content.strip_prefix("---") else {
-        return String::new();
-    };
-    let Some(end) = rest.find("---") else {
-        return String::new();
-    };
-    let prefix = format!("{field}:");
-    for line in rest[..end].lines() {
-        if let Some(v) = line.trim().strip_prefix(&prefix) {
-            return v.trim().trim_matches('"').trim_matches('\'').to_string();
-        }
-    }
-    String::new()
-}
+// frontmatter 字段解析（含 YAML 块标量）统一走 agent-core 的规范实现，
+// 本文件不再保留本地副本（避免双份逻辑漂移）。
 
 fn parse_description(content: &str) -> String {
     parse_frontmatter_field(content, "description")
@@ -827,6 +809,20 @@ mod tests {
         assert_eq!(parse_frontmatter_field(md, "name"), "x");
         assert_eq!(parse_frontmatter_field("no frontmatter", "name"), "");
         assert_eq!(parse_frontmatter_field("---\nbroken", "name"), "");
+    }
+
+    #[test]
+    fn description_parser_supports_yaml_block_scalars() {
+        // 常见的 YAML 折叠标量写法（合法 YAML，之前会被解析成字面值 ">-"）
+        let md = "---\nname: demo\ndescription: >-\n  First line of the description.\n  Second line continues it.\n---\n\nbody";
+        assert_eq!(
+            parse_description(md),
+            "First line of the description. Second line continues it."
+        );
+        // 裸 `>` 同样支持，且后续字段仍可读取
+        let md2 = "---\ndescription: >\n  中文描述第一段。\n  第二段接上。\nversion: 1.0\n---\n";
+        assert_eq!(parse_description(md2), "中文描述第一段。 第二段接上。");
+        assert_eq!(parse_frontmatter_field(md2, "version"), "1.0");
     }
 
     #[test]

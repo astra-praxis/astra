@@ -14,67 +14,12 @@ pub(crate) struct SkillCard {
     is_git: bool,
 }
 
-/// 解析 SKILL.md 的 YAML frontmatter
+/// 解析 SKILL.md 的 YAML frontmatter（name / description / version）。
+/// 字段解析（含 YAML 块标量折叠）统一走 agent-core 的规范实现，
+/// 避免与 user.rs / astra-skill 各自维护一份解析逻辑漂移。
 pub(crate) fn parse_skill_frontmatter(content: &str) -> (String, String, String) {
-    let mut name = String::new();
-    let mut description = String::new();
-    let mut version = String::new();
-
-    let content = content.trim();
-    if !content.starts_with("---") {
-        return (name, description, version);
-    }
-
-    let after_first = content.strip_prefix("---").unwrap_or("");
-    if let Some(end) = after_first.find("---") {
-        let frontmatter = &after_first[..end];
-        let mut in_description = false;
-        let mut desc_parts: Vec<String> = Vec::new();
-
-        for line in frontmatter.lines() {
-            if in_description {
-                let trimmed = line.trim();
-                if trimmed.is_empty()
-                    || !trimmed.starts_with(' ')
-                        && !trimmed.starts_with(|c: char| c.is_whitespace())
-                {
-                    // check if this is a new key
-                    if trimmed.contains(':') && !trimmed.starts_with(' ') {
-                        in_description = false;
-                        // parse as key... but just fall through
-                    } else {
-                        desc_parts.push(trimmed.to_string());
-                    }
-                } else {
-                    desc_parts.push(trimmed.to_string());
-                }
-                continue;
-            }
-
-            if let Some(val) = line.strip_prefix("name:") {
-                name = val.trim().trim_matches('"').to_string();
-            } else if let Some(val) = line.strip_prefix("description:") {
-                let val = val.trim();
-                if val.starts_with('"') {
-                    description = val.trim_matches('"').to_string();
-                } else if val.starts_with(">-") || val.starts_with('|') {
-                    in_description = true;
-                } else if !val.is_empty() {
-                    description = val.to_string();
-                } else {
-                    in_description = true;
-                }
-            } else if let Some(val) = line.strip_prefix("version:") {
-                version = val.trim().trim_matches('"').to_string();
-            }
-        }
-
-        if !desc_parts.is_empty() {
-            description = desc_parts.join(" ");
-        }
-    }
-
-    (name, description, version)
+    let field = |name: &str| agent_core::skill_tools::parse_frontmatter_field(content, name);
+    (field("name"), field("description"), field("version"))
 }
 
 #[tauri::command]

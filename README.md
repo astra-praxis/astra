@@ -21,80 +21,6 @@ Astra 是一个基于 Tauri 2 的**本地优先 AI Agent 桌面应用**。选择
 - **Artifact**：集中展示任务生成的文档与结果
 - **桌面集成**：Tauri 2 原生桌面体验，多窗口 / 单实例
 
-## 架构总览
-
-Astra · 知行 —— 本地优先的 AI Agent 桌面应用，核心运行时由 Rust 承载，支持远程模型 API 与本地模型服务。
-
-```mermaid
-graph TB
-    subgraph FE["产品交互层 · Frontend"]
-        FE1["Agent 对话"]
-        FE2["工作空间"]
-        FE3["模型与配置"]
-        FE4["能力与扩展"]
-    end
-
-    IPC["Tauri IPC · Commands / Events / DTO"]
-
-    subgraph HOST["应用宿主层 · Tauri + Rust"]
-        H1["应用生命周期 · 启动 / 退出 / 窗口"]
-        H2["应用命令桥接 · 输入 / 事件 / 结果"]
-        H3["配置与凭证 · Provider / OS 密钥库"]
-        H4["运行时装配"]
-    end
-
-    API["Rust API · 配置注入 · 运行事件"]
-
-    subgraph CORE["Agent Runtime · astra-core · 独立于 UI 的 Agent 执行核心"]
-        C1["Run 生命周期 · 执行 / 取消 / 超时"]
-        C2["模型交互 · 请求 / 流式响应"]
-        C3["权限控制 · 授权 / 审批 / 拦截"]
-        C4["工具执行循环 · 调用 / 结果 / 继续"]
-    end
-
-    DEP["依赖：配置 / Provider / 工具注册表 / Skill Registry / 权限与事件协议"]
-
-    subgraph MS["模型服务"]
-        M1["远程 API"]
-        M2["OpenAI 兼容接口"]
-        M3["Anthropic 等协议适配"]
-        M4["本地模型端点"]
-    end
-
-    subgraph TC["工具与能力"]
-        T1["内置工具"]
-        T2["本地进程 / stdio MCP"]
-        T3["远程 MCP"]
-        T4["Skills 指导与工作流"]
-    end
-
-    subgraph LD["本地数据"]
-        D1["对话与运行记录"]
-        D2["配置与状态"]
-        D3["加密长期记忆"]
-        D4["工作空间文件"]
-    end
-
-    subgraph OS["操作系统能力"]
-        O1["文件系统"]
-        O2["进程与命令执行"]
-        O3["系统密钥库"]
-        O4["权限与资源边界"]
-    end
-
-    FE --> IPC
-    IPC --> HOST
-    HOST --> API
-    API --> CORE
-    CORE --> DEP
-    DEP --> MS
-    DEP --> TC
-    DEP --> LD
-    DEP --> OS
-```
-
-> 注：此图为逻辑架构总览，不代表每个模块均已完整接线；数据存储与记忆的具体调用关系以当前实现为准。
-
 ## 核心亮点
 
 ### 多会话并行体验
@@ -125,6 +51,72 @@ GitHub Actions 一键构建并发布 macOS / Windows / Linux 安装包，版本�
 | 构建工具 | Vite、pnpm |
 | 扩展协议 | MCP、ACP |
 | 本地存储 | SQLite |
+
+## 功能完成度
+
+### ✅ 已完成
+
+**Agent 核心（astra-core）**
+
+- **Agent Loop**：多步任务执行循环，流式响应、工具调用、错误重试（上限 4 次）、用户取消
+- **权限引擎**：Policy 分级（只读放行 / 确认 / 拒绝）+ 授权链硬拦截；工具输出按不可信数据处理
+- **工具运行时**：内置工具（文件 / 命令 / 搜索）+ ToolManifest 元数据（category / risk）
+- **预算策略**：单次 Run 的轮次 / 运行时长 / 工具调用预算（内置默认上限，防失控循环）
+- **上下文压缩**：长对话自动 compaction，撞上下文窗口前自动收敛
+
+**会话与持久化**
+
+- **多会话**：多标签页并行，历史会话恢复、全局平铺与时间分桶
+- **SQLite 持久化**：ThreadStore trait + astra-store-sqlite（Memory / SQLite 同套契约测试）
+- **Run 内增量落盘**：对话过程逐条写穿，进程意外退出最多丢最后一段流式文本
+- **Checkpoint 恢复边界**：对话历史锚点 + workspace git 快照，可恢复到任意检查点
+- **错误恢复 UX**：Run 失败后仅重试，不回档；完整对话记录始终保留
+
+**子代理（Subagent v1.6）**
+
+- `delegate_task` 委托工具：主 Agent 拆解任务给子 Run 执行
+- **有界并发**：Semaphore 槽位排队（桌面端上限 8），父 Run 取消 / 超时真实中断排队任务
+- **活动可见性**：子任务执行过程实时展示（工具调用 / 阶段），经 `parent_tool_call_id` 精确关联卡片
+- **权限继承**：子 Run 有效能力 ⊆ 父 Run（结构性禁递归 + 负向测试）
+
+**生态与扩展**
+
+- **MCP**：本地 stdio / 远程 Server 接入（rmcp），配置驱动的权限规则推导
+- **ACP**：外部 Agent 接入（claude-code-acp 等），权限三档 + 会话池生命周期
+- **Skills**：技能包指导与工作流，`skill.yaml` 依赖声明
+- **Artifact**：任务产出的文件注册、版本链、集中展示
+
+**产品与工程**
+
+- **配置系统**：`~/.astra/config.toml`，Provider / 存储 / 权限 / MCP / ACP 分段
+- **错误与可观测**：flat 错误枚举 + tracing 日志 + Execution Record
+- **长期记忆**：跨会话沉淀与召回，本地加密存储，支持纠正与失效
+- **多模型**：OpenAI 兼容 API 与本地模型服务
+- **桌面集成**：Tauri 2 多窗口 / 单实例 / 托盘 / 全局热键
+- **三端自动发布**：GitHub Actions 构建 macOS / Windows / Linux 安装包
+
+### ⬜ 未完成 / 触发式规划
+
+**子代理（Subagent）**
+
+- ⬜ 子事件流前端内嵌：子任务活动为快照轮询，非实时流式转发（Phase D/E）
+- ⬜ 子 Run 持久化：子 Run 对话 ephemeral，不落库
+- ⬜ 子代理模型分级选择：恒为父模型实例，未支持注入不同 backend
+- ⬜ astra-serve 子代理接入：仅桌面端接委托
+
+**核心运行时（astra-core）**
+
+- ⬜ ThreadQuery 扩展：标签 / 时间范围过滤（出现真实消费方再冻结）
+- ⬜ Memory Provider 实现（core 侧）：trait 已留口，宿主已接 astra-memory，core 零实现
+
+**生态后续**
+
+- ⬜ MCP Streamable HTTP / 非文本结果：当前仅 stdio + 文本
+- ⬜ ACP Workspace Bridge / AgentProvider：协议层与工具适配已完成，能力外供未做
+- ⬜ Artifact 内容存储 / 回滚：只存 metadata，内容恢复不做
+- ⬜ Scheduler / Multi-Agent 框架：明确不做（架构纪律），出现 Agent 并行执行需求再评估
+
+> 未完成项均为「触发式」：有真实消费方或需求再冻结设计，避免过度建设。
 
 ## 项目状态
 

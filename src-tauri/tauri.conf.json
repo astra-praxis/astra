@@ -31,6 +31,15 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "windows/header.bmp",
+        "sidebarImage": "windows/welcome.bmp",
+        "uninstallerHeaderImage": "windows/header.bmp",
+        "installerHooks": "windows/installer-hooks.nsh",
+        "languages": ["SimpChinese", "English"]
       }
     },
     "macOS": {

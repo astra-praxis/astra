@@ -194,7 +194,7 @@ pub(crate) async fn attach_extensions(
     let cfg = match agent_core::astra_config::load() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[extensions] 配置无效，本次运行不加载 MCP/ACP: {e}");
+            app_log!(error, "extensions", "配置无效，本次运行不加载 MCP/ACP: {e}");
             return Ok(registry);
         }
     };
@@ -212,9 +212,12 @@ pub(crate) async fn attach_extensions(
         let (reg, report) = manager.load_and_register(registry).await;
         registry = reg;
         for failed in &report.failed {
-            eprintln!(
-                "[extensions] MCP server '{}' 加载失败: {}",
-                failed.id, failed.error
+            app_log!(
+                error,
+                "extensions",
+                "MCP server '{}' 加载失败: {}",
+                failed.id,
+                failed.error
             );
             if failed.required {
                 return Err(format!(
@@ -224,9 +227,13 @@ pub(crate) async fn attach_extensions(
             }
         }
         for dropped in &report.dropped_tools {
-            eprintln!(
-                "[extensions] MCP 工具被丢弃: {}/{} ({})",
-                dropped.server, dropped.tool, dropped.reason
+            app_log!(
+                warn,
+                "extensions",
+                "MCP 工具被丢弃: {}/{} ({})",
+                dropped.server,
+                dropped.tool,
+                dropped.reason
             );
         }
         // manager 由 rule_provider + state.extensions 保活；权限规则按发现
@@ -246,9 +253,13 @@ pub(crate) async fn attach_extensions(
         config.rule_provider = Some(std::sync::Arc::new(
             agent_core::astra_config::McpRuleProvider::new(manager, permissions),
         ));
-        eprintln!(
-            "[extensions] MCP: {} server(s) 已注册（见上方失败日志，如有）",
-            report.loaded.len()
+        app_log!(
+            info,
+            "extensions",
+            "MCP: {} server(s) 已注册 [{}]（{} 个工具被丢弃）",
+            report.loaded.len(),
+            report.loaded.join(", "),
+            report.dropped_tools.len()
         );
     }
 
@@ -259,9 +270,12 @@ pub(crate) async fn attach_extensions(
         let (reg, report) = manager.load_and_register(registry).await;
         registry = reg;
         for failed in &report.failed {
-            eprintln!(
-                "[extensions] ACP agent '{}' 加载失败: {}",
-                failed.id, failed.error
+            app_log!(
+                error,
+                "extensions",
+                "ACP agent '{}' 加载失败: {}",
+                failed.id,
+                failed.error
             );
             if failed.required {
                 return Err(format!(
@@ -270,9 +284,12 @@ pub(crate) async fn attach_extensions(
                 ));
             }
         }
-        eprintln!(
-            "[extensions] ACP: {} agent(s) 已注册（见上方失败日志，如有）",
-            report.loaded.len()
+        app_log!(
+            info,
+            "extensions",
+            "ACP: {} agent(s) 已注册 [{}]",
+            report.loaded.len(),
+            report.loaded.join(", ")
         );
         // D7.1：调用外部 Agent 本身复用既有 decide 管线——装配期对每个注册
         // 成功的 agent 生成 Confirm 规则（risk=High 不降级，未配置即 Confirm）。

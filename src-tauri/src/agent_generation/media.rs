@@ -4,15 +4,12 @@ use std::sync::RwLock;
 use base64::Engine as _;
 
 use agent_core::astra_generation::openai_images::ImageSink;
-use agent_core::astra_generation::{
-    MediaKind, MediaLocation, MediaRef,
-};
+use agent_core::astra_generation::{MediaKind, MediaLocation, MediaRef};
 use agent_core::task::AssetStore;
 use agent_core::Error;
 use async_trait::async_trait;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
-
 
 /// 单个媒体资产字节上限（§8：下载前先看 Content-Length，流式读取再复核）
 pub(crate) const MAX_ASSET_BYTES: usize = 100 * 1024 * 1024;

@@ -619,9 +619,13 @@ mod tests {
 
         // 存储后可检索（重新打开连接）
         let conn = crate::memory::vector_store::open_db_at(&db_path).unwrap();
-        let results =
-            crate::memory::vector_store::search_similar_conn(&conn, &proj_path, &[10.0, 1.0, 0.0], 10)
-                .unwrap();
+        let results = crate::memory::vector_store::search_similar_conn(
+            &conn,
+            &proj_path,
+            &[10.0, 1.0, 0.0],
+            10,
+        )
+        .unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0].project_path, proj_path);
 
@@ -717,9 +721,13 @@ mod tests {
 
         // 数据库中只剩 a.rs 的分块
         let conn = crate::memory::vector_store::open_db_at(&db_path).unwrap();
-        let results =
-            crate::memory::vector_store::search_similar_conn(&conn, &proj_path, &[1.0, 1.0, 0.0], 50)
-                .unwrap();
+        let results = crate::memory::vector_store::search_similar_conn(
+            &conn,
+            &proj_path,
+            &[1.0, 1.0, 0.0],
+            50,
+        )
+        .unwrap();
         assert!(results.iter().all(|r| r.file_path == "a.rs"));
 
         let _ = fs::remove_dir_all(&project);

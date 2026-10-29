@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
-
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
-
 
 // ===== 配置（generation.json）=====
 

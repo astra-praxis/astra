@@ -1,12 +1,10 @@
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-
 use agent_core::astra_generation::error::rejected;
 use agent_core::astra_generation::openai_images::ImageSink;
 use agent_core::astra_generation::{
-    GenerationError, GenerationProvider, OpenAIImageModel,
-    OpenAIImagesConfig, OpenAIImagesProvider,
+    GenerationError, GenerationProvider, OpenAIImageModel, OpenAIImagesConfig, OpenAIImagesProvider,
 };
 use agent_core::model::capability::{ModelDescriptor, OperationConstraints};
 use agent_core::task::{AssetStore, GenerationTaskBackend};

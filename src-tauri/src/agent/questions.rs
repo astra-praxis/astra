@@ -5,7 +5,6 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
-
 // ===== ask_user 提问桥：问题卡事件 + oneshot 回答 =====
 
 /// 等待用户回答的问题集合（question_id → oneshot 发送端）

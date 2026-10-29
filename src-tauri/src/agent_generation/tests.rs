@@ -1,11 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-
 use agent_core::astra_generation::openai_images::ImageSink;
-use agent_core::astra_generation::{
-    GenerationProvider, MediaKind, MediaLocation, MediaRef,
-};
+use agent_core::astra_generation::{GenerationProvider, MediaKind, MediaLocation, MediaRef};
 use agent_core::task::AssetStore;
 
 use super::*;

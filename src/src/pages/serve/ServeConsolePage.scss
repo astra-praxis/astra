@@ -216,3 +216,34 @@
     }
   }
 }
+
+// ===== Web 模式（宿主内嵌控制台）Entity 列表 =====
+.serve-console__entities {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.serve-console__entity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  border-radius: 8px;
+}
+
+.serve-console__entity-name {
+  font-weight: 600;
+}
+
+.serve-console__entity-state {
+  font-size: 12px;
+  opacity: 0.75;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.12);
+}

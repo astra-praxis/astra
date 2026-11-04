@@ -578,7 +578,8 @@ Entity：长期存在的 Agent 主体）。桌面端只是 Client，退出不影
 
 - `serve_bot_list`：列出 bot、状态、当前任务
 - `serve_bot_manage`：create（新建，工作空间默认用当前项目根）/ start /
-  stop / pause / resume
+  stop / pause / resume / 触发器管理（trigger_list / trigger_add /
+  trigger_remove / trigger_fire）
 - `serve_bot_task`：assign 下发任务 / list / report / cancel
 - `serve_bot_chat`：与 bot 对话（回答 ask_user 问题卡时传 question_id）
 
@@ -595,6 +596,29 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8800/api/entities -H "Au
 - 连接拒绝：没在跑，走「启动」
 
 端口默认 8800；若 `{SERVE_DIR}/port` 文件存在则以文件里的端口为准。
+
+## 触发器（bot 无人值守自动触发）
+
+bot 可以配触发器：不用客户端操作，满足条件就自动给 bot 下发任务（走任务流，
+有执行记录和产物）。bot 忙时事件会入队（磁盘持久化），任务结束后自动补跑，
+不丢事件。用户说「每天/每隔多久让 bot 做XX」「监听某个目录有新文件就让 bot
+处理」时用触发器：
+
+- `serve_bot_manage action=trigger_list id=X`：列出触发器
+- `serve_bot_manage action=trigger_add id=X trigger_id=T kind=schedule \
+  mission="..." every_seconds=600`（或 `daily_at="09:30"`，24 小时制）
+- `serve_bot_manage action=trigger_add id=X trigger_id=T kind=file_watch \
+  mission="..." dir=/监听/目录 patterns=["*.txt"]`（patterns 可省，默认全部文件）
+- `serve_bot_manage action=trigger_remove id=X trigger_id=T`
+- `serve_bot_manage action=trigger_fire id=X trigger_id=T`（可选 payload）
+  ——手动触发/测试用
+
+mission 是任务模板，`{{payload字段}}` 和 `{{fire_time}}` 会被渲染成实际值，
+未知占位符原样保留。trigger_fire 的 payload 就是渲染数据本身，不要包一层
+`{{"payload":...}}`。fire 是异步的（202 受理），结果用 serve_bot_task 查。
+
+触发器由 Serve 自己驱动，客户端退出不影响定时/监听。注意：Serve 重启后
+bot Runtime 是 stopped，触发的任务会落在磁盘上挂起，start 后才执行。
 
 {PLATFORM_SECTION}
 

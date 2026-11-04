@@ -3,7 +3,7 @@
 //! 用户口中的「bot」即 astra-serve 上的 Entity（长期 Agent 主体）。本组
 //! 工具把 Serve 的 HTTP API 包装成 AgentTool，让桌面端 Agent 能在对话里：
 //! - `serve_bot_list`   列出 bot 及运行状态（只读 Allow）
-//! - `serve_bot_manage` 创建 / 启动 / 停止 / 暂停 / 恢复（Confirm）
+//! - `serve_bot_manage` 创建 / 启动 / 停止 / 暂停 / 恢复 / 触发器管理（Confirm）
 //! - `serve_bot_task`   下发任务 / 取消 / 查列表 / 查报告产物（Confirm）
 //! - `serve_bot_chat`   给 bot 发消息并等待本轮回答（Confirm）
 //!
@@ -184,6 +184,11 @@ impl AgentTool for ServeBotManage {
         "管理本机 Serve 上的 bot。action=create 新建（参数 name；用户说「新建一个 bot 来做XX」时用，\
          XX 可并入 name）；action=start 启动它的 Runtime（必须先启动才能对话/接任务）；\
          action=stop 停止 Runtime（历史保留）；action=pause 暂停（拒绝新任务）；action=resume 恢复。\
+         触发器管理（bot 无人值守自动触发，触发后走任务流）：action=trigger_list 列出；\
+         action=trigger_add 添加/覆盖（kind=schedule 用 every_seconds 或 daily_at；\
+         kind=file_watch 用 dir+patterns，mission 是触发后下发的任务模板，支持 {{字段}} 占位符）；\
+         action=trigger_remove 删除；action=trigger_fire 手动触发（可选 payload，\
+         body 即渲染数据本身，不要包 {\"payload\":...}）。\
          参数：action、id（create 时传 name，其余传 bot 的 id）、workspace（可选，bot 的工作目录；\
          create 缺省时自动用当前会话的项目根目录，让 bot 直接在用户选的项目里干活）"
     }
@@ -192,10 +197,18 @@ impl AgentTool for ServeBotManage {
             "type": "object",
             "required": ["action"],
             "properties": {
-                "action": { "type": "string", "enum": ["create", "start", "stop", "pause", "resume"] },
-                "id": { "type": "string", "description": "bot id（start/stop/pause/resume 必填）" },
+                "action": { "type": "string", "enum": ["create", "start", "stop", "pause", "resume", "trigger_list", "trigger_add", "trigger_remove", "trigger_fire"] },
+                "id": { "type": "string", "description": "bot id（create 时传 name，其余必填）" },
                 "name": { "type": "string", "description": "bot 名称（create 必填）" },
-                "workspace": { "type": "string", "description": "bot 工作目录（create 可选；缺省用当前项目根目录）" }
+                "workspace": { "type": "string", "description": "bot 工作目录（create 可选；缺省用当前项目根目录）" },
+                "trigger_id": { "type": "string", "description": "触发器 id（trigger_add/remove/fire 必填）" },
+                "kind": { "type": "string", "enum": ["schedule", "file_watch"], "description": "触发器类型（trigger_add 必填）" },
+                "mission": { "type": "string", "description": "触发后下发给 bot 的任务模板（trigger_add 必填），支持 {{payload字段}}/{{fire_time}} 占位符" },
+                "every_seconds": { "type": "integer", "description": "schedule：间隔秒数（与 daily_at 二选一）" },
+                "daily_at": { "type": "string", "description": "schedule：每天固定时间 HH:MM（24 小时制，与 every_seconds 二选一）" },
+                "dir": { "type": "string", "description": "file_watch：监听目录（必填）" },
+                "patterns": { "type": "array", "items": { "type": "string" }, "description": "file_watch：文件后缀 glob，如 [\"*.txt\"]（缺省 [\"*\"]）" },
+                "payload": { "type": "object", "description": "trigger_fire 可选：模板渲染数据，body 即它本身" }
             }
         })
     }
@@ -305,6 +318,146 @@ impl AgentTool for ServeBotManage {
                     } else {
                         "恢复"
                     }
+                )))
+            }
+            "trigger_list" => {
+                let id = require(&args, self.name(), "id")?;
+                let raw = call_serve(
+                    self.name(),
+                    reqwest::Method::GET,
+                    &format!("/api/entities/{id}/triggers"),
+                    None,
+                )
+                .await?;
+                let text = serde_json::to_string_pretty(&raw).unwrap_or_default();
+                Ok(ToolOutput::from(format!(
+                    "bot {id} 的触发器：\n{}",
+                    text.chars().take(2000).collect::<String>()
+                )))
+            }
+            "trigger_add" => {
+                let id = require(&args, self.name(), "id")?;
+                let trigger_id = require(&args, self.name(), "trigger_id")?;
+                let kind = require(&args, self.name(), "kind")?;
+                let mission = require(&args, self.name(), "mission")?;
+                let config = match kind.as_str() {
+                    "schedule" => {
+                        let every = args.get("every_seconds").and_then(|v| v.as_u64());
+                        let daily = arg_str(&args, "daily_at");
+                        match (every, daily) {
+                            (Some(s), _) => json!({ "every_seconds": s }),
+                            (None, Some(t)) => json!({ "daily_at": t }),
+                            (None, None) => {
+                                return Err(Error::tool(
+                                    self.name(),
+                                    "schedule 触发器需要 every_seconds 或 daily_at 之一",
+                                ))
+                            }
+                        }
+                    }
+                    "file_watch" => {
+                        let dir = require(&args, self.name(), "dir")?;
+                        let patterns: Vec<String> = args
+                            .get("patterns")
+                            .and_then(|v| v.as_array())
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|p| p.as_str().map(String::from))
+                                    .collect()
+                            })
+                            .unwrap_or_else(|| vec!["*".to_string()]);
+                        json!({ "dir": dir, "patterns": patterns })
+                    }
+                    other => {
+                        return Err(Error::tool(
+                            self.name(),
+                            format!("未知触发器类型: {other}（支持 schedule / file_watch）"),
+                        ))
+                    }
+                };
+                // PUT 是整组替换：先读现有集合，同 id 覆盖、否则追加。
+                let existing = call_serve(
+                    self.name(),
+                    reqwest::Method::GET,
+                    &format!("/api/entities/{id}/triggers"),
+                    None,
+                )
+                .await?;
+                let mut triggers = existing
+                    .get("triggers")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let spec = json!({
+                    "id": trigger_id,
+                    "kind": kind,
+                    "enabled": true,
+                    "mission_template": mission,
+                    "config": config,
+                });
+                if let Some(pos) = triggers
+                    .iter()
+                    .position(|t| t.get("id").and_then(|v| v.as_str()) == Some(trigger_id.as_str()))
+                {
+                    triggers[pos] = spec;
+                } else {
+                    triggers.push(spec);
+                }
+                call_serve(
+                    self.name(),
+                    reqwest::Method::PUT,
+                    &format!("/api/entities/{id}/triggers"),
+                    Some(json!({ "triggers": triggers })),
+                )
+                .await?;
+                Ok(ToolOutput::from(format!(
+                    "bot {id} 的触发器 {trigger_id}（{kind}）已保存并生效，触发后走任务流：\
+                     用 serve_bot_task action=list 查进度，action=report 查产物。"
+                )))
+            }
+            "trigger_remove" => {
+                let id = require(&args, self.name(), "id")?;
+                let trigger_id = require(&args, self.name(), "trigger_id")?;
+                let existing = call_serve(
+                    self.name(),
+                    reqwest::Method::GET,
+                    &format!("/api/entities/{id}/triggers"),
+                    None,
+                )
+                .await?;
+                let triggers: Vec<Value> = existing
+                    .get("triggers")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|t| t.get("id").and_then(|v| v.as_str()) != Some(trigger_id.as_str()))
+                    .collect();
+                call_serve(
+                    self.name(),
+                    reqwest::Method::PUT,
+                    &format!("/api/entities/{id}/triggers"),
+                    Some(json!({ "triggers": triggers })),
+                )
+                .await?;
+                Ok(ToolOutput::from(format!(
+                    "bot {id} 的触发器 {trigger_id} 已删除。"
+                )))
+            }
+            "trigger_fire" => {
+                let id = require(&args, self.name(), "id")?;
+                let trigger_id = require(&args, self.name(), "trigger_id")?;
+                let payload = args.get("payload").cloned().unwrap_or_else(|| json!({}));
+                call_serve(
+                    self.name(),
+                    reqwest::Method::POST,
+                    &format!("/api/entities/{id}/triggers/{trigger_id}/fire"),
+                    Some(payload),
+                )
+                .await?;
+                Ok(ToolOutput::from(format!(
+                    "触发器 {trigger_id} 已受理（202）。fire 是异步的：任务创建后 bot 忙会先入队，\
+                     结果用 serve_bot_task action=list / report 查。"
                 )))
             }
             other => Err(Error::tool(self.name(), format!("未知 action: {other}"))),

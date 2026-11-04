@@ -557,10 +557,15 @@ fn builtin_find_skills_md(skills_dir: &Path) -> String {
 /// 用 {SERVE_DIR} 占位符替换为当前实际目录，避免硬编码路径在非默认安装
 /// 位置时失效。
 const BUILTIN_SERVE_SKILL_NAME: &str = "astra-serve";
+/// 内置技能模板版本：模板内容变更时递增，启动时本地版本低于此值则刷新覆盖
+/// （用户手改会被覆盖，故仅在版本升级时发生）。
+const BUILTIN_SERVE_SKILL_VERSION: u32 = 2;
 const BUILTIN_SERVE_SKILL_MD_TEMPLATE: &str = r#"---
 name: astra-serve
-description: 本机 Astra Serve（bot 宿主服务）运维指南。当用户提到启动/关闭/重启 serve 或 bot 服务、bot 起不来、连不上 Serve、serve_bot_* 工具报错（401/连接失败/409）、需要安装或构建 astra-serve-host 二进制、或想看 serve 日志时使用本 skill。
+description: 本机 Astra Serve（bot 宿主服务）运维指南。当用户提到启动/关闭/重启/更新 serve 或 bot 服务、bot 起不来、连不上 Serve、serve_bot_* 工具报错（401/连接失败/409）、触发器、需要安装/更新 astra-serve-host 二进制、或想看 serve 日志时使用本 skill。
 ---
+
+<!-- builtin-version: 2 -->
 
 # Astra Serve 运维
 
@@ -656,6 +661,43 @@ pkill -f astra-serve-host
 ⚠️ 这会停掉**所有** bot 的 Runtime（正在执行的任务一并中断）。停止前先和
 用户确认；bot 和历史数据不会丢，重启后逐个 start 即可。
 
+## 重启
+
+先停后启，两步分开执行（中间确认端口已释放）：
+
+```
+pkill -f astra-serve-host
+sleep 1
+nohup ~/.astra/bin/astra-serve-host --dir '{SERVE_DIR}' --token $(cat '{SERVE_DIR}/token') > /tmp/astra-serve.log 2>&1 &
+```
+
+然后轮询健康检查确认就绪。重启后所有 bot Runtime 都是 stopped，提醒用户
+或用 serve_bot_manage action=start 逐个拉起。
+
+## 更新二进制
+
+新版本发布在分发仓库，更新 = 下载替换 + 重启：
+
+```
+# 1. 看最新版本号和 sha256
+curl -s https://raw.githubusercontent.com/astra-praxis/astra-bot/main/latest.json
+
+# 2. 下载（走系统代理时 curl 需显式带代理；浏览器能下的环境一般都开着代理）
+curl -sL -x http://127.0.0.1:7890 -o /tmp/astra-serve-host \
+  https://github.com/astra-praxis/astra-bot/releases/download/<tag>/astra-serve-host-<平台>
+
+# 3. 校验 + 替换 + 重启
+shasum -a 256 /tmp/astra-serve-host   # 对照 latest.json 里的 sha256
+chmod +x /tmp/astra-serve-host
+pkill -f astra-serve-host; sleep 1
+mv /tmp/astra-serve-host ~/.astra/bin/astra-serve-host
+# 然后按「启动」章节拉起，并逐个 start bot
+```
+
+注意：桌面端只在**找不到**二进制时才自动下载，已有旧版不会自动更新。
+最省事的更新方式：删掉现有二进制（~/.astra/bin/ 与桌面端数据目录 bin/），
+再到「Agent 服务」页点启动，让桌面端自己下载最新版。
+
 ## 二进制缺失时
 
 桌面端启动 Serve 时会**自动下载**：定位不到二进制就拉取分发仓库的
@@ -696,6 +738,19 @@ taskkill /F /IM astra-serve-host.exe
 
 ⚠️ 这会停掉**所有** bot 的 Runtime（正在执行的任务一并中断）。停止前先和
 用户确认；bot 和历史数据不会丢，重启后逐个 start 即可。
+
+## 重启（Windows）
+
+先停后启，两步分开执行（中间确认端口已释放），然后轮询健康检查。重启后
+所有 bot Runtime 都是 stopped，逐个 start。
+
+## 更新二进制（Windows）
+
+新版本发布在 https://github.com/astra-praxis/astra-bot/releases ：下载
+`astra-serve-host-x86_64-pc-windows-msvc.exe`，对照 latest.json 里的 sha256
+校验，替换 `%USERPROFILE%\.astra\bin\astra-serve-host.exe` 后按「启动」
+章节重启，并逐个 start bot。桌面端只在**找不到**二进制时才自动下载；最省事
+的更新方式：删掉现有二进制再到「Agent 服务」页点启动。
 
 ## 二进制缺失时（Windows）
 
@@ -740,8 +795,8 @@ pub fn ensure_builtin_skills(app: &AppHandle) -> Result<(), String> {
     ensure_builtin_skills_into(&dir, &serve_dir)
 }
 
-/// ensure_builtin_skills 的可测内核：逐个写入缺失的内置技能，
-/// 已有同名技能一律不动（用户可能已自行修改）。
+/// ensure_builtin_skills 的可测内核：逐个写入缺失的内置技能；
+/// serve 运维技能额外带版本标记，本地版本低于内置版本时刷新覆盖（升级传播）。
 fn ensure_builtin_skills_into(dir: &Path, serve_dir: &Path) -> Result<(), String> {
     let find_skills_md = builtin_find_skills_md(dir);
     let serve_skill_md = builtin_serve_skill_md(serve_dir);
@@ -751,13 +806,29 @@ fn ensure_builtin_skills_into(dir: &Path, serve_dir: &Path) -> Result<(), String
         (BUILTIN_SERVE_SKILL_NAME, serve_skill_md.as_str()),
     ] {
         let skill_dir = dir.join(name);
-        if skill_dir.join("SKILL.md").is_file() {
-            continue;
+        let skill_md = skill_dir.join("SKILL.md");
+        if skill_md.is_file() {
+            if name != BUILTIN_SERVE_SKILL_NAME
+                || builtin_skill_version(&fs::read_to_string(&skill_md).unwrap_or_default())
+                    >= BUILTIN_SERVE_SKILL_VERSION
+            {
+                continue;
+            }
+            // 版本落后：刷新（覆盖用户手改内容，仅发生在内置模板升级时）
         }
         fs::create_dir_all(&skill_dir).map_err(|e| format!("创建内置技能目录失败: {e}"))?;
-        fs::write(skill_dir.join("SKILL.md"), md).map_err(|e| format!("写入内置技能失败: {e}"))?;
+        fs::write(&skill_md, md).map_err(|e| format!("写入内置技能失败: {e}"))?;
     }
     Ok(())
+}
+
+/// 从技能正文读内置版本标记（`<!-- builtin-version: N -->`），无标记视为 0。
+fn builtin_skill_version(md: &str) -> u32 {
+    md.split("builtin-version: ")
+        .nth(1)
+        .and_then(|rest| rest.split("-->").next())
+        .and_then(|num| num.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 #[tauri::command]
@@ -1055,6 +1126,38 @@ mod tests {
             fs::create_dir_all(fp.parent().unwrap()).unwrap();
             fs::write(fp, "data").unwrap();
         }
+    }
+
+    #[test]
+    fn builtin_version_marker_parsing_and_refresh() {
+        assert_eq!(builtin_skill_version("<!-- builtin-version: 2 -->"), 2);
+        assert_eq!(builtin_skill_version("无标记旧版"), 0);
+
+        // 本地版本落后 → 刷新；版本一致/无标记规则外的普通技能 → 不动
+        let root = temp_root("builtin-refresh");
+        let serve_dir = root.join("serve");
+        fs::create_dir_all(serve_dir.join("astra-serve")).unwrap();
+        fs::write(
+            serve_dir.join("astra-serve/SKILL.md"),
+            "---\nname: astra-serve\ndescription: 旧版\n---\n无标记",
+        )
+        .unwrap();
+        fs::create_dir_all(serve_dir.join("other")).unwrap();
+        fs::write(
+            serve_dir.join("other/SKILL.md"),
+            "---\nname: other\ndescription: 用户自建\n---\n",
+        )
+        .unwrap();
+        ensure_builtin_skills_into(&serve_dir, &serve_dir).unwrap();
+        let refreshed = fs::read_to_string(serve_dir.join("astra-serve/SKILL.md")).unwrap();
+        assert!(refreshed.contains("builtin-version"));
+        assert!(refreshed.contains("astra-bot"));
+        // 非内置技能不受影响
+        assert_eq!(
+            fs::read_to_string(serve_dir.join("other/SKILL.md")).unwrap(),
+            "---\nname: other\ndescription: 用户自建\n---\n"
+        );
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

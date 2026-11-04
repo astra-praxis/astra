@@ -411,17 +411,25 @@ impl AgentTool for ServeBotManage {
                 } else {
                     triggers.push(spec);
                 }
-                call_serve(
+                let resp = call_serve(
                     self.name(),
                     reqwest::Method::PUT,
                     &format!("/api/entities/{id}/triggers"),
                     Some(json!({ "triggers": triggers })),
                 )
                 .await?;
-                Ok(ToolOutput::from(format!(
+                let mut msg = format!(
                     "bot {id} 的触发器 {trigger_id}（{kind}）已保存并生效，触发后走任务流：\
                      用 serve_bot_task action=list 查进度，action=report 查产物。"
-                )))
+                );
+                if let Some(warnings) = resp.get("warnings").and_then(|v| v.as_array()) {
+                    for w in warnings {
+                        if let Some(s) = w.as_str() {
+                            msg.push_str(&format!("\n注意：{s}"));
+                        }
+                    }
+                }
+                Ok(ToolOutput::from(msg))
             }
             "trigger_remove" => {
                 let id = require(&args, self.name(), "id")?;
@@ -513,11 +521,39 @@ impl AgentTool for ServeBotTask {
         match action.as_str() {
             "list" => {
                 let raw = call_serve(self.name(), reqwest::Method::GET, &base, None).await?;
-                let text = serde_json::to_string_pretty(&raw).unwrap_or_default();
-                Ok(ToolOutput::from(format!(
-                    "bot {id} 的任务：\n{}",
-                    text.chars().take(2000).collect::<String>()
-                )))
+                let tasks = raw
+                    .get("tasks")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                if tasks.is_empty() {
+                    return Ok(ToolOutput::from(format!("bot {id} 目前没有任务记录。")));
+                }
+                // 结构化摘要而非原始 JSON：单条任务就足以撑爆截断窗口，
+                // 半截 JSON 还会误导模型。
+                let mut out = format!("bot {id} 的任务（共 {} 条，新→旧）：\n", tasks.len());
+                for t in tasks.iter().take(10) {
+                    let goal_id = t.get("goal_id").and_then(|v| v.as_str()).unwrap_or("?");
+                    let status = t.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                    let title = t
+                        .pointer("/goal/title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let reason = t
+                        .get("status_reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    out.push_str(&format!("- {goal_id} [{status}] {title}"));
+                    if !reason.is_empty() {
+                        out.push_str(&format!("（{reason}）"));
+                    }
+                    out.push('\n');
+                }
+                if tasks.len() > 10 {
+                    out.push_str(&format!("（其余 {} 条略）\n", tasks.len() - 10));
+                }
+                out.push_str("列表第一条是当前任务；报告用 action=report。");
+                Ok(ToolOutput::from(out))
             }
             "assign" => {
                 let goal = require(&args, self.name(), "goal")?;
@@ -530,7 +566,7 @@ impl AgentTool for ServeBotTask {
                     }
                     t
                 });
-                call_serve(
+                let resp = call_serve(
                     self.name(),
                     reqwest::Method::POST,
                     &base,
@@ -541,10 +577,23 @@ impl AgentTool for ServeBotTask {
                     })),
                 )
                 .await?;
-                Ok(ToolOutput::from(format!(
-                    "任务已下发给 bot {id}：「{goal}」。它会自主执行；进度用 serve_bot_task action=list 查，\
-                     报告用 action=report 查。"
-                )))
+                // Serve 对 stopped 的 bot 会落盘返回 200（runtime_running=false），
+                // 任务要等启动后才执行——必须如实告知，否则像「假成功卡死」。
+                let running = resp
+                    .get("runtime_running")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                if running {
+                    Ok(ToolOutput::from(format!(
+                        "任务已下发给 bot {id}：「{goal}」。它会自主执行；进度用 serve_bot_task action=list 查，\
+                         报告用 action=report 查。"
+                    )))
+                } else {
+                    Ok(ToolOutput::from(format!(
+                        "任务已保存但尚未执行：bot {id} 的 Runtime 当前是停止状态。\
+                         先用 serve_bot_manage action=start id={id} 启动，启动后任务会自动继续。"
+                    )))
+                }
             }
             "report" => {
                 let raw = call_serve(
@@ -605,12 +654,10 @@ enum TurnEvent {
 }
 
 impl ServeBotChat {
-    /// 订阅 SSE 事件流等本轮终态：run_completed / 提问 / 审批请求。
-    ///
-    /// 订阅用 `?after=0`：replay 帧带 `id:` 行，live 帧不带——以此区分
-    /// 历史与本次新事件，避免“订阅前 run 已立刻失败（如未配模型）导致
-    /// 永远等不到 run_completed”的竞态；历史帧一律忽略，只处理 live。
-    async fn wait_turn(&self, id: &str, session: &str) -> std::result::Result<TurnEvent, String> {
+    /// 先于业务请求建立 SSE 订阅。必须赶在 POST 之前打开流：否则本轮
+    /// 秒级失败（如单运行锁冲突、未配模型）的终态事件会先落进事件日志，
+    /// 订阅后回放时带 `id:` 行被当历史丢掉，工具白等满超时。
+    async fn subscribe_events(&self, id: &str) -> std::result::Result<reqwest::Response, String> {
         let token = read_token().map_err(|e| e.to_string())?;
         let url = format!(
             "{}/api/entities/{id}/api/events?token={}&after=0",
@@ -627,7 +674,19 @@ impl ServeBotChat {
         if !resp.status().is_success() {
             return Err(format!("事件流返回 {}", resp.status()));
         }
-        let mut stream = resp.bytes_stream();
+        Ok(resp)
+    }
+
+    /// 在已建立的流上等本轮终态：run_completed / 提问 / 审批请求。
+    ///
+    /// replay 帧带 `id:` 行（订阅前已发生的历史），一律跳过；live 帧
+    /// 不带 `id:`，必然是订阅之后发生的事件。调用方必须先 `subscribe_events`
+    /// 再发业务 POST，这样本轮产生的任何事件（含秒级失败）都是 live 帧。
+    async fn read_turn(
+        stream: reqwest::Response,
+        session: &str,
+    ) -> std::result::Result<TurnEvent, String> {
+        let mut stream = stream.bytes_stream();
         let mut buf = Vec::<u8>::new();
         let deadline = tokio::time::Instant::now() + CHAT_WAIT;
         use futures_util::StreamExt;
@@ -681,8 +740,13 @@ impl ServeBotChat {
         body: Value,
         what: &str,
     ) -> Result<ToolOutput> {
+        // 先订阅再提交决策：决策后的终态事件（含秒级失败）不会错过。
+        let stream = self
+            .subscribe_events(id)
+            .await
+            .map_err(|e| Error::tool(self.name(), e))?;
         call_serve(self.name(), reqwest::Method::POST, path, Some(body)).await?;
-        match self.wait_turn(id, &format!("{id}-chat")).await {
+        match Self::read_turn(stream, &format!("{id}-chat")).await {
             Ok(TurnEvent::Done(Ok(answer))) => Ok(ToolOutput::from(format!(
                 "{what}已提交。bot 继续执行后的回答：\n{answer}"
             ))),
@@ -835,6 +899,12 @@ impl AgentTool for ServeBotChat {
         match action.as_str() {
             "send" => {
                 let text = require(&args, self.name(), "text")?;
+                // 先订阅再发消息：保证本轮产生的任何事件（含秒级失败，
+                // 如单运行锁冲突）都是 live 帧，不会被回放过滤掉。
+                let stream = self
+                    .subscribe_events(&id)
+                    .await
+                    .map_err(|e| Error::tool(self.name(), e))?;
                 let accepted = call_serve(
                     self.name(),
                     reqwest::Method::POST,
@@ -853,7 +923,7 @@ impl AgentTool for ServeBotChat {
                             .to_string(),
                     ));
                 }
-                match self.wait_turn(&id, &session).await {
+                match Self::read_turn(stream, &session).await {
                     Ok(TurnEvent::Done(Ok(answer))) => {
                         Ok(ToolOutput::from(format!("bot 的回答：\n{answer}")))
                     }

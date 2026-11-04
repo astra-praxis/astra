@@ -69,6 +69,15 @@ fn ensure_token(app: &AppHandle, explicit: Option<&str>) -> Result<String, Strin
     Ok(token)
 }
 
+/// 宿主二进制文件名：Windows 带 `.exe`。
+fn host_bin_name() -> &'static str {
+    if std::env::consts::OS == "windows" {
+        "astra-serve-host.exe"
+    } else {
+        "astra-serve-host"
+    }
+}
+
 /// Serve 二进制定位：显式路径 → ~/.astra/bin → app_data_dir/bin → PATH。
 /// 全部落空且非显式路径时，自动从分发仓库下载（见 `download_serve_bin`）。
 fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, String> {
@@ -79,17 +88,18 @@ fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, Strin
         }
         return Err(format!("指定的 Serve 程序不存在: {}", p.display()));
     }
+    let exe_name = host_bin_name();
     let mut searched: Vec<String> = Vec::new();
     // `dirs::home_dir()`：HOME on unix，Windows 回落 USERPROFILE（HOME 常缺省）
     if let Some(home) = dirs::home_dir() {
-        let candidate = home.join(".astra/bin/astra-serve-host");
+        let candidate = home.join(".astra/bin").join(exe_name);
         searched.push(candidate.display().to_string());
         if candidate.is_file() {
             return Ok(candidate);
         }
     }
     if let Ok(data) = app.path().app_data_dir() {
-        let candidate = data.join("bin/astra-serve-host");
+        let candidate = data.join("bin").join(exe_name);
         searched.push(candidate.display().to_string());
         if candidate.is_file() {
             return Ok(candidate);
@@ -150,7 +160,11 @@ fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
         ));
     }
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(300))
+        // 公司网络直连 GitHub 常年黑洞：快速失败远好于长时间白屏。
+        // reqwest 默认读 HTTP(S)_PROXY 环境变量；系统代理（非 TUN）读不到，
+        // 失败信息里提示用户手动填路径。
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(180))
         .build()
         .map_err(|e| format!("HTTP 客户端创建失败: {e}"))?;
 
@@ -160,7 +174,7 @@ fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
             .send()
             .await
             .and_then(|r| r.error_for_status())
-            .map_err(|e| format!("拉取 latest.json 失败: {e}"))?
+            .map_err(|e| format!("拉取 latest.json 失败（网络受限需代理?）: {e}"))?
             .json::<serde_json::Value>()
             .await
             .map_err(|e| format!("latest.json 解析失败: {e}"))
@@ -199,11 +213,7 @@ fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
     let bin_dir = data_dir.join("bin");
     std::fs::create_dir_all(&bin_dir).map_err(|e| format!("创建 bin 目录失败: {e}"))?;
-    let exe = if std::env::consts::OS == "windows" {
-        "astra-serve-host.exe"
-    } else {
-        "astra-serve-host"
-    };
+    let exe = host_bin_name();
     let path = bin_dir.join(exe);
     std::fs::write(&path, &bytes).map_err(|e| format!("写入二进制失败: {e}"))?;
     #[cfg(unix)]
@@ -337,7 +347,23 @@ pub(crate) fn serve_console_start(
         .arg(&token)
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err));
-    crate::proc_util::hide_window(&mut cmd);
+    // 独立进程组：桌面端被强杀/终端退出时不连带杀掉常驻 Serve。
+    // Windows 下 CREATE_NO_WINDOW 抑制控制台闪窗 + 脱离作业对象。
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(
+            CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
+        );
+    }
 
     let child = cmd
         .spawn()
@@ -359,7 +385,7 @@ pub(crate) fn serve_console_start(
         }
     }
     Err(format!(
-        "Serve 进程已启动但端口 {port} 未就绪（5s），日志: {}",
+        "Serve 进程已启动但端口 {port} 未就绪（5s），请查看日志: {}",
         log_path.display()
     ))
 }

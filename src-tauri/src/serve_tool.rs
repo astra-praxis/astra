@@ -487,7 +487,8 @@ impl AgentTool for ServeBotTask {
             "properties": {
                 "action": { "type": "string", "enum": ["list", "assign", "report", "cancel"] },
                 "id": { "type": "string", "description": "bot id" },
-                "goal": { "type": "string", "description": "任务目标（assign 必填）" }
+                "goal": { "type": "string", "description": "任务目标/完整要求（assign 必填）" },
+                "title": { "type": "string", "description": "任务标题（assign 可选；缺省取 goal 首行前 40 字）" }
             }
         })
     }
@@ -512,11 +513,24 @@ impl AgentTool for ServeBotTask {
             }
             "assign" => {
                 let goal = require(&args, self.name(), "goal")?;
+                // 接口必填 title + mission：title 缺省从 goal 首行派生。
+                let title = arg_str(&args, "title").unwrap_or_else(|| {
+                    let first_line = goal.lines().next().unwrap_or(&goal).trim();
+                    let mut t: String = first_line.chars().take(40).collect();
+                    if first_line.chars().count() > 40 {
+                        t.push('…');
+                    }
+                    t
+                });
                 call_serve(
                     self.name(),
                     reqwest::Method::POST,
                     &base,
-                    Some(json!({ "goal": goal, "idempotency_key": uuid::Uuid::new_v4().to_string() })),
+                    Some(json!({
+                        "title": title,
+                        "mission": goal,
+                        "idempotency_key": uuid::Uuid::new_v4().to_string(),
+                    })),
                 )
                 .await?;
                 Ok(ToolOutput::from(format!(

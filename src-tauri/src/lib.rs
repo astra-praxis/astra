@@ -328,14 +328,28 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // 主窗口点关闭 → 隐藏到托盘（常驻）；其他窗口（如 Serve
-                // 控制台子窗口）照常真正关闭，否则 X 无效且外链页面
-                // 的轮询/Webview 一直存活。
-                if window.label() == "main" {
-                    window.hide().ok();
-                    api.prevent_close();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // 主窗口点关闭 → 隐藏到托盘（常驻）；其他窗口（如 Serve
+                    // 控制台子窗口）照常真正关闭，否则 X 无效且外链页面
+                    // 的轮询/Webview 一直存活。
+                    if window.label() == "main" {
+                        app_log!(info, "window", "close requested: label=main -> hide to tray");
+                        window.hide().ok();
+                        api.prevent_close();
+                    } else {
+                        app_log!(
+                            info,
+                            "window",
+                            "close requested: label={} -> real close",
+                            window.label()
+                        );
+                    }
                 }
+                tauri::WindowEvent::Destroyed { .. } => {
+                    app_log!(info, "window", "destroyed: label={}", window.label());
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

@@ -8,8 +8,10 @@
 //!   工作区 / 对话），窗口关了 Serve 照常跑
 //!
 //! Serve 二进制定位顺序：显式传入 → `~/.astra/bin/astra-serve-host` →
-//! app_data_dir/bin → PATH（`which`）。token 持久化在
-//! `<data>/serve/token`，首次自动生成（32 hex），之后复用。
+//! app_data_dir/bin → PATH（`which`）→ 自动从分发仓库下载到 app_data_dir/bin。
+//! 分发仓库：https://github.com/astra-praxis/astra-bot（latest.json + Release
+//! 资产，sha256 校验）。token 持久化在 `<data>/serve/token`，首次自动生成
+//! （32 hex），之后复用。
 
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -68,6 +70,7 @@ fn ensure_token(app: &AppHandle, explicit: Option<&str>) -> Result<String, Strin
 }
 
 /// Serve 二进制定位：显式路径 → ~/.astra/bin → app_data_dir/bin → PATH。
+/// 全部落空且非显式路径时，自动从分发仓库下载（见 `download_serve_bin`）。
 fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, String> {
     if let Some(p) = explicit {
         let p = PathBuf::from(p.trim());
@@ -96,10 +99,119 @@ fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, Strin
         return Ok(found);
     }
     searched.push("PATH 中的 astra-serve-host".to_string());
-    Err(format!(
-        "未找到 astra-serve-host。已尝试: {}。可在下方填入程序路径后重试。",
-        searched.join("、")
-    ))
+    let local_err = format!("未找到 astra-serve-host。已尝试: {}。", searched.join("、"));
+    match download_serve_bin(app) {
+        Ok(path) => {
+            app_log!(info, "serve", "Serve 二进制已自动下载: {}", path.display());
+            Ok(path)
+        }
+        Err(dl_err) => Err(format!(
+            "{local_err}自动下载也失败：{dl_err}。可在下方填入程序路径后重试。"
+        )),
+    }
+}
+
+// ===== 二进制自动下载（astra-praxis/astra-bot 分发仓库）=====
+
+const SERVE_DIST_LATEST: &str =
+    "https://raw.githubusercontent.com/astra-praxis/astra-bot/main/latest.json";
+
+/// 当前运行环境的分发仓库 target triple（与构建侧 rustc host triple 对齐）。
+fn current_triple() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        _ => "unknown",
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(64);
+    for b in digest {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+/// 从分发仓库下载 serve 二进制到 app_data_dir/bin/。sha256 校验失败不落盘。
+/// 阻塞调用（同步命令上下文，通过 tauri 的 tokio runtime 发请求）。
+fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
+    let triple = current_triple();
+    if triple == "unknown" {
+        return Err(format!(
+            "不支持的平台: {}/{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {e}"))?;
+
+    let manifest = tauri::async_runtime::block_on(async {
+        client
+            .get(SERVE_DIST_LATEST)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| format!("拉取 latest.json 失败: {e}"))?
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| format!("latest.json 解析失败: {e}"))
+    })?;
+    let entry = manifest
+        .pointer(&format!("/files/{triple}"))
+        .ok_or_else(|| format!("latest.json 里没有平台 {triple} 的产物"))?;
+    let url = entry
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or("latest.json 条目缺 url")?;
+    let want = entry
+        .get("sha256")
+        .and_then(|v| v.as_str())
+        .ok_or("latest.json 条目缺 sha256")?;
+
+    let bytes = tauri::async_runtime::block_on(async {
+        client
+            .get(url)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| format!("下载失败: {e}"))?
+            .bytes()
+            .await
+            .map_err(|e| format!("读取响应失败: {e}"))
+    })?;
+    let got = sha256_hex(&bytes);
+    if got != want.to_lowercase() {
+        return Err(format!("sha256 校验失败：期望 {want}，实际 {got}"));
+    }
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
+    let bin_dir = data_dir.join("bin");
+    std::fs::create_dir_all(&bin_dir).map_err(|e| format!("创建 bin 目录失败: {e}"))?;
+    let exe = if std::env::consts::OS == "windows" {
+        "astra-serve-host.exe"
+    } else {
+        "astra-serve-host"
+    };
+    let path = bin_dir.join(exe);
+    std::fs::write(&path, &bytes).map_err(|e| format!("写入二进制失败: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+    }
+    Ok(path)
 }
 
 #[derive(Debug, Serialize)]

@@ -658,8 +658,14 @@ pkill -f astra-serve-host
 
 ## 二进制缺失时
 
-没有官方下载地址。定位顺序：显式路径 → `~/.astra/bin/astra-serve-host` →
-桌面端数据目录 `bin/` → PATH。全都找不到时，从源码构建（需要 Rust 环境）：
+桌面端启动 Serve 时会**自动下载**：定位不到二进制就拉取分发仓库的
+latest.json，按平台下载到 app_data_dir/bin 并做 sha256 校验。手动重试
+「Agent 服务」页启动即可；网络不通时可手动下载：
+
+https://github.com/astra-praxis/astra-bot/releases
+
+定位顺序：显式路径 → `~/.astra/bin/astra-serve-host` → 桌面端数据目录
+`bin/` → PATH。全都找不到时也可从源码构建（需要 Rust 环境）：
 
 ```
 cd <astra-serve 源码仓库> && cargo build --release
@@ -693,9 +699,18 @@ taskkill /F /IM astra-serve-host.exe
 
 ## 二进制缺失时（Windows）
 
-没有官方下载地址。定位顺序：显式路径 →
+桌面端启动 Serve 时会**自动下载**：定位不到二进制就拉取分发仓库的
+latest.json，按平台下载到 app_data_dir/bin 并做 sha256 校验。手动重试
+「Agent 服务」页启动即可；网络不通时可手动下载：
+
+https://github.com/astra-praxis/astra-bot/releases
+
+（下载 `astra-serve-host-x86_64-pc-windows-msvc.exe`，放
+`%USERPROFILE%\.astra\bin\astra-serve-host.exe`。）
+
+定位顺序：显式路径 →
 `%USERPROFILE%\.astra\bin\astra-serve-host.exe` → 桌面端数据目录
-`bin\` → PATH。全都找不到时，从源码构建（需要 Rust 环境 + MSVC Build
+`bin\` → PATH。全都找不到时也可从源码构建（需要 Rust 环境 + MSVC Build
 Tools）：
 
 ```

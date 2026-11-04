@@ -596,7 +596,22 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8800/api/entities -H "Au
 
 端口默认 8800；若 `{SERVE_DIR}/port` 文件存在则以文件里的端口为准。
 
-## 启动
+{PLATFORM_SECTION}
+
+## 常见坑
+
+- Serve 重启后所有 bot Runtime 都是 stopped（无自动恢复），需要逐个
+  `serve_bot_manage action=start`；读历史/任务列表不依赖 Runtime，但对话和
+  下发任务前必须先启动。
+- `409 notReady`：对应 bot 的 Runtime 没启动，先 start。
+- 启动后端口 5s 内没就绪：先看日志再重试，不要反复杀进程起进程。
+- 跑在 8787 上的旧 `astra-serve-manager` 是废弃组件，见到可直接杀。
+"#;
+
+/// 平台专属段：启动/停止/二进制路径命令随编译目标平台生成，技能写入
+/// 本机时只保留当前平台的指令，避免 agent 照着错误平台的命令敲。
+#[cfg(not(target_os = "windows"))]
+const BUILTIN_SERVE_PLATFORM_SECTION: &str = r#"## 启动
 
 必须带 `--dir`（否则会静默落到 `~/.astra-serve-host` 空数据目录，看起来
 「bot 全没了」其实只是连错了库），并带 `--token`（省去桌面端弹 token 填写）：
@@ -626,20 +641,51 @@ pkill -f astra-serve-host
 cd <astra-serve 源码仓库> && cargo build --release
 cp target/release/astra-serve-host ~/.astra/bin/
 ```
-
-## 常见坑
-
-- Serve 重启后所有 bot Runtime 都是 stopped（无自动恢复），需要逐个
-  `serve_bot_manage action=start`；读历史/任务列表不依赖 Runtime，但对话和
-  下发任务前必须先启动。
-- `409 notReady`：对应 bot 的 Runtime 没启动，先 start。
-- 启动后端口 5s 内没就绪：先看日志再重试，不要反复杀进程起进程。
-- 跑在 8787 上的旧 `astra-serve-manager` 是废弃组件，见到可直接杀。
 "#;
 
-/// 用当前 serve 数据目录渲染内置 Serve 运维技能正文。
+#[cfg(target_os = "windows")]
+const BUILTIN_SERVE_PLATFORM_SECTION: &str = r#"## 启动（Windows）
+
+必须带 `--dir`（否则会静默落到 `%USERPROFILE%\.astra-serve-host` 空数据
+目录，看起来「bot 全没了」其实只是连错了库），并带 `--token`。用 shell
+工具（Windows 下走 cmd /C）执行：
+
+```
+powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath "$env:USERPROFILE\.astra\bin\astra-serve-host.exe" -ArgumentList '--dir','{SERVE_DIR}','--token',(Get-Content '{SERVE_DIR}\token')"
+```
+
+启动后轮询健康检查确认端口就绪（桌面端「Agent 服务」页启动的进程日志在
+`{SERVE_DIR}\serve-host.log`；上面命令的输出会打到当前控制台，需要留日志时
+改用 `Start-Process -RedirectStandardOutput`）。
+
+## 停止（Windows）
+
+```
+taskkill /F /IM astra-serve-host.exe
+```
+
+⚠️ 这会停掉**所有** bot 的 Runtime（正在执行的任务一并中断）。停止前先和
+用户确认；bot 和历史数据不会丢，重启后逐个 start 即可。
+
+## 二进制缺失时（Windows）
+
+没有官方下载地址。定位顺序：显式路径 →
+`%USERPROFILE%\.astra\bin\astra-serve-host.exe` → 桌面端数据目录
+`bin\` → PATH。全都找不到时，从源码构建（需要 Rust 环境 + MSVC Build
+Tools）：
+
+```
+cd <astra-serve 源码仓库> && cargo build --release
+copy target\release\astra-serve-host.exe %USERPROFILE%\.astra\bin\
+```
+"#;
+
+/// 用当前 serve 数据目录渲染内置 Serve 运维技能正文。先插入平台段再替换
+/// {SERVE_DIR}，平台段内的目录占位符也能得到替换。
 fn builtin_serve_skill_md(serve_dir: &Path) -> String {
-    BUILTIN_SERVE_SKILL_MD_TEMPLATE.replace("{SERVE_DIR}", &serve_dir.to_string_lossy())
+    BUILTIN_SERVE_SKILL_MD_TEMPLATE
+        .replace("{PLATFORM_SECTION}", BUILTIN_SERVE_PLATFORM_SECTION)
+        .replace("{SERVE_DIR}", &serve_dir.to_string_lossy())
 }
 
 /// 启动时确保内置技能存在：技能库中没有同名技能时写入；已存在则不动

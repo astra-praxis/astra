@@ -77,8 +77,9 @@ fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, Strin
         return Err(format!("指定的 Serve 程序不存在: {}", p.display()));
     }
     let mut searched: Vec<String> = Vec::new();
-    if let Ok(home) = std::env::var("HOME") {
-        let candidate = PathBuf::from(home).join(".astra/bin/astra-serve-host");
+    // `dirs::home_dir()`：HOME on unix，Windows 回落 USERPROFILE（HOME 常缺省）
+    if let Some(home) = dirs::home_dir() {
+        let candidate = home.join(".astra/bin/astra-serve-host");
         searched.push(candidate.display().to_string());
         if candidate.is_file() {
             return Ok(candidate);

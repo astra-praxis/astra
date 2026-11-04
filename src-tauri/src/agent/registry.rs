@@ -59,6 +59,13 @@ pub(crate) fn host_tool_policy() -> ToolPolicy {
     policy.allowed_readonly.push("memory_search".into());
     policy.allowed_readonly.push("memory_remember".into());
     policy.allowed_readonly.push("memory_forget".into());
+    // Serve bot 管理（桌面端作为 astra-serve 的 Client）：列表只读 Allow；
+    // 创建/启停/任务/对话都有副作用（改 Serve 状态、消耗模型调用），
+    // 统一 Confirm，由用户逐次放行
+    policy.allowed_readonly.push("serve_bot_list".into());
+    policy.confirm_tools.push("serve_bot_manage".into());
+    policy.confirm_tools.push("serve_bot_task".into());
+    policy.confirm_tools.push("serve_bot_chat".into());
     policy
 }
 
@@ -94,7 +101,12 @@ pub(crate) fn build_registry(
         // MCP 配置自助管理：用户在对话里说「装个 xx MCP」时，agent 用它写
         // 账户感知的 config.toml（保存后各会话下次对话自动重建生效）
         .register(crate::extensions::mcp_config_tool::McpConfigRead)
-        .register(crate::extensions::mcp_config_tool::McpConfigWrite);
+        .register(crate::extensions::mcp_config_tool::McpConfigWrite)
+        // Serve bot 管理（用户口中的 bot = astra-serve 上的 Entity）
+        .register(crate::serve_tool::ServeBotList)
+        .register(crate::serve_tool::ServeBotManage)
+        .register(crate::serve_tool::ServeBotTask)
+        .register(crate::serve_tool::ServeBotChat);
     let reg = agent_core::task_tools::register(reg, tasks.clone());
     // 多模态 M5：enabled 且配置完整时注册 generate_image（付费生成，
     // MULTIMODAL_SPEC §10）；disabled / 缺配置时不注册、不报错。

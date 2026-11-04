@@ -15,6 +15,7 @@ import ProviderDetailPage from './pages/providers/ProviderDetailPage';
 import SkillDetailPage from './pages/skills/SkillDetailPage';
 import MarketMcpPage from './pages/market/MarketMcpPage';
 import MarketSkillPage from './pages/market/MarketSkillPage';
+import ServeConsolePage from './pages/serve/ServeConsolePage';
 import SettingsPage from './pages/settings/SettingsPage';
 import DevModePage from './pages/dev-mode/DevModePage';
 
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/skills/:name" element={<SkillDetailPage />} />
           <Route path="/market/mcp" element={<MarketMcpPage />} />
           <Route path="/market/skills" element={<MarketSkillPage />} />
+          <Route path="/serve" element={<ServeConsolePage />} />
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="/settings/:section" element={<SettingsPage />} />
           <Route path="/dev-mode/:encoded" element={<DevModePage />} />

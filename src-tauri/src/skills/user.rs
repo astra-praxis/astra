@@ -552,21 +552,118 @@ fn builtin_find_skills_md(skills_dir: &Path) -> String {
     BUILTIN_FIND_SKILLS_MD_TEMPLATE.replace("{SKILLS_DIR}", &skills_dir.to_string_lossy())
 }
 
+/// 内置 Serve 运维技能：让 agent 知道本机 Astra Serve（bot 宿主服务）怎么
+/// 健康检查、启动、停止、装二进制。Serve 数据目录随机器不随账户，写入时
+/// 用 {SERVE_DIR} 占位符替换为当前实际目录，避免硬编码路径在非默认安装
+/// 位置时失效。
+const BUILTIN_SERVE_SKILL_NAME: &str = "astra-serve";
+const BUILTIN_SERVE_SKILL_MD_TEMPLATE: &str = r#"---
+name: astra-serve
+description: 本机 Astra Serve（bot 宿主服务）运维指南。当用户提到启动/关闭/重启 serve 或 bot 服务、bot 起不来、连不上 Serve、serve_bot_* 工具报错（401/连接失败/409）、需要安装或构建 astra-serve-host 二进制、或想看 serve 日志时使用本 skill。
+---
+
+# Astra Serve 运维
+
+Astra Serve 是独立常驻进程（`astra-serve-host`），负责托管多个 bot（即
+Entity：长期存在的 Agent 主体）。桌面端只是 Client，退出不影响 Serve。
+数据目录（含 token、port、bot 工作空间）：
+
+```
+{SERVE_DIR}
+```
+
+## 日常操作：优先用 serve_bot_* 工具
+
+管理 bot 一律优先用已有工具，不要手搓 curl：
+
+- `serve_bot_list`：列出 bot、状态、当前任务
+- `serve_bot_manage`：create（新建，工作空间默认用当前项目根）/ start /
+  stop / pause / resume
+- `serve_bot_task`：assign 下发任务 / list / report / cancel
+- `serve_bot_chat`：与 bot 对话（回答 ask_user 问题卡时传 question_id）
+
+serve_bot_* 报「连不上 Serve」时按下面步骤把服务拉起来。
+
+## 健康检查
+
+```
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8800/api/entities -H "Authorization: Bearer $(cat '{SERVE_DIR}/token')"
+```
+
+- `200`：在跑且 token 正确，问题在别处
+- `401`：在跑但 token 不对（token 文件和进程启动参数不一致）
+- 连接拒绝：没在跑，走「启动」
+
+端口默认 8800；若 `{SERVE_DIR}/port` 文件存在则以文件里的端口为准。
+
+## 启动
+
+必须带 `--dir`（否则会静默落到 `~/.astra-serve-host` 空数据目录，看起来
+「bot 全没了」其实只是连错了库），并带 `--token`（省去桌面端弹 token 填写）：
+
+```
+nohup ~/.astra/bin/astra-serve-host --dir '{SERVE_DIR}' --token $(cat '{SERVE_DIR}/token') > /tmp/astra-serve.log 2>&1 &
+```
+
+启动后轮询健康检查确认端口就绪（桌面端「Agent 服务」页启动的进程日志在
+`{SERVE_DIR}/serve-host.log`，手动 nohup 的在 /tmp/astra-serve.log）。
+
+## 停止
+
+```
+pkill -f astra-serve-host
+```
+
+⚠️ 这会停掉**所有** bot 的 Runtime（正在执行的任务一并中断）。停止前先和
+用户确认；bot 和历史数据不会丢，重启后逐个 start 即可。
+
+## 二进制缺失时
+
+没有官方下载地址。定位顺序：显式路径 → `~/.astra/bin/astra-serve-host` →
+桌面端数据目录 `bin/` → PATH。全都找不到时，从源码构建（需要 Rust 环境）：
+
+```
+cd <astra-serve 源码仓库> && cargo build --release
+cp target/release/astra-serve-host ~/.astra/bin/
+```
+
+## 常见坑
+
+- Serve 重启后所有 bot Runtime 都是 stopped（无自动恢复），需要逐个
+  `serve_bot_manage action=start`；读历史/任务列表不依赖 Runtime，但对话和
+  下发任务前必须先启动。
+- `409 notReady`：对应 bot 的 Runtime 没启动，先 start。
+- 启动后端口 5s 内没就绪：先看日志再重试，不要反复杀进程起进程。
+- 跑在 8787 上的旧 `astra-serve-manager` 是废弃组件，见到可直接杀。
+"#;
+
+/// 用当前 serve 数据目录渲染内置 Serve 运维技能正文。
+fn builtin_serve_skill_md(serve_dir: &Path) -> String {
+    BUILTIN_SERVE_SKILL_MD_TEMPLATE.replace("{SERVE_DIR}", &serve_dir.to_string_lossy())
+}
+
 /// 启动时确保内置技能存在：技能库中没有同名技能时写入；已存在则不动
 /// （用户可能已自行修改，不覆盖）。best-effort：失败只影响技能提示，
 /// 由调用方记日志。
 pub fn ensure_builtin_skills(app: &AppHandle) -> Result<(), String> {
     let dir = app_skills_dir(app)?;
-    ensure_builtin_skills_into(&dir)
+    // serve 数据目录与 serve_tool.rs / serve_console.rs 写入的保持一致：
+    // `<app_data_dir>/serve`，机器级不随账户。
+    let serve_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("com.astra.app/serve");
+    ensure_builtin_skills_into(&dir, &serve_dir)
 }
 
 /// ensure_builtin_skills 的可测内核：逐个写入缺失的内置技能，
 /// 已有同名技能一律不动（用户可能已自行修改）。
-fn ensure_builtin_skills_into(dir: &Path) -> Result<(), String> {
+fn ensure_builtin_skills_into(dir: &Path, serve_dir: &Path) -> Result<(), String> {
     let find_skills_md = builtin_find_skills_md(dir);
+    let serve_skill_md = builtin_serve_skill_md(serve_dir);
     for (name, md) in [
         (BUILTIN_MEMORY_SKILL_NAME, BUILTIN_MEMORY_SKILL_MD),
         (BUILTIN_FIND_SKILLS_NAME, find_skills_md.as_str()),
+        (BUILTIN_SERVE_SKILL_NAME, serve_skill_md.as_str()),
     ] {
         let skill_dir = dir.join(name);
         if skill_dir.join("SKILL.md").is_file() {
@@ -691,14 +788,27 @@ mod tests {
     #[test]
     fn ensure_builtin_skills_writes_all_and_never_overwrites() {
         let root = temp_root("ensure-builtin");
-        ensure_builtin_skills_into(&root).unwrap();
-        for name in [BUILTIN_MEMORY_SKILL_NAME, BUILTIN_FIND_SKILLS_NAME] {
+        let serve_dir = temp_root("ensure-builtin-serve");
+        ensure_builtin_skills_into(&root, &serve_dir).unwrap();
+        for name in [
+            BUILTIN_MEMORY_SKILL_NAME,
+            BUILTIN_FIND_SKILLS_NAME,
+            BUILTIN_SERVE_SKILL_NAME,
+        ] {
             assert!(root.join(name).join("SKILL.md").is_file(), "{name} missing");
         }
+        // serve 技能里的 {SERVE_DIR} 占位符已替换为实际目录
+        let serve_md =
+            fs::read_to_string(root.join(BUILTIN_SERVE_SKILL_NAME).join("SKILL.md")).unwrap();
+        assert!(
+            !serve_md.contains("{SERVE_DIR}"),
+            "SERVE_DIR placeholder not replaced"
+        );
+        assert!(serve_md.contains(&serve_dir.to_string_lossy().to_string()));
         // 已存在的内置技能不覆盖（用户可能已自行修改）
         let p = root.join(BUILTIN_MEMORY_SKILL_NAME).join("SKILL.md");
         fs::write(&p, "user-edited").unwrap();
-        ensure_builtin_skills_into(&root).unwrap();
+        ensure_builtin_skills_into(&root, &serve_dir).unwrap();
         assert_eq!(fs::read_to_string(&p).unwrap(), "user-edited");
     }
 

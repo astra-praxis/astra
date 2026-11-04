@@ -544,6 +544,44 @@ export interface AgentQuestionPayload {
   allow_free_text: boolean;
 }
 
+/** serve-bot-event 载荷（Serve bot 反向通道，Rust 侧 serve_watch.rs 推送） */
+export interface ServeBotEventPayload {
+  kind: 'question' | 'permission' | 'task_finished' | 'runtime_failed';
+  entity_id: string;
+  entity_name: string;
+  question_id?: string;
+  question?: string;
+  options?: string[];
+  allow_free_text?: boolean;
+  tool_call_id?: string;
+  tool_name?: string;
+  summary?: string;
+  task_id?: string;
+  goal?: string;
+  status?: string;
+  ok?: boolean;
+  detail?: string | null;
+}
+
+/** 把 Serve bot 事件格式化成会话里的通知文本 */
+export function formatBotEvent(ev: ServeBotEventPayload): string {
+  const bot = `「${ev.entity_name}」`;
+  switch (ev.kind) {
+    case 'question': {
+      const opts = ev.options && ev.options.length > 0 ? `\n选项：${ev.options.join(' / ')}` : '';
+      return `${bot} 在等你回答：${ev.question ?? ''}${opts}\n（在对话框里说「回答 XX bot：…」，我会用 serve_bot_chat 转达）`;
+    }
+    case 'permission':
+      return `${bot} 在等权限审批：${ev.tool_name ?? ''}（${ev.summary ?? ''}）\n（可以说「同意 XX bot 的审批」或「拒绝」，我会用 serve_bot_chat 处理）`;
+    case 'task_finished':
+      return `${bot} 的任务${ev.ok ? '已完成' : `已结束（${ev.status ?? ''}）`}：${ev.goal ?? ''}\n（说「看看 XX bot 的任务报告」可查看详情）`;
+    case 'runtime_failed':
+      return `${bot} 的 Runtime 异常退出${ev.detail ? `：${ev.detail}` : ''}\n（说「启动 XX bot」可重新拉起）`;
+    default:
+      return `${bot} 有新动态`;
+  }
+}
+
 // ===== 思考模式（thinking_enabled / thinking_effort 随 agent_start_run 下发） =====
 
 export const THINKING_EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
@@ -617,6 +655,8 @@ interface AgentState extends RunWindow {
   pushTerminal: (outcome: 'completed' | 'failed', text?: string) => void;
   /** 猫猫互动台词：本地脚本，只追加会话条目，不动运行状态 */
   pushCat: (text: string) => void;
+  /** Serve bot 反向通道通知：追加 notice 条目，不动运行状态 */
+  pushBotNotice: (text: string) => void;
   /** 收到 ask_user 提问事件（追加问题卡条目） */
   pushQuestion: (q: AgentQuestionPayload) => void;
   /** 回答问题卡：answer 为 null 表示取消（本地立即置态，后端 oneshot 解析） */
@@ -782,6 +822,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   /** 猫猫互动台词：本地脚本，只追加会话条目，不动运行状态 */
   pushCat: (text) =>
     set((s) => ({ entries: [...s.entries, withId({ kind: 'cat' as const, text })] })),
+  /** Serve bot 反向通道通知：只追加条目；运行中也不打断（notice 是独立条目） */
+  pushBotNotice: (text) =>
+    set((s) => ({ entries: [...s.entries, withId({ kind: 'notice' as const, text })] })),
   pushQuestion: (q) =>
     set((s) => {
       // 幂等防御：同一 questionId 只入列一次（防事件层重复投递）
@@ -1439,6 +1482,10 @@ export function ensureAgentListeners(): Promise<void> {
       })),
       Promise.resolve().then(() => listen<AgentSettledPayload>('agent-run-settled', (e) => {
         if (ready) settleRun(e.payload);
+      })),
+      Promise.resolve().then(() => listen<ServeBotEventPayload>('serve-bot-event', (e) => {
+        // bot 反向通道：追加通知条目到当前会话（多会话 V1 简化：只进激活会话）
+        if (ready) useAgentStore.getState().pushBotNotice(formatBotEvent(e.payload));
       })),
     ]);
     const errors: unknown[] = [];

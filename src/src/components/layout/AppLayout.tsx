@@ -13,6 +13,7 @@ import {
   Activity,
   Square,
   X,
+  Server,
 } from 'lucide-react';
 import { useNmStore } from '@/stores/nm';
 import { useFavoriteStore } from '@/stores/favorite';
@@ -23,6 +24,7 @@ import './layout.scss';
 
 const menuItems = [
   { id: 'agent', label: 'Agent', path: '/agent', icon: Bot },
+  { id: 'serve', label: 'Agent 服务', path: '/serve', icon: Server },
   { id: 'workspace', label: '工作空间', path: '/workspace', icon: FolderOpen },
   { id: 'market-mcp', label: '扩展管理', path: '/market/mcp', icon: Blocks },
   { id: 'market-skills', label: '技能管理', path: '/market/skills', icon: GraduationCap },

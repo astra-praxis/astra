@@ -196,8 +196,8 @@ name = "astra-agent"
 version = "1.0.0-rc.1"
 dependencies = [
  "astra-config",
- "astra-core",
  "astra-generation",
+ "astra-runtime",
  "astra-store-sqlite",
  "astra-workspace",
 ]
@@ -207,12 +207,12 @@ name = "astra-config"
 version = "1.0.0-rc.1"
 dependencies = [
  "astra-acp",
- "astra-core",
  "astra-error",
  "astra-events",
  "astra-mcp",
  "astra-model",
  "astra-permission",
+ "astra-runtime",
  "astra-store-sqlite",
  "astra-tools",
  "async-trait",
@@ -222,27 +222,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "astra-core"
-version = "1.0.0-rc.1"
-dependencies = [
- "astra-error",
- "astra-events",
- "astra-model",
- "astra-permission",
- "astra-skill",
- "astra-task",
- "astra-tools",
- "async-trait",
- "futures",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -315,9 +294,9 @@ dependencies = [
 name = "astra-memory-provider"
 version = "0.1.0"
 dependencies = [
- "astra-core",
  "astra-error",
  "astra-memory",
+ "astra-runtime",
  "async-trait",
  "serde_json",
  "tracing",
@@ -364,6 +343,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-runtime"
+version = "1.0.0-rc.1"
+dependencies = [
+ "astra-error",
+ "astra-events",
+ "astra-model",
+ "astra-permission",
+ "astra-skill",
+ "astra-task",
+ "astra-tools",
+ "async-trait",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "astra-skill"
 version = "1.0.0-rc.1"
 dependencies = [
@@ -376,10 +376,10 @@ dependencies = [
 name = "astra-store-sqlite"
 version = "1.0.0-rc.1"
 dependencies = [
- "astra-core",
  "astra-error",
  "astra-events",
  "astra-model",
+ "astra-runtime",
  "astra-task",
  "async-trait",
  "serde",
@@ -449,9 +449,9 @@ dependencies = [
 name = "astra-workspace"
 version = "1.0.0-rc.1"
 dependencies = [
- "astra-core",
  "astra-error",
  "astra-process",
+ "astra-runtime",
  "async-trait",
  "tokio",
  "tracing",

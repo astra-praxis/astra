@@ -1,0 +1,277 @@
+//! Serve 控制台（astra-serve 宿主的桌面端入口）。
+//!
+//! 职责边界：桌面端是 Serve 的 Client，不在本进程内托管 Entity。
+//! 这里只做三件事：
+//! - 探测本机 Serve 是否在运行（TCP 探测）
+//! - 拉起独立常驻的 `astra-serve-host` 进程（不随桌面端退出而停止）
+//! - 用独立 WebviewWindow 打开 Serve 自带的 Web 管理页（Entity 列表 /
+//!   工作区 / 对话），窗口关了 Serve 照常跑
+//!
+//! Serve 二进制定位顺序：显式传入 → `~/.astra/bin/astra-serve-host` →
+//! app_data_dir/bin → PATH（`which`）。token 持久化在
+//! `<data>/serve/token`，首次自动生成（32 hex），之后复用。
+
+use std::net::TcpStream;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use serde::Serialize;
+use tauri::{AppHandle, Manager};
+
+pub(crate) const DEFAULT_PORT: u16 = 8800;
+
+fn port_of(port: Option<u16>) -> u16 {
+    port.unwrap_or(DEFAULT_PORT)
+}
+
+fn is_listening(port: u16) -> bool {
+    TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}").parse().expect("valid addr"),
+        Duration::from_millis(400),
+    )
+    .is_ok()
+}
+
+/// serve 数据目录：`<app_data_dir>/serve`（机器级，不随账户隔离——
+/// Serve 是本机常驻服务，不属于任何一个账户）。
+fn serve_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {e}"))?
+        .join("serve");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 serve 目录失败: {e}"))?;
+    Ok(dir)
+}
+
+/// token：显式传入 > `<serve_dir>/token` 现值 > 自动生成并落盘。
+fn ensure_token(app: &AppHandle, explicit: Option<&str>) -> Result<String, String> {
+    let path = serve_dir(app)?.join("token");
+    if let Some(t) = explicit {
+        let t = t.trim().to_string();
+        if t.is_empty() {
+            return Err("token 不能为空".into());
+        }
+        std::fs::write(&path, &t).map_err(|e| format!("写入 token 失败: {e}"))?;
+        return Ok(t);
+    }
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let t = existing.trim().to_string();
+        if !t.is_empty() {
+            return Ok(t);
+        }
+    }
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    std::fs::write(&path, &token).map_err(|e| format!("写入 token 失败: {e}"))?;
+    Ok(token)
+}
+
+/// Serve 二进制定位：显式路径 → ~/.astra/bin → app_data_dir/bin → PATH。
+fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(p) = explicit {
+        let p = PathBuf::from(p.trim());
+        if p.is_file() {
+            return Ok(p);
+        }
+        return Err(format!("指定的 Serve 程序不存在: {}", p.display()));
+    }
+    let mut searched: Vec<String> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        let candidate = PathBuf::from(home).join(".astra/bin/astra-serve-host");
+        searched.push(candidate.display().to_string());
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    if let Ok(data) = app.path().app_data_dir() {
+        let candidate = data.join("bin/astra-serve-host");
+        searched.push(candidate.display().to_string());
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    if let Ok(found) = which::which("astra-serve-host") {
+        return Ok(found);
+    }
+    searched.push("PATH 中的 astra-serve-host".to_string());
+    Err(format!(
+        "未找到 astra-serve-host。已尝试: {}。可在下方填入程序路径后重试。",
+        searched.join("、")
+    ))
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ServeStatus {
+    pub running: bool,
+    pub port: u16,
+}
+
+/// 探测本机 Serve 是否在监听。
+#[tauri::command]
+pub(crate) fn serve_console_status(port: Option<u16>) -> ServeStatus {
+    let port = port_of(port);
+    ServeStatus {
+        running: is_listening(port),
+        port,
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ServeStartInfo {
+    /// true = 本次拉起；false = 端口已有服务（视为已运行）
+    pub started: bool,
+    pub port: u16,
+    pub token: String,
+    pub bin_path: String,
+    pub data_dir: String,
+}
+
+/// 把桌面端已配置的模型来源同步成宿主 `settings.json` 的 providers 段。
+/// 只覆盖 `providers` 字段，其余（搜索源、profiles 等 Web 页配置）保留。
+/// best-effort：providers 解密失败（未解锁等）或写盘失败只记日志，不阻塞启动。
+fn sync_host_settings(app: &AppHandle, data_dir: &std::path::Path) {
+    let providers = match crate::providers::list_providers(app.clone()) {
+        Ok(p) if !p.is_empty() => p,
+        Ok(_) => return, // 桌面端还没配模型来源：不动宿主文件
+        Err(e) => {
+            app_log!(warn, "serve", "同步宿主模型来源失败（跳过）: {e}");
+            return;
+        }
+    };
+    let items: Vec<serde_json::Value> = providers
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "name": p.name,
+                "base_url": p.base_url,
+                "api_key": p.api_key,
+                "active_model": p.active_model,
+                "protocol": if p.kind == crate::providers::ProviderKind::Anthropic {
+                    "anthropic"
+                } else {
+                    "openai_compat"
+                },
+            })
+        })
+        .collect();
+    let path = data_dir.join("settings.json");
+    let mut root: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    root["providers"] = serde_json::Value::Array(items);
+    let content = match serde_json::to_string_pretty(&root) {
+        Ok(c) => c,
+        Err(e) => {
+            app_log!(warn, "serve", "序列化宿主 settings 失败（跳过）: {e}");
+            return;
+        }
+    };
+    if let Err(e) = std::fs::write(&path, content) {
+        app_log!(warn, "serve", "写宿主 settings.json 失败（跳过）: {e}");
+    }
+}
+
+/// 拉起（或复用）本机 Serve。进程 detached：桌面端退出不影响它。
+#[tauri::command]
+pub(crate) fn serve_console_start(
+    app: AppHandle,
+    bin_path: Option<String>,
+    port: Option<u16>,
+    token: Option<String>,
+) -> Result<ServeStartInfo, String> {
+    let port = port_of(port);
+    let data_dir = serve_dir(&app)?;
+    let token = ensure_token(&app, token.as_deref())?;
+
+    // 桌面端模型来源 → 宿主 settings.json（新建 Entity 的 providers 模板）。
+    // 无论是否复用已有进程都同步，保持「Agent 页默认 provider」即建 bot 默认模型。
+    sync_host_settings(&app, &data_dir);
+
+    if is_listening(port) {
+        // 已有服务在跑：不覆盖、不重复拉起（token 可能属于它，前端会校验）。
+        return Ok(ServeStartInfo {
+            started: false,
+            port,
+            token,
+            bin_path: String::new(),
+            data_dir: data_dir.display().to_string(),
+        });
+    }
+
+    let bin = resolve_bin(&app, bin_path.as_deref())?;
+
+    // 端口落盘：serve_tool 等无 app 句柄的模块从文件读连接信息
+    let _ = std::fs::write(data_dir.join("port"), port.to_string());
+
+    // stdout/stderr 追加进 serve/serve-host.log，方便排查启动失败。
+    let log_path = data_dir.join("serve-host.log");
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("打开日志文件失败: {e}"))?;
+    let log_err = log
+        .try_clone()
+        .map_err(|e| format!("复制日志句柄失败: {e}"))?;
+
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--dir")
+        .arg(&data_dir)
+        .arg("--token")
+        .arg(&token)
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_err));
+    crate::proc_util::hide_window(&mut cmd);
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("启动 {} 失败: {e}", bin.display()))?;
+    // 刻意不保留 Child：Serve 是独立常驻服务，随桌面端退出被杀反而违背设计。
+    drop(child);
+
+    // 轮询最多 ~5s 等端口就绪。
+    for _ in 0..25 {
+        std::thread::sleep(Duration::from_millis(200));
+        if is_listening(port) {
+            return Ok(ServeStartInfo {
+                started: true,
+                port,
+                token,
+                bin_path: bin.display().to_string(),
+                data_dir: data_dir.display().to_string(),
+            });
+        }
+    }
+    Err(format!(
+        "Serve 进程已启动但端口 {port} 未就绪（5s），日志: {}",
+        log_path.display()
+    ))
+}
+
+/// 用独立窗口打开 Serve 自带的 Web 管理页。同端口复用已有窗口并聚焦。
+#[tauri::command]
+pub(crate) fn serve_console_open(app: AppHandle, port: Option<u16>) -> Result<String, String> {
+    let port = port_of(port);
+    if !is_listening(port) {
+        return Err(format!("Serve 未在端口 {port} 运行，请先启动"));
+    }
+    let label = format!("serve-console-{port}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(label);
+    }
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+    let url: tauri::Url = format!("http://127.0.0.1:{port}/")
+        .parse()
+        .map_err(|e| format!("无效的 Serve 地址: {e}"))?;
+    WebviewWindowBuilder::new(&app, label.clone(), WebviewUrl::External(url))
+        .title("Astra Serve")
+        .inner_size(1180.0, 780.0)
+        .build()
+        .map_err(|e| format!("打开 Serve 控制台窗口失败: {e}"))?;
+    Ok(label)
+}

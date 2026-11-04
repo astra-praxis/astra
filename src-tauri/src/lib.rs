@@ -8,6 +8,9 @@ mod extensions;
 mod memory;
 mod proc_util;
 mod providers;
+mod serve_console;
+mod serve_tool;
+mod serve_watch;
 mod skills;
 
 // 非 panic 版 eprintln!：stderr 写失败（如冷切换后死管道 EPIPE）时静默。
@@ -255,6 +258,10 @@ pub fn run() {
             // 访问密码锁定时跳过，解锁命令会再调 init_memory_host 补做。
             init_memory_host(app.handle());
 
+            // Serve bot 反向通道：轮询 Serve 待办（提问/审批）与任务终态，
+            // 推给前端（serve-bot-event 事件）。Serve 未启动时静默重试。
+            serve_watch::spawn(app.handle().clone());
+
             // 内置技能（astra-memory 记忆指南 + astra-find-skills 找装技能）：
             // 技能库中已有同名技能时不覆盖，用户修改优先。best-effort。
             if let Err(error) = skills::user::ensure_builtin_skills(app.handle()) {
@@ -405,6 +412,10 @@ pub fn run() {
             memory::host::memory_search,
             memory::host::memory_remember,
             memory::host::memory_forget,
+            // Serve 控制台（桌面端作为 astra-serve 的 Client 入口）
+            serve_console::serve_console_status,
+            serve_console::serve_console_start,
+            serve_console::serve_console_open,
             // Agent Sessions
             agent::sessions::list_agent_sessions,
             agent::sessions::save_agent_session,

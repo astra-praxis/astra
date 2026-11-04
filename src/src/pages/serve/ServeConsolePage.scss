@@ -1,0 +1,218 @@
+/**
+ * Agent 服务页（Serve 控制台入口）样式：单栏卡片，BEM + 主题变量。
+ */
+@use '@/styles/variables' as *;
+
+.serve-console {
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+}
+
+.serve-console__head {
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  p {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+}
+
+.serve-console__error {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.serve-console__card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+}
+
+.serve-console__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.serve-console__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+
+  &.is-on {
+    background: var(--success-text, var(--accent));
+  }
+}
+
+.serve-console__state {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.serve-console__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+
+  &:hover {
+    color: var(--text-primary);
+    background: var(--bg-subtle);
+  }
+}
+
+.serve-console__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.serve-console__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &.primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--on-accent-text);
+
+    &:hover:not(:disabled) {
+      background: var(--accent-hover);
+      color: var(--on-accent-text);
+    }
+  }
+}
+
+.serve-console__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  label {
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--text-secondary);
+  }
+
+  input {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-input, var(--bg-surface));
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+
+    &:focus {
+      border-color: var(--accent);
+    }
+  }
+}
+
+.serve-console__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.serve-console__meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  > div {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  dt {
+    flex-shrink: 0;
+    width: 72px;
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--text-muted);
+  }
+
+  dd {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-primary);
+    word-break: break-all;
+
+    code {
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-size: 11px;
+      background: var(--bg-subtle);
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+  }
+}

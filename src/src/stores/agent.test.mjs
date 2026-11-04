@@ -343,7 +343,7 @@ test('partial listener registration cannot consume SDK or host events', async ()
   assert.equal(store.getState().error, '');
   last.reject(new Error('failed'));
   await assert.rejects(task, /监听注册失败/);
-  assert.equal(removals, 2);
+  assert.equal(removals, 3);
 });
 
 test('status recovers missed settlement, retained errors and successful retry', async () => {
@@ -436,12 +436,12 @@ for (const failed of ['agent-event', 'agent-question', 'agent-run-settled']) {
     const first = ensureAgentListeners();
     assert.equal(first, ensureAgentListeners());
     await assert.rejects(first, /监听注册失败/);
-    assert.equal(registrations, 3);
-    assert.equal(removals, 2);
+    assert.equal(registrations, 4);
+    assert.equal(removals, 3);
     fail = false;
     await ensureAgentListeners();
     await ensureAgentListeners();
-    assert.equal(registrations, 6);
+    assert.equal(registrations, 8);
     store.setState({ sessionId: 's' });
     store.getState().setRunState(true, null);
     callbacks.get('agent-question')({ payload: { session_id: 'foreign', question_id: 'bad' } });

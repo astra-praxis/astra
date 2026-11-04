@@ -150,7 +150,11 @@ impl AgentTool for ServeBotList {
         }
         out.push_str(&format!("Serve 上共 {} 个 bot：\n", items.len()));
         for e in &items {
-            let id = e.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            let id = e
+                .get("entity_id")
+                .or_else(|| e.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let name = e.get("name").and_then(|v| v.as_str()).unwrap_or(id);
             let state = e
                 .pointer("/runtime/state")
@@ -266,7 +270,11 @@ impl AgentTool for ServeBotManage {
                     })),
                 )
                 .await?;
-                let id = created.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                let id = created
+                    .get("entity_id")
+                    .or_else(|| created.get("id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 Ok(ToolOutput::from(format!(
                     "已创建 bot「{name}」（id={id}），工作空间 {}，模型来源沿用桌面端默认。\
                      它还不能对话：先用 serve_bot_manage action=start id={id} 启动 Runtime。",

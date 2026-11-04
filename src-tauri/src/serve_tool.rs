@@ -105,6 +105,10 @@ fn arg_str(args: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn arg_num(args: &Value, key: &str) -> Option<u32> {
+    args.get(key).and_then(|v| v.as_u64()).map(|v| v as u32)
+}
+
 fn require(args: &Value, tool: &str, key: &str) -> Result<String> {
     arg_str(args, key).ok_or_else(|| Error::tool(tool, format!("缺少必填参数 {key}")))
 }
@@ -337,11 +341,47 @@ impl AgentTool for ServeBotManage {
                     None,
                 )
                 .await?;
-                let text = serde_json::to_string_pretty(&raw).unwrap_or_default();
-                Ok(ToolOutput::from(format!(
-                    "bot {id} 的触发器：\n{}",
-                    text.chars().take(2000).collect::<String>()
-                )))
+                let mut out = format!("bot {id} 的触发器：\n");
+                let triggers = raw
+                    .get("triggers")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                if triggers.is_empty() {
+                    out.push_str("（无）\n");
+                }
+                for t in &triggers {
+                    let tid = t.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                    let kind = t.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+                    let enabled = t.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let mission = t
+                        .get("mission_template")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let config = t.get("config").cloned().unwrap_or(serde_json::json!({}));
+                    out.push_str(&format!(
+                        "- {tid}（{kind}，{}）：{mission}；config={config}\n",
+                        if enabled { "已启用" } else { "已禁用" }
+                    ));
+                }
+                // 忙时入队、待补跑的触发器事件（问题 10：入队要有可见性）
+                let queue = raw
+                    .get("queue")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                if !queue.is_empty() {
+                    out.push_str(&format!(
+                        "\n排队中的触发器事件（{} 条，忙时入队待补跑）：\n",
+                        queue.len()
+                    ));
+                    for q in queue.iter().take(10) {
+                        let tid = q.get("trigger_id").and_then(|v| v.as_str()).unwrap_or("?");
+                        let title = q.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                        out.push_str(&format!("- {tid}: {title}\n"));
+                    }
+                }
+                Ok(ToolOutput::from(out))
             }
             "trigger_add" => {
                 let id = require(&args, self.name(), "id")?;
@@ -492,8 +532,9 @@ impl AgentTool for ServeBotTask {
     }
     fn description(&self) -> &str {
         "管理 bot 的任务（Task）。action=list 列任务；action=assign 给 bot 下发新目标（参数 id + goal，\
-         用户说「让 bot 去做XX」「给 bot 安排个任务」时用，bot Runtime 必须已启动）；\
-         action=report 查最新任务报告；action=cancel 取消当前任务。\
+         用户说「让 bot 去做XX」「给 bot 安排个任务」时用，bot Runtime 必须已启动，\
+         停止态会提示先 start）；action=report 查最新任务报告；action=cancel 取消当前任务。\
+         可选：max_turns_per_action / max_actions 收紧执行预算（mission 模糊时防长时间空转）。\
          注意：这是长期目标式任务（bot 自主执行），只是一句话问答请用 serve_bot_chat"
     }
     fn parameters_schema(&self) -> Value {
@@ -504,7 +545,9 @@ impl AgentTool for ServeBotTask {
                 "action": { "type": "string", "enum": ["list", "assign", "report", "cancel"] },
                 "id": { "type": "string", "description": "bot id" },
                 "goal": { "type": "string", "description": "任务目标/完整要求（assign 必填）" },
-                "title": { "type": "string", "description": "任务标题（assign 可选；缺省取 goal 首行前 40 字）" }
+                "title": { "type": "string", "description": "任务标题（assign 可选；缺省取 goal 首行前 40 字）" },
+                "max_turns_per_action": { "type": "integer", "description": "assign 可选：单 Action 轮数上限（默认 50，模糊任务可降到 10-20 防空转）" },
+                "max_actions": { "type": "integer", "description": "assign 可选：整任务 Action 数上限（默认 12）" }
             }
         })
     }
@@ -574,6 +617,10 @@ impl AgentTool for ServeBotTask {
                         "title": title,
                         "mission": goal,
                         "idempotency_key": uuid::Uuid::new_v4().to_string(),
+                        "budget": {
+                            "per_action_max_turns": arg_num(&args, "max_turns_per_action"),
+                            "max_actions": arg_num(&args, "max_actions"),
+                        }
                     })),
                 )
                 .await?;

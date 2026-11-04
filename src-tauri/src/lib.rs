@@ -329,9 +329,13 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // 点击关闭按钮时不退出，而是隐藏到托盘
-                window.hide().ok();
-                api.prevent_close();
+                // 主窗口点关闭 → 隐藏到托盘（常驻）；其他窗口（如 Serve
+                // 控制台子窗口）照常真正关闭，否则 X 无效且外链页面
+                // 的轮询/Webview 一直存活。
+                if window.label() == "main" {
+                    window.hide().ok();
+                    api.prevent_close();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

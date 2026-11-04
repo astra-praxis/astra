@@ -404,7 +404,7 @@ pub(crate) fn serve_console_open(app: AppHandle, port: Option<u16>) -> Result<St
         return Ok(label);
     }
     use tauri::{WebviewUrl, WebviewWindowBuilder};
-    let url: tauri::Url = format!("http://127.0.0.1:{port}/")
+    let url: tauri::Url = format!("http://127.0.0.1:{port}/?console=1")
         .parse()
         .map_err(|e| format!("无效的 Serve 地址: {e}"))?;
     WebviewWindowBuilder::new(&app, label.clone(), WebviewUrl::External(url))

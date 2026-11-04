@@ -6,6 +6,18 @@ import { reportError } from './lib/log';
 import './styles/global.scss';
 import './styles/ui.scss';
 
+// 非 Tauri 环境（浏览器 / astra-serve-host 内嵌控制台窗口）只放行
+// 管理页需要的路由，阻断桌面端专属逻辑（账户门、Agent 会话等全依赖
+// Tauri IPC，外链窗口里拿不到，误入只会白屏/建垃圾会话）。
+// 用 hash 路由直接指向 /serve，UI 复用同一 SPA。
+const isEmbeddedConsole =
+  typeof window !== 'undefined' &&
+  !('__TAURI_INTERNALS__' in window) &&
+  new URLSearchParams(window.location.search).has('console');
+if (isEmbeddedConsole) {
+  window.location.hash = '#/serve';
+}
+
 // 主题初始化必须在渲染之前调用，否则刷新时闪白
 initTheme();
 

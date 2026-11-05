@@ -37,7 +37,7 @@ dirs = "5"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["time", "process", "io-util", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["time", "process", "io-util", "rt-multi-thread", "sync", "fs"] }
 async-trait = "0.1"
 which = "7"
 uuid = { version = "1", features = ["v4"] }

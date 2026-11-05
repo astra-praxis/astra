@@ -80,7 +80,7 @@ fn host_bin_name() -> &'static str {
 
 /// Serve 二进制定位：显式路径 → ~/.astra/bin → app_data_dir/bin → PATH。
 /// 全部落空且非显式路径时，自动从分发仓库下载（见 `download_serve_bin`）。
-fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, String> {
+async fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, String> {
     if let Some(p) = explicit {
         let p = PathBuf::from(p.trim());
         if p.is_file() {
@@ -110,7 +110,7 @@ fn resolve_bin(app: &AppHandle, explicit: Option<&str>) -> Result<PathBuf, Strin
     }
     searched.push("PATH 中的 astra-serve-host".to_string());
     let local_err = format!("未找到 astra-serve-host。已尝试: {}。", searched.join("、"));
-    match download_serve_bin(app) {
+    match download_serve_bin(app).await {
         Ok(path) => {
             app_log!(info, "serve", "Serve 二进制已自动下载: {}", path.display());
             Ok(path)
@@ -149,8 +149,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// 从分发仓库下载 serve 二进制到 app_data_dir/bin/。sha256 校验失败不落盘。
-/// 阻塞调用（同步命令上下文，通过 tauri 的 tokio runtime 发请求）。
-fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
+async fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
     let triple = current_triple();
     if triple == "unknown" {
         return Err(format!(
@@ -168,17 +167,15 @@ fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
         .build()
         .map_err(|e| format!("HTTP 客户端创建失败: {e}"))?;
 
-    let manifest = tauri::async_runtime::block_on(async {
-        client
-            .get(SERVE_DIST_LATEST)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| format!("拉取 latest.json 失败（网络受限需代理?）: {e}"))?
-            .json::<serde_json::Value>()
-            .await
-            .map_err(|e| format!("latest.json 解析失败: {e}"))
-    })?;
+    let manifest = client
+        .get(SERVE_DIST_LATEST)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("拉取 latest.json 失败（网络受限需代理?）: {e}"))?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("latest.json 解析失败: {e}"))?;
     let entry = manifest
         .pointer(&format!("/files/{triple}"))
         .ok_or_else(|| format!("latest.json 里没有平台 {triple} 的产物"))?;
@@ -191,17 +188,15 @@ fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
         .and_then(|v| v.as_str())
         .ok_or("latest.json 条目缺 sha256")?;
 
-    let bytes = tauri::async_runtime::block_on(async {
-        client
-            .get(url)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| format!("下载失败: {e}"))?
-            .bytes()
-            .await
-            .map_err(|e| format!("读取响应失败: {e}"))
-    })?;
+    let bytes = client
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("下载失败: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("读取响应失败: {e}"))?;
     let got = sha256_hex(&bytes);
     if got != want.to_lowercase() {
         return Err(format!("sha256 校验失败：期望 {want}，实际 {got}"));
@@ -212,10 +207,14 @@ fn download_serve_bin(app: &AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
     let bin_dir = data_dir.join("bin");
-    std::fs::create_dir_all(&bin_dir).map_err(|e| format!("创建 bin 目录失败: {e}"))?;
+    tokio::fs::create_dir_all(&bin_dir)
+        .await
+        .map_err(|e| format!("创建 bin 目录失败: {e}"))?;
     let exe = host_bin_name();
     let path = bin_dir.join(exe);
-    std::fs::write(&path, &bytes).map_err(|e| format!("写入二进制失败: {e}"))?;
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| format!("写入二进制失败: {e}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -297,9 +296,21 @@ fn sync_host_settings(app: &AppHandle, data_dir: &std::path::Path) {
     }
 }
 
+/// 异步端口探测：同步 TCP 探测最多阻塞 400ms，扔给 blocking 池，
+/// 避免占用 async worker（轮询里会调用 25 次）。
+async fn probe(port: u16) -> bool {
+    tauri::async_runtime::spawn_blocking(move || is_listening(port))
+        .await
+        .unwrap_or(false)
+}
+
 /// 拉起（或复用）本机 Serve。进程 detached：桌面端退出不影响它。
+///
+/// 必须是 async 命令：Tauri 里同步命令跑在主线程，而这里可能触发二进制
+/// 下载（GitHub 直连黑洞时最坏几十秒），会把整个窗口卡死。async 命令
+/// 在 async runtime 上执行，UI 线程始终可响应。
 #[tauri::command]
-pub(crate) fn serve_console_start(
+pub(crate) async fn serve_console_start(
     app: AppHandle,
     bin_path: Option<String>,
     port: Option<u16>,
@@ -311,9 +322,14 @@ pub(crate) fn serve_console_start(
 
     // 桌面端模型来源 → 宿主 settings.json（新建 Entity 的 providers 模板）。
     // 无论是否复用已有进程都同步，保持「Agent 页默认 provider」即建 bot 默认模型。
-    sync_host_settings(&app, &data_dir);
+    // 读 providers 可能解密 keychain（阻塞），放 blocking 池。
+    {
+        let app = app.clone();
+        let dir = data_dir.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || sync_host_settings(&app, &dir)).await;
+    }
 
-    if is_listening(port) {
+    if probe(port).await {
         // 已有服务在跑：不覆盖、不重复拉起（token 可能属于它，前端会校验）。
         return Ok(ServeStartInfo {
             started: false,
@@ -324,7 +340,7 @@ pub(crate) fn serve_console_start(
         });
     }
 
-    let bin = resolve_bin(&app, bin_path.as_deref())?;
+    let bin = resolve_bin(&app, bin_path.as_deref()).await?;
 
     // 端口落盘：serve_tool 等无 app 句柄的模块从文件读连接信息
     let _ = std::fs::write(data_dir.join("port"), port.to_string());
@@ -360,9 +376,7 @@ pub(crate) fn serve_console_start(
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(
-            CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
-        );
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB);
     }
 
     let child = cmd
@@ -373,8 +387,8 @@ pub(crate) fn serve_console_start(
 
     // 轮询最多 ~5s 等端口就绪。
     for _ in 0..25 {
-        std::thread::sleep(Duration::from_millis(200));
-        if is_listening(port) {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if probe(port).await {
             return Ok(ServeStartInfo {
                 started: true,
                 port,

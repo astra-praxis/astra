@@ -43,6 +43,12 @@
   width: 420px;
 }
 
+/* 宽屏弹窗（差异对比、代码查看等需要横向空间的场景） */
+.modal.wide {
+  width: min(1100px, 92vw);
+  max-height: 88vh;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

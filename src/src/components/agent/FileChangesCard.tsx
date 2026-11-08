@@ -265,7 +265,7 @@ export function FileChangesCard({ runId, files }: FileChangesCardProps) {
         open={diff !== null}
         onClose={() => setDiff(null)}
         title={diff ? `差异 · ${diff.path}` : '查看差异'}
-        variant="default"
+        variant="wide"
       >
         {diff?.loading && (
           <div className="fcard__diff-loading">

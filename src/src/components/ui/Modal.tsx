@@ -17,8 +17,8 @@ interface ModalProps {
   children: ReactNode;
   /** 底部按钮区；不传则不渲染 footer */
   footer?: ReactNode;
-  /** "confirm" 更紧凑（420px） */
-  variant?: 'default' | 'confirm';
+  /** "confirm" 更紧凑（420px）；"wide" 宽屏（差异对比 / 代码查看） */
+  variant?: 'default' | 'confirm' | 'wide';
   /** 点击遮罩是否关闭（表单弹窗建议 false 防误触丢输入） */
   closeOnOverlay?: boolean;
   /** 提交中时禁用关闭 */
@@ -45,7 +45,7 @@ export default function Modal({
       <Dialog.Portal>
         <Dialog.Overlay className="modal-overlay" />
         <Dialog.Content
-          className={`modal${variant === 'confirm' ? ' compact' : ''}`}
+          className={`modal${variant === 'confirm' ? ' compact' : variant === 'wide' ? ' wide' : ''}`}
           onInteractOutside={(e) => {
             if (!closeOnOverlay) e.preventDefault();
           }}

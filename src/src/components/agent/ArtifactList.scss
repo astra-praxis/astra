@@ -1,9 +1,9 @@
 .artifact-list {
   display: grid;
-  gap: 8px;
+  gap: 2px;
   width: 100%;
   min-width: 0;
-  margin: 8px 0 0;
+  margin: 2px 0 0;
   padding: 0;
   list-style: none;
   font-size: 12px;
@@ -11,10 +11,11 @@
 
   &__item {
     min-width: 0;
-    padding: 8px 12px;
-    border: 1px solid var(--divider, var(--border-color));
-    border-radius: 12px;
-    background: var(--bg-surface-soft, var(--bg-surface));
+    // 纯文字流：不套卡片壳，只靠缩进与行高
+    padding: 1px 0 1px 12px;
+    border: none;
+    border-radius: 0;
+    background: none;
   }
 
   &__header {

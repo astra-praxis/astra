@@ -1,24 +1,31 @@
 .stream-block {
   align-self: stretch;
   width: 100%;
-  padding: 6px 12px;
-  background: var(--bg-surface-soft, var(--bg-surface));
-  border: 1px solid var(--divider, var(--border-color));
-  border-radius: 12px;
+  padding: 0;
+  // 无底色 / 无边框 / 无阴影：思考与工具内容就是对话流里可折叠的一段
+  background: none;
+  border: none;
+  border-radius: 0;
 
   &__head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     width: 100%;
-    padding: 0;
+    padding: 1px 4px;
     font: inherit;
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--text-muted);
     background: transparent;
     border: none;
+    border-radius: 6px;
     text-align: left;
     cursor: pointer;
+    transition: background 0.12s ease;
+
+    &:hover {
+      background: var(--bg-surface-hover, rgba(128, 128, 128, 0.07));
+    }
 
     &:focus-visible {
       outline: 2px solid var(--brand-300);
@@ -37,7 +44,8 @@
   }
 
   &__body {
-    margin: 6px 0 0;
+    // 仅靠左缩进表达嵌套，不画引导线
+    margin: 0;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     font-size: 11.5px;
     line-height: 1.55;
@@ -46,17 +54,17 @@
     word-break: break-word;
     max-height: 200px;
     overflow-y: auto;
-    padding: 6px 8px;
-    border-left: 2px solid var(--divider, var(--border-color));
+    padding: 1px 0 1px 12px;
+    border: none;
   }
 
   // Monaco 编辑器容器（内容完成后的代码视图）：固定高度，超长内部滚动
   &__monaco {
-    margin: 6px 0 0;
+    margin: 2px 0 0;
     height: 300px;
     max-height: 55vh;
     border: 1px solid var(--divider, var(--border-color));
-    border-radius: 8px;
+    border-radius: 6px;
     overflow: hidden;
     background: var(--bg-surface);
 
@@ -66,21 +74,19 @@
     }
   }
 
-  // 工具内容变体：正文更亮一点、左边线用品牌色，与思考块区分
+  // 工具内容变体：正文稍亮一点，与思考块区分（不用颜色）
   &--tool {
-    background: var(--bg-surface);
 
     .stream-block__body {
       color: var(--text-secondary);
-      border-left-color: var(--brand-300);
     }
   }
 
-  // diff 内容（编辑类工具）：- 删行红 / + 增行绿
+  // diff 内容（编辑类工具）：保留 +/- 前缀，不用色底
   &--diff {
     .stream-block__body {
-      padding: 0;
-      border-left: none;
+      padding: 0 0 0 12px;
+      border: none;
     }
 
     .stream-block__diff-line {
@@ -89,13 +95,13 @@
       white-space: pre-wrap;
 
       &.is-del {
-        background: var(--danger-50, rgba(239, 68, 68, 0.08));
-        color: var(--danger-600, #e5484d);
+        color: var(--text-muted);
+        text-decoration: line-through;
+        text-decoration-color: var(--border-strong, var(--border-color));
       }
 
       &.is-add {
-        background: var(--success-50, rgba(34, 197, 94, 0.08));
-        color: var(--success-600, #16a34a);
+        color: var(--text-primary);
       }
     }
   }

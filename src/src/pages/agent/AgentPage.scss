@@ -258,7 +258,7 @@ body .content:has(.agent-root) {
   display: flex;
   flex-direction: column;
   // 右侧 16px 与 dock 外边距对齐；滚动条仍贴容器右缘（在 padding 外侧）
-  padding: 16px 16px;
+  padding: 10px 16px;
 
   // react-virtuoso 的内部 viewport 层（scroller 的直接子元素）：
   // - 恒为 position: absolute + width: 100%（Virtuoso 内部契约，不可改 relative），
@@ -272,14 +272,15 @@ body .content:has(.agent-root) {
   & > [data-viewport-type='element'] {
     left: 16px;
     right: 16px;
-    top: 10px;
+    top: 4px;
     width: auto !important;
   }
 }
 
 // 文件路径链接（FilePathText：工具卡摘要 / 工具结果 / 粘贴提示中可点击的绝对路径）
 .file-path-link {
-  color: var(--brand-500, var(--text-primary));
+  // 不做颜色区分：用下划线表达“可点”
+  color: var(--text-primary);
   cursor: pointer;
   text-decoration: underline dashed;
   text-decoration-color: var(--border-strong, currentColor);
@@ -287,7 +288,7 @@ body .content:has(.agent-root) {
   transition: color 0.12s ease;
 
   &:hover {
-    color: var(--brand-600, var(--text-primary));
+    color: var(--text-primary);
     text-decoration-style: solid;
   }
 }
@@ -304,13 +305,14 @@ body .content:has(.agent-root) {
   flex: 1 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 // 虚拟化条目包装（react-virtuoso）：条目默认块级布局，flex gap 失效，
 // 间距改由条目自身承担（纳入测量高度，滚动定位不累积误差）
 .agent-entries__item {
-  padding-bottom: 12px;
+  // 条目之间不再留垂直间隔：整条对话读起来像分段文章（间距由行高承担）
+  padding-bottom: 0;
   min-width: 0;
 }
 
@@ -345,7 +347,7 @@ body .content:has(.agent-root) {
 .aentry {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   animation: agent-fade-in 0.18s ease;
 
   // 主题排版层：字距 / 行高 / 正文字体由 agent 主题注入（默认无差）
@@ -422,6 +424,8 @@ body .content:has(.agent-root) {
     // 对齐 chat 页用户消息：全宽深色卡片，不再右对齐气泡
     align-items: stretch;
     width: 100%;
+    // 其余条目间距为 0；用户消息是对话里的分段点，上下留出呼吸间距
+    padding: 12px 0;
 
     .aentry__bubble {
       position: relative;
@@ -530,7 +534,7 @@ body .content:has(.agent-root) {
     position: relative;
     align-items: stretch;
     width: 100%;
-    padding: 4px 0;
+    padding: 0;
     color: var(--text-primary);
 
     .aentry__md {
@@ -610,7 +614,7 @@ body .content:has(.agent-root) {
     }
 
     &.is-copied {
-      color: var(--success-600);
+      color: var(--text-primary);
     }
   }
 
@@ -619,13 +623,13 @@ body .content:has(.agent-root) {
     display: inline-flex;
     gap: 4px;
     align-items: center;
-    padding: 6px 0;
+    padding: 2px 0;
 
     span {
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background: var(--brand-500);
+      background: var(--text-muted);
       animation: agent-typing 1.2s infinite;
 
       &:nth-child(2) {
@@ -645,27 +649,17 @@ body .content:has(.agent-root) {
 .aentry--tool {
   align-self: stretch;
   width: 100%;
-  padding: 8px 12px;
-  background: var(--agent-tool-bg, var(--bg-surface));
-  border: 1px solid var(--agent-tool-border, var(--border-color));
-  border-radius: var(--agent-tool-radius, 12px);
+  // 扁平行式：工具调用就是对话流里的一行，无底色无边框无圆角
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
   font-size: 12.5px;
 
-  &.is-running {
-    border-color: var(--brand-300);
-  }
-  &.is-completed {
-    border-color: var(--success-300);
-  }
-  &.is-failed {
-    border-color: var(--danger-300);
-  }
-  &.is-denied {
-    border-color: var(--warning-300);
-  }
+  // 需要你处理的确认：不上底色（左侧提示线见文件后部，需盖过分类造型的 border: none）
   &.is-perm {
-    border-color: var(--warning-300);
-    background: var(--warning-50);
+    padding: 6px 8px;
+    background: transparent;
   }
 
   .aentry__tool-head {
@@ -675,13 +669,25 @@ body .content:has(.agent-root) {
     gap: 6px;
     width: 100%;
     min-width: 0;
-    padding: 0;
+    padding: 1px 4px;
     font: inherit;
     color: var(--text-secondary);
     background: transparent;
     border: none;
+    border-radius: 6px;
     text-align: left;
     cursor: default;
+    transition: background 0.12s ease;
+
+    // hover 才显出「这一行可以点」的底，静止态保持无盒
+    &:hover {
+      background: var(--bg-surface-hover, rgba(128, 128, 128, 0.07));
+    }
+
+    // 带展开箭头（有结果可展）时才给可点手势；不支持 :has 的旧内核保持 default
+    &:has(.aentry__tool-chev) {
+      cursor: pointer;
+    }
 
     &:focus-visible {
       outline: 2px solid var(--brand-300);
@@ -716,18 +722,18 @@ body .content:has(.agent-root) {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 10px;
+    padding: 1px 8px;
     font-size: 11.5px;
-    color: var(--brand-600);
-    background: var(--brand-50);
-    border: 1px solid var(--brand-200);
-    border-radius: 999px;
+    color: var(--text-secondary);
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
     cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease;
+    transition: color 0.12s ease, border-color 0.12s ease;
 
     &:hover {
-      color: var(--brand-700);
-      background: var(--brand-100);
+      color: var(--text-primary);
+      border-color: var(--text-muted);
     }
   }
 
@@ -741,52 +747,35 @@ body .content:has(.agent-root) {
 
   .aentry__tool-name {
     font-family: var(--agent-tool-name-font, ui-monospace, 'SF Mono', Menlo, monospace);
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 600;
     letter-spacing: var(--agent-tool-name-ls, normal);
     text-transform: var(--agent-tool-name-transform, none);
-    color: var(--brand-700);
+    // 工具名去着色，靠 mono + 字重识别（颜色只留给状态图标）
+    color: var(--text-primary);
     flex-shrink: 0;
   }
 
   .aentry__tool-status {
-    flex-shrink: 0;
-    margin-left: auto;
-    font-size: 11px;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: var(--bg-surface-soft, var(--bg-surface));
-    border: 1px solid var(--border-color);
-  }
-
-  &.is-running .aentry__tool-status {
-    color: var(--brand-600);
-    background: var(--brand-50);
-    border-color: var(--brand-200);
-  }
-  &.is-completed .aentry__tool-status {
-    color: var(--success-700);
-    background: var(--success-50);
-    border-color: var(--success-100);
-  }
-  &.is-failed .aentry__tool-status {
-    color: var(--danger-700);
-    background: var(--danger-50);
-    border-color: var(--danger-100);
-  }
-  &.is-denied .aentry__tool-status {
-    color: var(--warning-700);
-    background: var(--warning-50);
-    border-color: var(--warning-100);
+    // 不再用文字/胶囊标注执行状态：头部图标（转圈 / ✓ / 警告）已说明结果，
+    // 工具卡只需要证明「这件事执行过」
+    display: none;
   }
 
   .aentry__tool-body {
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px dashed var(--divider, var(--border-color));
+    // 只靠左缩进表达层级，不画引导线、不加分隔线
+    margin: 0;
+    padding: 1px 0 1px 12px;
+    border: none;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
+  }
+
+  // 内容预览 / 思考块（StreamBlock）作为工具卡的子行：轻微缩进以区分层级
+  > .stream-block {
+    margin-left: 8px;
+    width: auto;
   }
 
   .aentry__tool-result {
@@ -799,21 +788,22 @@ body .content:has(.agent-root) {
     word-break: break-word;
     max-height: 260px;
     overflow-y: auto;
-    padding: 6px 8px;
-    background: var(--bg-surface-soft, var(--bg-surface));
-    border: 1px solid var(--divider, var(--border-color));
-    border-radius: 8px;
+    // 结果不再套小盒子：直接贴左侧引导线，靠等宽字体区分
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
   }
 
   // 工具参数内容预览已改用 StreamBlock 组件（components/agent/StreamBlock）
 
   .aentry__perm-inline {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px dashed var(--warning-200, var(--warning-300));
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--divider, var(--border-color));
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
 
   // delegate_task 卡的内联实时活动：最近工具调用 chip（子事件在 core v1
@@ -821,33 +811,32 @@ body .content:has(.agent-root) {
   // 活动时渲染；无活动时整行不出现——头部已有 loading 不重复提示。
   // chip 内部长参数 ellipsis 收缩，不会把行撑出边界
   .aentry__subtask {
-    margin-top: 8px;
-    padding-top: 8px;
-    padding-bottom: 4px;
-    border-top: 1px dashed var(--divider, var(--border-color));
+    margin: 0;
+    padding: 1px 0 1px 12px;
+    border: none;
     display: flex;
     align-items: center;
     max-width: 100%;
     min-width: 0;
   }
-  // 最近工具调用 chip：与卡片头部状态胶囊同语言（圆角 + 软底 + 细边框）
+  // 最近工具调用 chip：去胶囊化，只用等宽文本 + 左侧引导线缩进
   .aentry__subtask-tool {
     flex: 1;
     min-width: 0;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 2px 8px;
-    background: var(--bg-surface-soft, var(--bg-surface));
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
     overflow: hidden;
   }
   .aentry__subtask-tool-name {
     flex-shrink: 0;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     font-size: 10.5px;
-    color: var(--brand-600);
+    color: var(--text-primary);
   }
   .aentry__subtask-tool-args {
     flex: 1;
@@ -860,17 +849,17 @@ body .content:has(.agent-root) {
     text-overflow: ellipsis;
   }
 
-  // 内嵌确认区命令摘要：与独立权限卡同款（自带 surface 底，深色终端卡上也可读）
+  // 内嵌确认区命令摘要：只靠等宽字体区分，不套盒子
   .aentry__perm-summary {
     display: block;
-    padding: 6px 8px;
+    padding: 0 0 0 12px;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     font-size: 11.5px;
     line-height: 1.5;
     color: var(--text-secondary);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    background: none;
+    border: none;
+    border-radius: 0;
     word-break: break-all;
     max-height: 120px;
     overflow-y: auto;
@@ -894,20 +883,21 @@ body .content:has(.agent-root) {
       transition: filter 0.12s ease, background 0.12s ease;
 
       &.is-allow {
-        background: var(--success-600);
-        color: #fff;
+        background: var(--text-primary);
+        color: var(--bg-surface);
 
         &:hover {
-          filter: brightness(1.06);
+          opacity: 0.9;
         }
       }
       &.is-deny {
         background: transparent;
-        color: var(--danger-400);
-        border-color: var(--danger-400);
+        color: var(--text-secondary);
+        border-color: var(--border-color);
 
         &:hover {
-          background: var(--danger-50);
+          color: var(--text-primary);
+          border-color: var(--text-muted);
         }
       }
     }
@@ -925,133 +915,67 @@ body .content:has(.agent-root) {
     gap: 2px;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--brand-50);
-    color: var(--brand-700);
-    border: 1px solid var(--brand-200);
+    padding: 0 2px;
+    border-radius: 0;
+    background: none;
+    color: var(--text-secondary);
+    border: none;
+    border-bottom: 1px dashed var(--border-strong, var(--border-color));
   }
 }
 
 /* ===== 工具卡分类造型（term / edit / read / memory / misc） =====
-   不同工具类型用不同的卡片形态，避免所有工具长一个样。
-   基础造型在这里定义，主题风味在 _agent-themes.scss 里再覆盖。 */
+   统一为扁平行式：所有工具调用都是对话流里的一行（图标 + 工具名 + 展开区），
+   层级只靠缩进表达，不再给每类套一个盒子，也不上任何底色。 */
 
-/* --- 终端 / 命令：黑底终端风，头部带红黄绿圆点标题栏，命令带 $ 前缀 --- */
+/* --- 终端 / 命令：等宽 + 命令体缩进；不再画黑底终端盒 --- */
 .agent-root[data-agent-theme] .aentry--tool[data-tool-kind='term'] {
-  background: var(--agent-tool-term-bg, #0d1117);
-  border: 1px solid var(--agent-tool-term-border, rgba(255, 255, 255, 0.1));
-  border-radius: var(--agent-tool-radius, 10px);
-  padding: 0;
-  overflow: hidden;
+  background: none;
+  border: none;
+  border-radius: 0;
 
   .aentry__tool-head {
-    padding: 7px 12px;
-    color: var(--agent-tool-term-head, rgba(255, 255, 255, 0.75));
-    background: var(--agent-tool-term-titlebar, rgba(255, 255, 255, 0.05));
+    padding: 2px 4px;
+    color: var(--text-secondary);
+    background: none;
 
-    // 终端标题栏红黄绿三圆点：用真实 span 占位（正圆、不叠文字）
+    // 红黄绿圆点属于纯装饰：扁平行里去掉，终端身份由图标 + 等宽字体表达
     .aentry__term-dots {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      flex-shrink: 0;
-
-      i {
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: #ff5f57;
-
-        &:nth-child(2) {
-          background: #febc2e;
-        }
-
-        &:nth-child(3) {
-          background: #28c840;
-        }
-      }
+      display: none;
     }
   }
 
   .aentry__tool-name {
-    color: var(--agent-tool-term-name, #7ee787);
-  }
-
-  .aentry__tool-status {
-    color: var(--agent-tool-term-name, #7ee787);
-    background: rgba(126, 231, 135, 0.1);
-    border-color: rgba(126, 231, 135, 0.25);
-  }
-
-  .aentry__tool-body {
-    padding: 2px 12px 8px;
+    color: var(--text-primary);
   }
 
   .aentry__tool-result {
-    background: rgba(255, 255, 255, 0.03);
+    background: none;
     border: none;
-    border-left: 2px solid rgba(126, 231, 135, 0.35);
     border-radius: 0;
-    color: var(--agent-tool-term-result, rgba(255, 255, 255, 0.85));
+    color: var(--text-secondary);
   }
 }
 
-/* --- 编辑 / 写文件：编辑器风，头部带行号/文件图标底色，正文 diff 上色 --- */
+/* --- 编辑 / 写文件：扁平；差异由内容区（Monaco 代码 / diff）自己表达 --- */
 .agent-root[data-agent-theme] .aentry--tool[data-tool-kind='edit'] {
-  background: var(--agent-tool-edit-bg, var(--bg-surface));
-  border: 1px solid var(--agent-tool-edit-border, var(--border-color));
-  border-radius: var(--agent-tool-radius, 12px);
+  background: none;
+  border: none;
+  border-radius: 0;
 
   .aentry__tool-head {
-    padding: 5px 8px;
-    background: var(--agent-tool-edit-head, var(--bg-surface-soft));
-    margin: -8px -12px 0;
-    border-radius: var(--agent-tool-radius, 12px) var(--agent-tool-radius, 12px) 0 0;
-    // 基础样式的 width:100% 与负 margin 过约束（LTR 下右侧 margin 被忽略），
-    // 背景条右边会留下两侧 padding 之和的空白；width:auto 让块级元素
-    // 随负 margin 自然撑满到卡片左右边缘
-    width: auto;
-
-    .aentry__tool-name {
-      color: var(--agent-tool-edit-accent, var(--accent));
-    }
-  }
-
-  .aentry__tool-status {
-    background: var(--agent-tool-edit-head, var(--bg-surface-soft));
+    padding: 2px 4px;
+    background: transparent;
   }
 }
 
-/* --- 阅读 / 搜索 / 网络：文档风，左侧色条 + 圆角 --- */
-.agent-root[data-agent-theme] .aentry--tool[data-tool-kind='read'] {
-  border-left: 3px solid var(--agent-tool-read-bar, var(--accent));
+/* --- 阅读 / 记忆：不再上分类色条（分类信息由图标与工具名承担） --- */
 
-  .aentry__tool-name {
-    color: var(--agent-tool-read-accent, var(--accent));
-  }
-}
-
-/* --- 记忆：记忆卡风，左侧圆点装饰 + 柔和底色 --- */
-.agent-root[data-agent-theme] .aentry--tool[data-tool-kind='memory'] {
-  border-left: 3px solid var(--agent-tool-memory-bar, var(--brand-400));
-
-  .aentry__tool-head {
-    // 记忆图标前的圆点
-    &::before {
-      content: '';
-      flex-shrink: 0;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--agent-tool-memory-dot, var(--brand-400));
-      box-shadow: 0 0 0 3px var(--agent-tool-memory-ring, var(--brand-100));
-    }
-  }
-
-  .aentry__tool-name {
-    color: var(--agent-tool-memory-accent, var(--brand-600));
-  }
+/* 待你确认的工具卡：只留左侧一根中性细线（分类造型会把 border 清空，
+   这里用同级+够后期的方式盖回来） */
+.agent-root[data-agent-theme] .aentry--tool.is-perm {
+  border-left: 2px solid var(--border-color);
+  border-radius: 0 6px 6px 0;
 }
 
 /* ===== 权限确认卡 ===== */
@@ -1059,27 +983,26 @@ body .content:has(.agent-root) {
 .aentry--permission {
   align-self: stretch;
   width: 100%;
-  padding: 10px 12px;
-  background: var(--warning-50);
-  border: 1px solid var(--warning-300);
-  border-radius: 12px;
+  padding: 2px 0 2px 12px;
+  background: none;
+  // 中性细线：表示“需要你看一眼”，不用色
+  border-left: 2px solid var(--border-color);
+  border-radius: 0;
   font-size: 12.5px;
 
   &.is-allowed {
-    background: var(--bg-surface);
-    border-color: var(--success-300);
+    border-left-color: var(--divider, var(--border-color));
   }
   &.is-denied {
-    background: var(--bg-surface);
-    border-color: var(--border-color);
-    opacity: 0.75;
+    border-left-color: var(--divider, var(--border-color));
+    opacity: 0.7;
   }
 
   .aentry__perm-head {
     display: flex;
     align-items: center;
     gap: 6px;
-    color: var(--warning-700);
+    color: var(--text-primary);
 
     b {
       font-family: ui-monospace, 'SF Mono', Menlo, monospace;
@@ -1094,14 +1017,14 @@ body .content:has(.agent-root) {
 
   .aentry__perm-summary {
     display: block;
-    padding: 6px 8px;
+    padding: 0 0 0 2px;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     font-size: 11.5px;
     line-height: 1.5;
     color: var(--text-secondary);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    background: none;
+    border: none;
+    border-radius: 0;
     word-break: break-all;
     max-height: 120px;
     overflow-y: auto;
@@ -1115,29 +1038,30 @@ body .content:has(.agent-root) {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 5px 14px;
+      padding: 3px 12px;
       font-size: 12px;
-      border-radius: 8px;
+      border-radius: 6px;
       cursor: pointer;
-      transition: all 0.12s ease;
+      transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
       &.is-allow {
-        color: #fff;
-        background: var(--success-600);
-        border: 1px solid var(--success-600);
+        color: var(--bg-surface);
+        background: var(--text-primary);
+        border: 1px solid var(--text-primary);
 
         &:hover {
-          background: var(--success-700);
+          opacity: 0.88;
         }
       }
 
       &.is-deny {
-        color: var(--danger-700);
+        color: var(--text-secondary);
         background: transparent;
-        border: 1px solid var(--danger-300);
+        border: 1px solid var(--border-color);
 
         &:hover {
-          background: var(--danger-50);
+          color: var(--text-primary);
+          border-color: var(--text-muted);
         }
       }
     }
@@ -1148,7 +1072,7 @@ body .content:has(.agent-root) {
     font-weight: 600;
 
     &.is-allowed {
-      color: var(--success-600);
+      color: var(--text-primary);
     }
     &.is-denied {
       color: var(--text-muted);
@@ -1161,23 +1085,23 @@ body .content:has(.agent-root) {
 .aentry--question {
   align-self: stretch;
   width: 100%;
-  padding: 10px 12px;
-  background: var(--info-50, var(--bg-surface));
-  border: 1px solid var(--info-300, var(--border-color));
-  border-radius: 12px;
+  padding: 2px 0 2px 12px;
+  background: none;
+  border-left: 2px solid var(--border-color);
+  border-radius: 0;
   font-size: 12.5px;
 
   .aentry__q-head {
     display: flex;
     align-items: center;
     gap: 6px;
-    color: var(--info-700, var(--text-primary));
+    color: var(--text-primary);
     font-weight: 600;
     line-height: 1.45;
   }
 
   .aentry__q-state {
-    margin-top: 6px;
+    margin-top: 2px;
     font-size: 12px;
     color: var(--text-secondary);
 
@@ -1187,10 +1111,10 @@ body .content:has(.agent-root) {
   }
 
   .aentry__q-body {
-    margin-top: 8px;
+    margin-top: 6px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
 
   .aentry__q-options {
@@ -1199,17 +1123,18 @@ body .content:has(.agent-root) {
     gap: 6px;
 
     button {
-      padding: 5px 14px;
+      padding: 2px 10px;
       font-size: 12px;
-      color: var(--info-700, var(--text-primary));
-      background: var(--bg-surface);
-      border: 1px solid var(--info-300, var(--border-color));
-      border-radius: 999px;
+      color: var(--text-secondary);
+      background: none;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
       cursor: pointer;
-      transition: all 0.12s ease;
+      transition: color 0.12s ease, border-color 0.12s ease;
 
       &:hover {
-        background: var(--info-100, var(--bg-surface-soft));
+        color: var(--text-primary);
+        border-color: var(--text-muted);
       }
     }
   }
@@ -1218,18 +1143,19 @@ body .content:has(.agent-root) {
     display: flex;
     gap: 6px;
 
+    // 输入控件是操作区，不是对话内容，保留必要底色
     input {
       flex: 1;
-      padding: 5px 10px;
+      padding: 4px 10px;
       font-size: 12.5px;
       color: var(--text-primary);
       background: var(--bg-surface);
       border: 1px solid var(--border-color);
-      border-radius: 8px;
+      border-radius: 6px;
       outline: none;
 
       &:focus {
-        border-color: var(--info-500, var(--brand-500));
+        border-color: var(--text-secondary);
       }
     }
 
@@ -1237,16 +1163,16 @@ body .content:has(.agent-root) {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 5px 14px;
+      padding: 3px 12px;
       font-size: 12px;
-      border-radius: 8px;
+      border-radius: 6px;
       cursor: pointer;
-      transition: all 0.12s ease;
+      transition: opacity 0.12s ease;
 
       &.is-allow {
-        color: #fff;
-        background: var(--success-600);
-        border: 1px solid var(--success-600);
+        color: var(--bg-surface);
+        background: var(--text-primary);
+        border: 1px solid var(--text-primary);
 
         &:disabled {
           opacity: 0.5;
@@ -1254,7 +1180,7 @@ body .content:has(.agent-root) {
         }
 
         &:hover:not(:disabled) {
-          background: var(--success-700);
+          opacity: 0.88;
         }
       }
     }
@@ -1267,19 +1193,20 @@ body .content:has(.agent-root) {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 5px 14px;
+      padding: 3px 12px;
       font-size: 12px;
-      border-radius: 8px;
+      border-radius: 6px;
       cursor: pointer;
-      transition: all 0.12s ease;
+      transition: color 0.12s ease, border-color 0.12s ease;
 
       &.is-deny {
-        color: var(--danger-700);
+        color: var(--text-secondary);
         background: transparent;
-        border: 1px solid var(--danger-300);
+        border: 1px solid var(--border-color);
 
         &:hover {
-          background: var(--danger-50);
+          color: var(--text-primary);
+          border-color: var(--text-muted);
         }
       }
     }
@@ -1289,43 +1216,39 @@ body .content:has(.agent-root) {
 /* ===== 终态条 ===== */
 
 .aentry--terminal {
-  align-self: center;
+  align-self: flex-start;
   flex-direction: row;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 4px 12px;
+  padding: 1px 0;
   font-size: 11.5px;
-  border-radius: 12px;
-  background: var(--bg-surface-soft, var(--bg-surface));
-  border: 1px solid var(--border-color);
+  border-radius: 0;
+  background: none;
+  border: none;
   color: var(--text-muted);
   max-width: 90%;
   word-break: break-word;
 
+  // 终态行不靠色：失败只用更重的字重说明
   &.is-failed {
-    color: var(--danger-700);
-    background: var(--danger-50);
-    border-color: var(--danger-200);
+    color: var(--text-primary);
+    font-weight: 600;
   }
   &.is-cancelled {
-    color: var(--warning-700);
-    background: var(--warning-50);
-    border-color: var(--warning-100);
+    color: var(--text-secondary);
   }
   &.is-completed {
-    color: var(--success-700);
-    background: var(--success-50);
-    border-color: var(--success-100);
+    color: var(--text-muted);
   }
 
   .aentry__hint {
     flex-basis: 100%;
-    padding-top: 3px;
-    border-top: 1px dashed var(--danger-200);
+    padding-top: 2px;
+    border-top: 1px solid var(--divider, var(--border-color));
     font-size: 11px;
     line-height: 1.5;
-    color: var(--danger-700);
+    color: var(--text-secondary);
   }
 }
 
@@ -1343,16 +1266,14 @@ body .content:has(.agent-root) {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--brand-500);
+  background: var(--text-muted);
   animation: agent-statusline-pulse 1.2s ease-in-out infinite;
 
   &:nth-child(2) {
-    background: var(--brand-400);
     animation-delay: 0.15s;
   }
 
   &:nth-child(3) {
-    background: var(--brand-600);
     animation-delay: 0.3s;
   }
 }

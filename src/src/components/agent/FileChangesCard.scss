@@ -2,11 +2,12 @@
 .fcard {
   width: 100%;
   min-width: 0;
-  margin: 8px 0;
-  padding: 4px 0;
-  border: 1px solid var(--divider, var(--border-color));
-  border-radius: 12px;
-  background: var(--bg-surface-soft, var(--bg-surface));
+  margin: 1px 0;
+  padding: 0;
+  // 与工具行一致：不套卡片壳，变更列表直接嵌在对话流里
+  border: none;
+  border-radius: 0;
+  background: none;
   font-size: 12px;
   color: var(--text-secondary);
 
@@ -15,19 +16,24 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    padding: 6px 12px;
+    padding: 2px 4px;
     border: none;
+    border-radius: 6px;
     background: transparent;
     color: inherit;
     font: inherit;
     text-align: left;
     cursor: pointer;
+    transition: background 0.12s ease;
 
-    &:hover { color: var(--text-primary); }
+    &:hover {
+      color: var(--text-primary);
+      background: var(--bg-surface-hover, rgba(128, 128, 128, 0.07));
+    }
     &:focus-visible {
       outline: 2px solid var(--brand-300);
       outline-offset: 2px;
-      border-radius: 8px;
+      border-radius: 6px;
     }
   }
 
@@ -37,23 +43,24 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--success, #2da44e) 12%, transparent);
-    color: var(--success, #2da44e);
+    // 状态只作弱提示，不再套色底胶囊
+    color: var(--text-muted);
     font-size: 11px;
+    font-weight: 400;
   }
 
   &__stats { margin-left: auto; display: inline-flex; gap: 6px; }
-  &__add { color: var(--success, #2da44e); font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
-  &__del { color: var(--danger, #cf222e); font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+  // +/− 数量不靠颜色：靠符号本身区分
+  &__add { color: var(--text-secondary); font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+  &__del { color: var(--text-muted); font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 
   &__list {
+    // 只靠缩进，不画引导线
     margin: 0;
-    padding: 2px 8px 6px;
+    padding: 0 0 0 12px;
     list-style: none;
     display: grid;
-    gap: 2px;
+    gap: 0;
   }
 
   &__row {
@@ -61,8 +68,8 @@
     align-items: center;
     gap: 6px;
     min-width: 0;
-    padding: 4px 6px;
-    border-radius: 8px;
+    padding: 1px 6px;
+    border-radius: 5px;
 
     &:hover { background: var(--bg-surface-hover, rgba(128, 128, 128, 0.08)); }
   }
@@ -70,8 +77,8 @@
   &__kind {
     flex-shrink: 0;
     color: var(--text-muted);
-    &.is-created { color: var(--success, #2da44e); }
-    &.is-deleted { color: var(--danger, #cf222e); }
+    &.is-created { color: var(--text-secondary); }
+    &.is-deleted { color: var(--text-secondary); }
   }
 
   &__path {
@@ -85,13 +92,13 @@
 
   &__badge {
     flex-shrink: 0;
-    padding: 0 6px;
-    border-radius: 999px;
+    padding: 0 4px;
+    border-radius: 4px;
     font-size: 11px;
     color: var(--text-muted);
-    background: var(--bg-surface-hover, rgba(128, 128, 128, 0.08));
-    &.is-created { color: var(--success, #2da44e); }
-    &.is-deleted { color: var(--danger, #cf222e); }
+    background: none;
+    &.is-created { color: var(--text-secondary); }
+    &.is-deleted { color: var(--text-secondary); }
   }
 
   &__row &__add,
@@ -136,7 +143,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 2px 12px 8px;
+    padding: 2px 6px 2px 12px;
   }
 
   &__feedback {
@@ -145,8 +152,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 11px;
-    &.is-ok { color: var(--success, #2da44e); }
-    &.is-err { color: var(--danger, #cf222e); }
+    &.is-ok { color: var(--text-muted); }
+    &.is-err { color: var(--text-primary); }
   }
 
   &__restore-all {
@@ -179,16 +186,17 @@
     padding: 12px 0;
     color: var(--text-muted);
   }
-  &__diff-error { color: var(--danger, #cf222e); }
+  &__diff-error { color: var(--text-primary); font-weight: 600; }
 
   &__diff {
-    height: 55vh;
-    max-height: 60vh;
+    // 差异对比需要横向 + 纵向空间：跟随宽屏弹窗（.modal.wide）
+    height: 68vh;
+    max-height: 68vh;
     min-height: 240px;
     overflow: hidden;
     border: 1px solid var(--divider, var(--border-color));
-    border-radius: 8px;
-    background: var(--bg-surface-hover, rgba(128, 128, 128, 0.06));
+    border-radius: 6px;
+    background: var(--bg-surface);
 
     // Monaco 容器占满：编辑器实例 absolute 填充
     .monaco-view {

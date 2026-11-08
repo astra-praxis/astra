@@ -579,7 +579,6 @@ function ToolEntry({
   onDecide: (callId: string, allow: boolean) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const hasBody = !!(entry.result || (entry.artifacts && entry.artifacts.length > 0));
   const perm = entry.perm;
   const toolKind = toolKindOf(entry.toolName);
   // 各类工具的头部图标（终端 / 编辑 / 阅读 / 记忆 / 其他）
@@ -617,6 +616,13 @@ function ToolEntry({
   const previewText = contentPreview ?? streamingPreview;
   // 内容已完成 = args 已到齐（区别于流式生成中）；驱动 StreamBlock 自动收起
   const previewDone = contentPreview !== undefined;
+  // 展开后展示什么：参数预览（写入内容 / 命令 / diff）、结果输出、附件。
+  // 写 / 编辑类工具的结果只是「Wrote … (N bytes)」这类确认摘要，内容已在
+  // 参数预览里 → 不再重复展示；其它工具的结果是真实输出，保留。
+  const showResult = !!entry.result && !(toolKind === 'edit' && previewText !== undefined);
+  const showArtifacts = !!(entry.artifacts && entry.artifacts.length > 0);
+  // 有任何可展开内容时头部才可点：点这一行就直接展开内容，不再多一层标题行
+  const hasBody = !!(previewText || showResult || showArtifacts);
   const previewTitle =
     entry.toolName === 'write_file'
       ? '写入内容'
@@ -739,9 +745,11 @@ function ToolEntry({
       )}
       {previewText && (
         <StreamBlock
+          // 无头部行：工具卡这一行就是唯一的展开开关（流式期间直接可见）
+          bare
+          open={open || !previewDone}
           variant="tool"
           title={previewTitle}
-          icon={<FileText size={12} strokeWidth={1.8} />}
           text={previewText}
           done={previewDone}
           diff={toolKind === 'edit' && entry.toolName === 'edit_file'}
@@ -788,10 +796,12 @@ function ToolEntry({
           </div>
         </div>
       )}
-      {open && hasBody && (
+      {open && (showResult || showArtifacts) && (
         <div className="aentry__tool-body">
-          {entry.result && <pre className="aentry__tool-result"><FilePathText text={entry.result} /></pre>}
-          {entry.artifacts && entry.artifacts.length > 0 && (
+          {showResult && entry.result && (
+            <pre className="aentry__tool-result"><FilePathText text={entry.result} /></pre>
+          )}
+          {showArtifacts && entry.artifacts && (
             <ArtifactList artifacts={entry.artifacts} />
           )}
         </div>

@@ -772,9 +772,9 @@ body .content:has(.agent-root) {
     gap: 2px;
   }
 
-  // 内容预览 / 思考块（StreamBlock）作为工具卡的子行：轻微缩进以区分层级
+  // 内容预览 / 思考块（StreamBlock）作为工具卡的子行：与正文区缩进对齐（12px）
   > .stream-block {
-    margin-left: 8px;
+    margin-left: 12px;
     width: auto;
   }
 

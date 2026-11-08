@@ -105,4 +105,12 @@
       }
     }
   }
+
+  // 无头部行（嵌在工具卡里，由工具行控制展开）：正文不再自己缩进，
+  // 缩进由工具卡正文区（.aentry__tool-body 的 padding-left）统一负责
+  &--bare {
+    .stream-block__body {
+      padding: 1px 0;
+    }
+  }
 }

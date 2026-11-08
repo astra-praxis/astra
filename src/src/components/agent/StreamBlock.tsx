@@ -28,6 +28,8 @@ export function StreamBlock({
   diff,
   monacoLang,
   monacoDiff,
+  bare = false,
+  open: openProp,
 }: {
   text: string;
   /** 内容是否已结束；缺省视为未结束（流式中） */
@@ -41,10 +43,18 @@ export function StreamBlock({
   monacoLang?: string;
   /** 内容完成后用 Monaco 渲染为 unified diff 视图（edit_file 对照用） */
   monacoDiff?: boolean;
+  /**
+   * 无头部行：内容直接渲染，展开/收起交给父级（工具卡那一行）控制。
+   * 用在工具卡里——一行工具调用就是唯一的开关，不再多一层「写入内容 / 命令」行。
+   */
+  bare?: boolean;
+  /** 受控展开状态（仅 bare 模式生效） */
+  open?: boolean;
 }) {
   const finished = done ?? false;
-  const [open, setOpen] = useState(!finished);
+  const [innerOpen, setInnerOpen] = useState(!finished);
   const [userToggled, setUserToggled] = useState(false);
+  const open = bare ? openProp ?? true : innerOpen;
   const bodyRef = useRef<HTMLPreElement | null>(null);
   const renderedText = useStreamingText(text, !finished);
   const [scroll] = useState(() => createOutputScroll(
@@ -58,10 +68,10 @@ export function StreamBlock({
     else scroll.dispose();
   }, [open, scroll]);
 
-  // 完成后自动收起（用户手动展开过则尊重用户选择）
+  // 完成后自动收起（无头模式由父级控制，不介入）
   useEffect(() => {
-    if (finished && !userToggled) setOpen(false);
-  }, [finished, userToggled]);
+    if (!bare && finished && !userToggled) setInnerOpen(false);
+  }, [bare, finished, userToggled]);
 
   // 展开且仍在流式输出时，正文滚动条保持在最底部
   useEffect(() => {
@@ -94,23 +104,25 @@ export function StreamBlock({
   const monacoLanguage = monacoDiff ? DIFF_LANGUAGE : monacoLang ?? DIFF_LANGUAGE;
 
   return (
-    <div className={`stream-block${variant ? ` stream-block--${variant}` : ''}${diff ? ' stream-block--diff' : ''}`}>
-      <button
-        type="button"
-        className="stream-block__head"
-        onClick={() => {
-          setUserToggled(true);
-          setOpen((v) => !v);
-        }}
-      >
-        {icon}
-        <span>{title}</span>
-        <ChevronDown
-          size={12}
-          strokeWidth={2}
-          className={`stream-block__chev${open ? ' rotated' : ''}`}
-        />
-      </button>
+    <div className={`stream-block${variant ? ` stream-block--${variant}` : ''}${diff ? ' stream-block--diff' : ''}${bare ? ' stream-block--bare' : ''}`}>
+      {!bare && (
+        <button
+          type="button"
+          className="stream-block__head"
+          onClick={() => {
+            setUserToggled(true);
+            setInnerOpen((v) => !v);
+          }}
+        >
+          {icon}
+          <span>{title}</span>
+          <ChevronDown
+            size={12}
+            strokeWidth={2}
+            className={`stream-block__chev${open ? ' rotated' : ''}`}
+          />
+        </button>
+      )}
       {open && (
         <>
           {useMonaco ? (

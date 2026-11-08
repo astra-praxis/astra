@@ -21,7 +21,6 @@ import {
   Loader2,
   MonitorUp,
   Pencil,
-  RotateCcw,
   Sparkles,
   Terminal,
   Wrench,
@@ -29,10 +28,10 @@ import {
 } from 'lucide-react';
 import MarkdownMessage from '../chat/MarkdownMessage';
 import { StreamBlock } from '@/components/agent/StreamBlock';
+import { languageForPath } from '@/components/agent/monacoLanguages';
 import { ArtifactList } from '@/components/agent/ArtifactList';
 import FilePathText from '@/components/agent/FilePathText';
 import { useAgentStore, userImageUrl, type Entry } from '@/stores/agent';
-import { useMascotStore } from '@/stores/mascot';
 import type { UserSkillLite } from '@/hooks/useSlash';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -183,7 +182,6 @@ function MessageCopyButton({ text, className = '' }: { text: string; className?:
           await navigator.clipboard.writeText(text);
           setCopied(true);
           setTimeout(() => setCopied(false), 1600);
-          useMascotStore.getState().say('收好啦！', { key: 'copy-result', cooldownMs: 5000 });
         } catch {
           // 剪贴板不可用时忽略
         }
@@ -208,7 +206,6 @@ function AssistantCopyFooter({ text }: { text: string }) {
             await navigator.clipboard.writeText(text);
             setCopied(true);
             setTimeout(() => setCopied(false), 1600);
-            useMascotStore.getState().say('收好啦！', { key: 'copy-result', cooldownMs: 5000 });
           } catch {
             // 剪贴板不可用时忽略
           }
@@ -259,13 +256,11 @@ function StatusLine({ status }: { status: string | null }) {
 export const EntryView = memo(function EntryView({
   entry,
   index,
-  isLast,
   fullText,
   isRunFinalAssistant = false,
   onDecide,
   onAnswer,
   onEdit,
-  onFailureRewind,
   skills,
   fileSet,
   linkPreview = false,
@@ -273,9 +268,6 @@ export const EntryView = memo(function EntryView({
   entry: Entry;
   /** 条目在会话流中的序号：写入 data-idx，供右侧圆点导轨快速定位 */
   index: number;
-  /** 是否为会话流最后一条：失败卡片的重试/编辑动作只在末尾提供
-   *  （更早的失败轮次走消息 hover 的「编辑重发」） */
-  isLast?: boolean;
   /** 本轮 Run 聚合后的完整回复（多段 assistant 时存在）；复制用 */
   fullText?: string;
   /** 是否为该 Run 的最后一条 assistant 条目：只有它展示底部「复制全文」，避免一段回答出现多个复制按钮 */
@@ -284,8 +276,6 @@ export const EntryView = memo(function EntryView({
   onAnswer: (questionId: string, answer: string | null) => void;
   /** hover 编辑重发（仅用户消息） */
   onEdit?: (index: number) => void;
-  /** 失败卡片「重试 / 编辑后重发」 */
-  onFailureRewind?: (mode: 'retry' | 'edit') => void;
   skills: UserSkillLite[];
   fileSet: Set<string>;
   /** 开启链接拦截：assistant 消息里的 http(s) 链接在右侧预览面板打开 */
@@ -366,17 +356,6 @@ export const EntryView = memo(function EntryView({
       );
     case 'thinking':
       return <StreamBlock text={entry.text} done={entry.done} title="思考过程" icon={<Brain size={13} strokeWidth={1.8} />} />;
-    case 'cat':
-      // 猫猫互动消息：以「猫猫」前缀展示，与会话里的 agent 消息明确区分
-      return (
-        <div className="aentry aentry--cat" data-idx={index}>
-          <div className="aentry__cat-head">
-            <span className="aentry__cat-avatar" aria-hidden>🐱</span>
-            <span className="aentry__cat-name">猫猫</span>
-          </div>
-          <div className="aentry__cat-bubble">{entry.text}</div>
-        </div>
-      );
     case 'tool':
       return <ToolEntry entry={entry} onDecide={onDecide} />;
     case 'file_changes':
@@ -429,18 +408,6 @@ export const EntryView = memo(function EntryView({
                 <div className="aentry__hint">
                   所选模型与当前模型服务端点不兼容（如火山编码计划端点仅支持计划内编码模型）。
                   请在模型列表选择兼容模型，或改用标准 API 端点后新建会话。
-                </div>
-              )}
-              {isLast && onFailureRewind && (
-                <div className="aentry__rewind">
-                  <button type="button" className="aentry__rewind-btn" onClick={() => onFailureRewind('retry')}>
-                    <RotateCcw size={12} strokeWidth={1.8} />
-                    重试
-                  </button>
-                  <button type="button" className="aentry__rewind-btn" onClick={() => onFailureRewind('edit')}>
-                    <Pencil size={12} strokeWidth={1.8} />
-                    编辑后重发
-                  </button>
                 </div>
               )}
             </>
@@ -778,6 +745,15 @@ function ToolEntry({
           text={previewText}
           done={previewDone}
           diff={toolKind === 'edit' && entry.toolName === 'edit_file'}
+          // 写文件/编辑文件的内容完成后用 Monaco 渲染（VSCode 核心编辑器样式）：
+          // write/read → 按文件语言高亮；edit_file → unified diff 视图
+          monacoLang={
+            (entry.toolName === 'write_file' || entry.toolName === 'read_file') &&
+            typeof entry.args?.path === 'string'
+              ? languageForPath(entry.args.path)
+              : undefined
+          }
+          monacoDiff={toolKind === 'edit' && entry.toolName === 'edit_file'}
         />
       )}
       {delegateLive && subTask?.last_tool && (() => {

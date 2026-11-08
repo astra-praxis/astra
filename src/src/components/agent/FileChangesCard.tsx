@@ -9,7 +9,7 @@
  *   agent_change_diff / agent_change_restore），不在消息里内联 diff 数据。
  * - restorable=false 的文件（无快照，如目录/超大文件）隐藏恢复入口。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   CheckCheck,
@@ -17,6 +17,7 @@ import {
   ChevronRight,
   CircleCheck,
   Diff,
+  ExternalLink,
   FileEdit,
   FilePlus,
   FileMinus,
@@ -26,7 +27,13 @@ import {
 import Modal from '@/components/ui/Modal';
 import { useAgentStore } from '@/stores/agent';
 import type { FileChangeItem } from '@/stores/agent';
+import { useWorkspaceStore } from '@/stores/workspace';
+import { openWithEditor } from '@/lib/openService';
+import { DIFF_LANGUAGE } from './monacoLanguages';
 import './FileChangesCard.scss';
+
+// Monaco 体积大（VSCode 核心编辑器），懒加载成独立 chunk，仅打开差异时加载
+const MonacoView = lazy(() => import('./MonacoView'));
 
 const KIND_META: Record<FileChangeItem['kind'], { label: string; icon: typeof FileEdit }> = {
   created: { label: '新增', icon: FilePlus },
@@ -50,6 +57,8 @@ interface FileChangesCardProps {
 export function FileChangesCard({ runId, files }: FileChangesCardProps) {
   const sessionId = useAgentStore((s) => s.sessionId);
   const running = useAgentStore((s) => s.running || s.sessionBusy);
+  const editor = useWorkspaceStore((s) => s.editor);
+  const activePath = useWorkspaceStore((s) => s.activePath);
   const [expanded, setExpanded] = useState(files.length <= 6);
   // 宿主确认的可恢复路径集合；null 表示尚未拉取，此时不显示恢复入口（安全降级）
   const [restorableSet, setRestorableSet] = useState<Set<string> | null>(null);
@@ -137,6 +146,20 @@ export function FileChangesCard({ runId, files }: FileChangesCardProps) {
     }
   }
 
+  /** 「使用编辑器打开」：调用配置的外部编辑器（open_in_editor 宿主命令） */
+  async function openInEditor(f: FileChangeItem) {
+    if (!editor.command) {
+      setFeedback({ ok: false, text: '请先在「设置」页面配置默认编辑器' });
+      return;
+    }
+    try {
+      await openWithEditor(f.path, editor.command, activePath || undefined);
+      setFeedback({ ok: true, text: `已在 ${editor.name || editor.command} 中打开` });
+    } catch (e) {
+      setFeedback({ ok: false, text: `打开编辑器失败：${String(e)}` });
+    }
+  }
+
   return (
     <div className="fcard" data-run={runId}>
       <button
@@ -180,6 +203,19 @@ export function FileChangesCard({ runId, files }: FileChangesCardProps) {
                   >
                     <Diff size={12} strokeWidth={1.8} />
                     查看差异
+                  </button>
+                  <button
+                    type="button"
+                    className="fcard__act"
+                    title={
+                      editor.command
+                        ? `在 ${editor.name || editor.command} 中打开`
+                        : '未配置编辑器，请先在「设置」页面配置'
+                    }
+                    onClick={() => void openInEditor(f)}
+                  >
+                    <ExternalLink size={12} strokeWidth={1.8} />
+                    使用编辑器打开
                   </button>
                   {restorableSet?.has(f.path) && (
                     <button
@@ -238,7 +274,21 @@ export function FileChangesCard({ runId, files }: FileChangesCardProps) {
           </div>
         )}
         {diff && !diff.loading && diff.error && <div className="fcard__diff-error">{diff.error}</div>}
-        {diff && !diff.loading && !diff.error && <pre className="fcard__diff">{diff.diff}</pre>}
+        {diff && !diff.loading && !diff.error && (
+          <div className="fcard__diff">
+            <Suspense
+              fallback={
+                <div className="fcard__diff-loading">
+                  <LoaderCircle size={16} strokeWidth={2} className="is-spin" />
+                  正在加载编辑器…
+                </div>
+              }
+            >
+              {/* key 变化时 Monaco 重建（每次打开新文件的差异） */}
+              <MonacoView key={diff.path} content={diff.diff} language={DIFF_LANGUAGE} path={diff.path} />
+            </Suspense>
+          </div>
+        )}
       </Modal>
 
       <Modal

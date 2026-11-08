@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use super::session_store;
+use super::sessions::AgentSession;
 use super::*;
 // ===== ChangeSet 查询（FileChanges 卡片：宿主提供事实，前端渲染）=====
 
@@ -48,17 +50,66 @@ pub struct AgentRestoreResult {
     pub conflicts: Vec<agent_core::change_tracking::RestoreConflict>,
 }
 
-fn tracker_of(
+/// 取会话的变更追踪器：优先内存缓存；miss 时从磁盘恢复
+/// （data_dir/agent_changes/<session>/，重启后重开历史会话可恢复记录），
+/// 并回填缓存避免每次重建。目录无历史也返回空 tracker（而非报错），
+/// agent_change_sets 对无记录的会话静默返回空列表。
+fn tracker_for(
     state: &AgentState,
+    app: &AppHandle,
     session_id: &str,
 ) -> Result<Arc<agent_core::ChangeTracker>, String> {
+    {
+        let map = state
+            .change_trackers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(t) = map.get(session_id) {
+            return Ok(Arc::clone(t));
+        }
+    }
+    let dir = crate::app::accounts::data_dir(app)?
+        .join("agent_changes")
+        .join(session_id);
+    let tracker = Arc::new(agent_core::ChangeTracker::open(dir));
     state
         .change_trackers
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .get(session_id)
-        .cloned()
-        .ok_or_else(|| "该会话没有变更记录（可能是旧会话或追踪器未初始化）".to_owned())
+        .insert(session_id.to_owned(), Arc::clone(&tracker));
+    Ok(tracker)
+}
+
+/// 取会话绑定的项目根：优先当前加载的 Thread；历史会话（未加载）回退到
+/// agent_sessions.json 里的 project_path，使 diff/restore 对旧会话可用。
+async fn project_root_of(
+    state: &AgentState,
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    {
+        let threads = state.threads.lock().await;
+        if let Some(root) = threads
+            .threads
+            .get(session_id)
+            .and_then(|t| t.project_root().cloned())
+        {
+            return Ok(root);
+        }
+    }
+    let path = session_store::ensure_json_file(app, "agent_sessions.json", "创建会话记录文件")?;
+    let sessions = session_store::read_json_vec::<AgentSession>(&path);
+    sessions
+        .iter()
+        .find(|s| s.id == session_id)
+        .and_then(|s| {
+            if s.project_path.is_empty() {
+                None
+            } else {
+                Some(std::path::PathBuf::from(&s.project_path))
+            }
+        })
+        .ok_or_else(|| "会话未加载或未绑定项目目录".to_owned())
 }
 
 fn change_info(f: &agent_core::change_tracking::FileChangeSummary) -> AgentFileChangeInfo {
@@ -77,10 +128,11 @@ fn change_info(f: &agent_core::change_tracking::FileChangeSummary) -> AgentFileC
 /// 列出会话全部 Run 的文件变更集（started_at 升序）。
 #[tauri::command]
 pub async fn agent_change_sets(
+    app: AppHandle,
     state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<Vec<AgentChangeSetInfo>, String> {
-    let tracker = tracker_of(&state, &session_id)?;
+    let tracker = tracker_for(&state, &app, &session_id)?;
     let sets = tokio::task::spawn_blocking(move || tracker.change_sets())
         .await
         .map_err(|e| e.to_string())?;
@@ -98,20 +150,14 @@ pub async fn agent_change_sets(
 /// 读取一次 Run 内某文件的真实差异（修改前快照 vs 当前磁盘内容）。
 #[tauri::command]
 pub async fn agent_change_diff(
+    app: AppHandle,
     state: State<'_, AgentState>,
     session_id: String,
     run_id: String,
     path: String,
 ) -> Result<AgentFileDiff, String> {
-    let tracker = tracker_of(&state, &session_id)?;
-    let root = {
-        let threads = state.threads.lock().await;
-        threads
-            .threads
-            .get(&session_id)
-            .and_then(|t| t.project_root().cloned())
-            .ok_or_else(|| "会话未加载或未绑定项目目录".to_owned())?
-    };
+    let tracker = tracker_for(&state, &app, &session_id)?;
+    let root = project_root_of(&state, &app, &session_id).await?;
     let diff = tokio::task::spawn_blocking(move || tracker.diff_for(&root, &run_id, &path))
         .await
         .map_err(|e| e.to_string())??;
@@ -129,6 +175,7 @@ pub async fn agent_change_diff(
 ///   不静默覆盖用户或其他 Agent 的后续修改
 #[tauri::command]
 pub async fn agent_change_restore(
+    app: AppHandle,
     state: State<'_, AgentState>,
     session_id: String,
     run_id: String,
@@ -144,15 +191,8 @@ pub async fn agent_change_restore(
             return Err("会话正在运行，请先取消当前任务再恢复文件".into());
         }
     }
-    let tracker = tracker_of(&state, &session_id)?;
-    let root = {
-        let threads = state.threads.lock().await;
-        threads
-            .threads
-            .get(&session_id)
-            .and_then(|t| t.project_root().cloned())
-            .ok_or_else(|| "会话未加载或未绑定项目目录".to_owned())?
-    };
+    let tracker = tracker_for(&state, &app, &session_id)?;
+    let root = project_root_of(&state, &app, &session_id).await?;
     let force = force.unwrap_or(false);
     let run_for_task = run_id.clone();
     let outcome =

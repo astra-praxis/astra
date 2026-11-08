@@ -50,6 +50,22 @@
     border-left: 2px solid var(--divider, var(--border-color));
   }
 
+  // Monaco 编辑器容器（内容完成后的代码视图）：固定高度，超长内部滚动
+  &__monaco {
+    margin: 6px 0 0;
+    height: 300px;
+    max-height: 55vh;
+    border: 1px solid var(--divider, var(--border-color));
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-surface);
+
+    .monaco-view {
+      width: 100%;
+      height: 100%;
+    }
+  }
+
   // 工具内容变体：正文更亮一点、左边线用品牌色，与思考块区分
   &--tool {
     background: var(--bg-surface);

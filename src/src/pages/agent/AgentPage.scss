@@ -63,6 +63,86 @@ body .content:has(.agent-root) {
   }
 }
 
+/* ===== Run 失败横幅（Zed 式）：不进对话流，挂在输入框上方；
+  右对齐操作组 继续 / 重试 / ×，自动重试中切换为进度徽标 ===== */
+
+.agent-run-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--danger-700);
+  background: var(--danger-50);
+  border: 1px solid var(--danger-200);
+  border-radius: 10px;
+
+  .agent-run-error__msg {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .agent-run-error__actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      font-size: 11.5px;
+      color: var(--danger-700);
+      background: transparent;
+      border: 1px solid var(--danger-200);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease;
+
+      &:hover {
+        background: color-mix(in srgb, var(--danger-200) 40%, transparent);
+      }
+
+      &.is-close {
+        padding: 3px;
+        border: none;
+        background: transparent;
+        color: var(--danger-500);
+        border-radius: 4px;
+
+        &:hover {
+          background: var(--danger-100);
+          color: var(--danger-700);
+        }
+      }
+    }
+  }
+
+  &.is-retrying {
+    color: var(--warning-700);
+    background: var(--warning-50);
+    border-color: var(--warning-200);
+
+    .is-spinning {
+      flex-shrink: 0;
+      animation: agent-run-error-spin 1s linear infinite;
+    }
+  }
+}
+
+@keyframes agent-run-error-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ===== 主区：左对话 + 右历史面板 ===== */
 
 /* ===== 右列：标签栏 + 对话流（与左侧历史面板并排） ===== */
@@ -1246,33 +1326,6 @@ body .content:has(.agent-root) {
     font-size: 11px;
     line-height: 1.5;
     color: var(--danger-700);
-  }
-
-  // 失败卡片的重试 / 编辑后重发：占满一行，与错误文案用虚线分隔
-  .aentry__rewind {
-    flex-basis: 100%;
-    display: flex;
-    gap: 8px;
-    padding-top: 6px;
-    border-top: 1px dashed var(--danger-200);
-
-    .aentry__rewind-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 10px;
-      font-size: 11.5px;
-      color: var(--danger-700);
-      background: transparent;
-      border: 1px solid var(--danger-200);
-      border-radius: 8px;
-      cursor: pointer;
-      transition: background 0.12s ease, border-color 0.12s ease;
-
-      &:hover {
-        background: color-mix(in srgb, var(--danger-200) 40%, transparent);
-      }
-    }
   }
 }
 

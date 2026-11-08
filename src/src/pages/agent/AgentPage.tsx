@@ -12,7 +12,7 @@ import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openWithDefaultApp, openWithEditor } from '@/lib/openService';
-import { ArrowRight, AtSign, ChevronDown, CircleAlert, FileText, FolderOpen, PanelLeftClose, PanelLeftOpen, Pencil, Trash, X } from 'lucide-react';
+import { ArrowRight, AtSign, ChevronDown, CircleAlert, FileText, FolderOpen, Loader2, PanelLeftClose, PanelLeftOpen, Pencil, Play, RotateCcw, Trash, X } from 'lucide-react';
 import OrbArt from '@/components/illustrations/OrbArt';
 
 import { useChatToolbarStore } from '@/stores/chatToolbar';
@@ -26,9 +26,6 @@ import { ThinkingButton, ContextUsage, RunningSubtasks } from './StatusWidgets';
 const STATUS_ITEM = Symbol('statusline');
 type ListItem = Entry | typeof STATUS_ITEM;
 import ModelPicker from '@/components/agent/ModelPicker';
-import { Mascot } from '@/components/agent/Mascot';
-import { useMascotStore } from '@/stores/mascot';
-import { parseCatCommandInput } from '@/hooks/useCatCommand';
 import { useAgentThemeStore } from '@/lib/agentTheme';
 
 import MentionInput, { type MentionInputHandle } from '../chat/MentionInput';
@@ -105,9 +102,9 @@ export default function AgentPage() {
   const imageRecognition = useAgentStore((s) => s.imageRecognition);
 
   const pushUser = useAgentStore((s) => s.pushUser);
-  const pushCat = useAgentStore((s) => s.pushCat);
-  const pushTerminal = useAgentStore((s) => s.pushTerminal);
   const setRunState = useAgentStore((s) => s.setRunState);
+  const runError = useAgentStore((s) => s.runError);
+  const setRunError = useAgentStore((s) => s.setRunError);
   const queue = useAgentStore((s) => s.queue);
   const enqueueMessage = useAgentStore((s) => s.enqueueMessage);
   const removeQueued = useAgentStore((s) => s.removeQueued);
@@ -416,25 +413,75 @@ export default function AgentPage() {
     [sessionId],
   );
 
-  /** 实际发送（队列续发与手动发送共用）：onAdmitted 在全部守卫通过、
-   *  即将开跑时调用 —— 队列路径借此保证「先准入后出队」，守卫拦截时消息不丢 */
-  const doSend = useCallback(
-    async (raw: string, skillName: string | null, text: string, onAdmitted?: () => void) => {
+  /** 失败自动重试与隐形继续/重试的请求记忆：记录最近一次实际发出的请求
+   *  （auto-retry 用它静默重发；手动重试优先用它精确重发失败的那次）。
+   *  会话切换即清空，避免把别的会话的失败请求重发到当前会话 */
+  const retryCountRef = useRef(0);
+  const lastRunRef = useRef<{ text: string; skill: string | null } | null>(null);
+  /** 本次自动重试是否已真正发出（区分「已调度等待发送」与「已发出正在运行」：
+   *  只有已发出的尝试在 Run 结束后才结束徽标；调度中的尝试等定时器触发） */
+  const retryInFlightRef = useRef(false);
+  /** 判定阶段防重入（React StrictMode 挂载期 effect 双跑会重复计数）：
+   *  判定调度后即置位，真正发出后清位；会话切换 / 手动发送也清位 */
+  const retrySchedulingRef = useRef(false);
+  /** 自动重试进行中的第 N 次（null = 未在自动重试）；同时作为横幅「自动重试中（n/3）」的展示状态 */
+  const [autoRetry, setAutoRetry] = useState<number | null>(null);
+  useEffect(() => {
+    retryCountRef.current = 0;
+    lastRunRef.current = null;
+    retryInFlightRef.current = false;
+    retrySchedulingRef.current = false;
+    setAutoRetry(null);
+  }, [sessionId]);
+
+  /** 构建 agent_start_run 请求体（手动发送 / 队列续发 / 隐形继续 / 重试共用） */
+  const buildRunReq = useCallback(
+    (text: string, skillName: string | null) => {
+      const st = useChatToolbarStore.getState();
+      return {
+        session_id: sessionId,
+        user_text: text,
+        images: [],
+        skill: skillName,
+        provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
+        model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
+        model:
+          st.sourceType === 'provider'
+            ? (st.overrideModelName ?? selectedProvider?.active_model ?? null)
+            : null,
+        project_root: projectPath || null,
+        system_prompt: systemPrompt.trim() || null,
+        auto_compact_tokens: useAgentStore.getState().autoCompactTokens,
+        image_recognition: useAgentStore.getState().imageRecognition,
+        thinking_enabled: useAgentStore.getState().thinkingEnabled,
+        thinking_effort: useAgentStore.getState().thinkingEffort,
+      };
+    },
+    [sessionId, projectPath, systemPrompt, selectedProvider],
+  );
+
+  /** 启动 Run 的公共骨架（手动发送 / 队列续发 / 隐形继续 / 重试共用）：
+   *  校验 → 监听 → 守卫 → 清失败横幅 → 记录最近请求 → 调后端。
+   *  返回是否真正发出；失败横幅（runError）由 startRun 与事件监听层共同维护：
+   *  启动前清除（新动作接管），invoke 立即失败或 run_failed 事件时重新点亮。
+   *  visible = 前端展示动作：清输入框 + pushUser；隐形（继续/重试）不动输入框、不进对话流 */
+  const startRun = useCallback(
+    async (raw: string, skillName: string | null, text: string, visible: boolean, onAdmitted?: () => void): Promise<boolean> => {
       const st = useChatToolbarStore.getState();
       if (st.sourceType === 'model' && !st.selectedModelPort) {
         setError('请先在标题栏选择一个运行中的本地模型');
-        return;
+        return false;
       }
       if (st.sourceType === 'provider') {
         const provider = st.providers.find((p) => p.id === st.selectedProviderId) ?? null;
         const name = st.overrideModelName ?? provider?.active_model ?? null;
         if (!provider) {
           setError('请先在输入框下方选择一个 API 提供者');
-          return;
+          return false;
         }
         if (!name) {
           setError('请先在输入框下方选择模型');
-          return;
+          return false;
         }
       }
 
@@ -442,80 +489,91 @@ export default function AgentPage() {
         await ensureAgentListeners();
       } catch (error) {
         setError(`事件监听失败：${String(error)}`);
-        return;
+        return false;
       }
-      if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId) return;
+      if (useAgentStore.getState().running || useAgentStore.getState().sessionBusy || useAgentStore.getState().sessionId !== sessionId) return false;
       // 编辑重发：真正发送前才执行回退（取消编辑则什么都不丢）。失败时不发送、
       // 保留编辑意图，用户可直接重试
-      if (editing) {
+      if (visible && editing) {
         try {
           await rewindToUserTurn(editing.turnsBack, false);
         } catch (e) {
           setError(`回退失败，消息未发送：${String(e)}`);
-          return;
+          return false;
         }
         setEditing(null);
       }
+      // 记录最近请求（隐形继续/重试也更新，供下一次自动重试与手动重试使用）
+      lastRunRef.current = { text, skill: skillName };
       setFollow(true);
-      setInput('');
-      setError('');
-      onAdmitted?.();
-      pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
+      if (visible) {
+        // 新消息 = 新意图接管：清掉旧的失败横幅
+        // 隐形继续/重试不清 runError —— 报错要保留到真正成功
+        // （run_completed / run_cancelled 由监听层清 runError）才消失，
+        // 避免「报错后没提示成功就把报错清了」的假无限循环
+        setRunError(null);
+        setInput('');
+        setError('');
+        onAdmitted?.();
+        pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
+      }
       setRunState(true, 'analyzing');
-      // 发送冲刺：猫猫先把消息「送出去」（工作级，冷却防连发），随后进入工作姿态
-      useMascotStore
-        .getState()
-        .interact('run', { priority: 'work', key: 'send-sprint', cooldownMs: 5000, holdMs: 1200 });
 
       try {
-        await invoke('agent_start_run', {
-          req: {
-            session_id: sessionId,
-            user_text: text,
-            images: [],
-            skill: skillName,
-            provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
-            model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
-            model:
-              st.sourceType === 'provider'
-                ? (st.overrideModelName ?? selectedProvider?.active_model ?? null)
-                : null,
-            project_root: projectPath || null,
-            system_prompt: systemPrompt.trim() || null,
-            auto_compact_tokens: useAgentStore.getState().autoCompactTokens,
-            image_recognition: useAgentStore.getState().imageRecognition,
-            thinking_enabled: useAgentStore.getState().thinkingEnabled,
-            thinking_effort: useAgentStore.getState().thinkingEffort,
-          },
-        });
+        await invoke('agent_start_run', { req: buildRunReq(text, skillName) });
+        return true;
       } catch (e) {
         setRunState(false, null);
-        pushTerminal('failed', String(e));
+        setRunError(String(e));
+        return false;
       }
     },
-    [projectPath, selectedProvider, systemPrompt, sessionId, setInput, setError, pushUser, pushTerminal, setRunState, setFollow, editing, rewindToUserTurn],
+    [sessionId, setError, setRunError, setInput, setFollow, pushUser, setRunState, editing, rewindToUserTurn, setEditing, buildRunReq],
   );
 
-  /** `&猫猫命令` 拦截：本地脚本回应 + 触发吉祥物动画，不经 agent 后端。
-   *  返回 true 表示已消费（发送流程终止）；未命中已知命令的 & 文本照常发给 agent */
-  const fireCatInteraction = useCallback(
-    (raw: string): boolean => {
-      const catCmd = parseCatCommandInput(raw);
-      if (!catCmd) return false;
-      setInput('');
-      setError('');
-      useMascotStore.getState().interact(catCmd.command.pose, { fx: catCmd.command.fx, bubble: catCmd.command.reply });
-      pushUser(raw);
-      pushCat(catCmd.command.reply);
-      return true;
+  /** 实际发送（队列续发与手动发送共用）：onAdmitted 在全部守卫通过、
+   *  即将开跑时调用 —— 队列路径借此保证「先准入后出队」，守卫拦截时消息不丢 */
+  const doSend = useCallback(
+    async (raw: string, skillName: string | null, text: string, onAdmitted?: () => void) => {
+      // 用户手动发送 = 接管失败处理：重置自动重试计数（下次失败重新获得 3 次配额）
+      retryCountRef.current = 0;
+      retryInFlightRef.current = false;
+      retrySchedulingRef.current = false;
+      setAutoRetry(null);
+      await startRun(raw, skillName, text, true, onAdmitted);
     },
-    [pushUser, pushCat, setInput, setError],
+    [startRun],
   );
+
+  /** 隐形继续 / 重试（Zed 式）：不改动当前对话、不在对话框内展示，
+   *  直接把请求追加到后端线程（模型上下文保留失败现场）。
+   *  清失败横幅后开跑；成功由 run_completed 事件收尾，失败重新点亮横幅 */
+  const resendRun = useCallback(
+    async (text: string, skillName: string | null): Promise<boolean> => startRun('', skillName, text, false),
+    [startRun],
+  );
+
+  /** 错误横幅「重试」：优先重发最近一次失败请求（lastRunRef 精确记录），
+   *  切回停靠会话等 lastRunRef 为空时从最后一条用户消息推导 */
+  const handleRetryBanner = useCallback(() => {
+    const last = lastRunRef.current;
+    if (last) {
+      void resendRun(last.text, last.skill);
+      return;
+    }
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e.kind === 'user') {
+        const parsed = parseSendInput(e.text);
+        if (parsed) void resendRun(parsed.text, parsed.skill);
+        return;
+      }
+    }
+  }, [resendRun, entries, parseSendInput]);
 
   const handleSend = useCallback(async () => {
     const raw = input.trim();
     if (!raw) return;
-    if (fireCatInteraction(raw)) return;
     if (running) return;
     // 有文本时照常走 /技能名 解析
     const parsed = parseSendInput(raw);
@@ -523,35 +581,90 @@ export default function AgentPage() {
     const spilled = takeSpill(parsed.text);
     const withFiles = takePastedFiles(spilled.text);
     await doSend(raw + spilled.displaySuffix + withFiles.displaySuffix, parsed.skill, withFiles.text);
-  }, [input, running, fireCatInteraction, parseSendInput, doSend, takeSpill, takePastedFiles]);
+  }, [input, running, parseSendInput, doSend, takeSpill, takePastedFiles]);
 
-  /** 失败卡片「重试 / 编辑后重发」：不做回档、不产生归档，完整对话记录保持显示。
-   *  重试 = 同一消息原样追加重发；编辑后重发 = 回填输入框改完再发。
-   *  两者都是追加到当前对话末尾，模型上下文保留失败尝试的现场 */
-  const handleFailureRewind = useCallback(
-    async (mode: 'retry' | 'edit') => {
-      if (running || settling) return;
-      let lastUserIdx = -1;
-      for (let i = entries.length - 1; i >= 0; i--) {
-        if (entries[i].kind === 'user') {
-          lastUserIdx = i;
-          break;
-        }
-      }
-      if (lastUserIdx < 0) return;
-      const lastUser = entries[lastUserIdx];
-      if (lastUser.kind !== 'user') return;
-      setEditing(null);
-      if (mode === 'edit') {
-        setInput(lastUser.text);
-        requestAnimationFrame(() => composerRef.current?.focusEnd());
-      } else {
-        const parsed = parseSendInput(lastUser.text);
-        if (parsed) await doSend(lastUser.text, parsed.skill, parsed.text);
-      }
-    },
-    [running, settling, entries, setInput, parseSendInput, doSend],
-  );
+  // ===== 失败自动重试（Zed 式，隐形，最多 3 次）：runError 出现且会话空闲时
+  //  静默重发最近一次请求；重试期间横幅显示「自动重试中（n/3）：错误信息」；
+  //  超过 3 次后停手，横幅常驻等用户手动 继续/重试/×。
+  //  会话切换（retryCountRef/lastRunRef 重置）与手动发送（doSend 重置）都重新计数。
+  //  拆成四个 effect：判定 + 发送 + 收尾 + 看门狗，各司其职：
+  //  - 判定与定时不能放同一个 effect：setAutoRetry 会让 effect 重跑，先执行上一次
+  //    cleanup 把还没到点的定时器清掉，导致永远卡在「自动重试中（1/3）」
+  //  - 收尾用 retryInFlightRef 区分「已调度未发出」与「已发出正在运行」，
+  //    只在整个尝试的 Run 结束（空闲）后才推进下一次/结束序列
+  //  - 收尾直接续下一次（autoRetry 1→2→3 不经过 null），横幅不闪断，
+  //    不会出现「报错被清了又出现」的假循环；成功（runError 被清）才结束序列
+  //  - 看门狗：尝试发出后 20s 仍未结算（running/settling 卡死，无终态事件）
+  //    → 强制结束序列回到常驻报错横幅，避免「自动重试中」无限转圈 */
+  const resendRunRef = useRef(resendRun);
+  resendRunRef.current = resendRun;
+  // 判定（仅首触）：空闲 + 失败 + 未超 3 次 → 进入自动重试序列（第 1 次）
+  useEffect(() => {
+    if (autoRetry !== null || retrySchedulingRef.current) return; // 已在重试中，等待结果
+    if (!runError || running || settling) return;
+    if (retryCountRef.current >= 3) return;
+    const last = lastRunRef.current;
+    if (!last) return;
+    const attempt = retryCountRef.current + 1;
+    retryCountRef.current = attempt;
+    retrySchedulingRef.current = true;
+    setAutoRetry(attempt);
+  }, [runError, running, settling, autoRetry]);
+  // 发送：autoRetry 每变化一次（1→2→3）调度一次隐形重发（不进对话流）；
+  // 延迟 800ms 给上一轮 Run 收尾留出间隔，避免瞬间连发造成「无限循环」观感
+  useEffect(() => {
+    if (autoRetry === null) return;
+    const last = lastRunRef.current;
+    if (!last) return;
+    const timer = setTimeout(() => {
+      retrySchedulingRef.current = false;
+      retryInFlightRef.current = true;
+      void resendRunRef.current(last.text, last.skill).then(
+        (ok) => {
+          if (ok) return;
+          // 守卫拦截未发出（会话被切换等）：结束本次序列，避免徽标悬挂
+          retryInFlightRef.current = false;
+          retrySchedulingRef.current = false;
+          setAutoRetry(null);
+        },
+        () => {
+          retryInFlightRef.current = false;
+          retrySchedulingRef.current = false;
+          setAutoRetry(null);
+        },
+      );
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [autoRetry]);
+  // 收尾：已发出的尝试在 Run 结束后（空闲）→ 未超 3 次直接续下一次（无闪烁）；
+  // 已超 3 次或 runError 已被清（真正成功）→ 结束序列，横幅随 runError 消失
+  useEffect(() => {
+    if (autoRetry === null) return;
+    if (!retryInFlightRef.current) return; // 还没真正发出（等定时器）
+    if (running || settling) return; // 尝试仍在运行
+    retryInFlightRef.current = false;
+    if (!runError || retryCountRef.current >= 3) {
+      retrySchedulingRef.current = false;
+      setAutoRetry(null); // 成功（runError 已清）或耗尽：结束自动重试
+    } else {
+      const next = retryCountRef.current + 1;
+      retryCountRef.current = next;
+      setAutoRetry(next); // 直接续下一次，横幅保持「自动重试中（n/3）」不闪断
+    }
+  }, [autoRetry, running, settling, runError]);
+  // 看门狗：尝试发出后 30s 仍未结算（running/settling 卡死，无终态事件）→ 强制结束序列，
+  // 回到常驻报错横幅（右侧 继续/重试），避免「自动重试中」无限转圈；
+  // 正常长任务会在 30s 内产生事件推进状态，看门狗不会误伤
+  useEffect(() => {
+    if (autoRetry === null || !retryInFlightRef.current) return;
+    if (!running && !settling) return; // 已空闲，由收尾 effect 处理
+    const timer = setTimeout(() => {
+      retryInFlightRef.current = false;
+      retrySchedulingRef.current = false;
+      setAutoRetry(null);
+    }, 30_000);
+    return () => clearTimeout(timer);
+  }, [autoRetry, running, settling]);
 
   /** 历史用户消息「编辑重发」：只记回退意图并回填输入框（真正回退发生在发送时，
    *  取消零损失）。其后有值得保留的内容（成功回复 / 完成终态）时弹确认 */
@@ -595,7 +708,6 @@ export default function AgentPage() {
   const handleQueueSend = useCallback(() => {
     const raw = input.trim();
     if (!raw) return;
-    if (fireCatInteraction(raw)) return; // 猫猫互动运行中也允许（纯前端，不打扰 Run）
     const parsed = parseSendInput(raw);
     if (!parsed) return;
     setEditing(null); // 排队新消息 = 放弃挂起的编辑意图（不回退）
@@ -603,14 +715,13 @@ export default function AgentPage() {
     const withFiles = takePastedFiles(spilled.text);
     enqueueMessage(raw + spilled.displaySuffix + withFiles.displaySuffix, withFiles.text, parsed.skill);
     setInput('');
-  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, takeSpill, takePastedFiles]);
+  }, [input, parseSendInput, enqueueMessage, setInput, takeSpill, takePastedFiles]);
 
   /** 打断并优先发送：当前 Run 取消 + 本条插到会话队首，settle 后立即续发。
    *  别的会话占用后端时不能打断（cancel 是全局单活动 Run），退化为普通排队 */
   const handleInterruptSend = useCallback(async () => {
     const raw = input.trim();
     if (!raw) return;
-    if (fireCatInteraction(raw)) return; // 猫猫互动不需要打断 Run
     const parsed = parseSendInput(raw);
     if (!parsed) return;
     setEditing(null); // 插队新消息 = 放弃挂起的编辑意图（不回退）
@@ -627,7 +738,7 @@ export default function AgentPage() {
         setError(`停止失败：${String(error)}`);
       }
     }
-  }, [input, fireCatInteraction, parseSendInput, enqueueMessage, setInput, setError, sessionId, takeSpill, takePastedFiles]);
+  }, [input, parseSendInput, enqueueMessage, setInput, setError, sessionId, takeSpill, takePastedFiles]);
 
   /** 编辑排队消息（Zed move_queued_message_to_main_editor 语义）：
    *  从队列移除，原文回填主输入框并聚焦到末尾，改完再自行发送 */
@@ -662,15 +773,13 @@ export default function AgentPage() {
   }, [removeQueued, enqueueMessage, doSend, setError]);
 
   // ===== 队列续发：Run 结束后自动发出当前会话的队首消息。
-  //  上一条以 failed 终态收尾时暂停自动续发（防模型配置错误时连环烧完队列），
-  //  用户手动发送成功一次后恢复。其他会话的运行与本会话无关（P3 并发），
+  //  失败横幅（runError）挂着时暂停自动续发（防模型配置错误时连环烧完队列），
+  //  用户手动发送 / 隐形继续 成功后恢复。其他会话的运行与本会话无关（P3 并发），
   //  不再阻塞续发。
-  const lastEntry = entries[entries.length - 1];
-  const lastFailed = lastEntry?.kind === 'terminal' && lastEntry.outcome === 'failed';
   const doSendRef = useRef(doSend);
   doSendRef.current = doSend;
   useEffect(() => {
-    if (running || settling || lastFailed || editing) return;
+    if (running || settling || runError || editing) return;
     const head = nextQueuedFor(useAgentStore.getState().queue, sessionId);
     if (!head) return;
     const timer = setTimeout(() => {
@@ -681,7 +790,7 @@ export default function AgentPage() {
       void doSendRef.current(head.raw, head.skill, head.text);
     }, 120);
     return () => clearTimeout(timer);
-  }, [running, settling, queue, sessionId, lastFailed, editing]);
+  }, [running, settling, queue, sessionId, runError, editing]);
 
   const handleStop = useCallback(async () => {
     if (useAgentStore.getState().settling || useAgentStore.getState().sessionBusy) return;
@@ -883,13 +992,11 @@ export default function AgentPage() {
                   <EntryView
                     entry={e}
                     index={i}
-                    isLast={i === entries.length - 1}
                     fullText={fullRunTexts.get(i)}
                     isRunFinalAssistant={lastAssistantOfRun.has(i)}
                     onDecide={handleDecide}
                     onAnswer={handleAnswer}
                     onEdit={handleEditUserMessage}
-                    onFailureRewind={handleFailureRewind}
                     skills={skills}
                     fileSet={fileSet}
                     linkPreview
@@ -929,7 +1036,6 @@ export default function AgentPage() {
           {/* 输入区（@ 提及 / / 技能弹层内聚在 MentionInput 内，浮层绝对定位于输入框上方） */}
           <RunningSubtasks />
           <div className="agent-dock-wrap">
-            <Mascot onFocusInput={() => composerRef.current?.focusEnd()} />
             <div className="agent-dock">
               {/* 错误提示：与编辑/排队/粘贴 chip 同层，展示在对话框最上方 */}
               {error && (
@@ -939,6 +1045,53 @@ export default function AgentPage() {
                   <button type="button" onClick={() => setError('')}>
                     <X size={12} strokeWidth={2} />
                   </button>
+                </div>
+              )}
+              {/* Run 失败横幅（Zed 式）：不进对话流，挂在输入框上方；
+                  自动重试中显示进度徽标（runError 被短暂清掉时也保持显示），
+                  重试耗尽后常驻，右侧 继续/重试/× */}
+              {(runError !== null || autoRetry !== null) && (
+                <div className={`agent-run-error${autoRetry !== null ? ' is-retrying' : ''}`} role="alert">
+                  {autoRetry !== null ? (
+                    <Loader2 size={14} strokeWidth={1.8} className="is-spinning" />
+                  ) : (
+                    <CircleAlert size={14} strokeWidth={1.8} />
+                  )}
+                  <span className="agent-run-error__msg">
+                    {autoRetry !== null ? `自动重试中（${autoRetry}/3）：${runError}` : runError}
+                  </span>
+                  {autoRetry === null && (
+                    <div className="agent-run-error__actions">
+                      <button
+                        type="button"
+                        onClick={() => void resendRun('继续', null)}
+                        title="继续（不修改当前对话，不显示在对话框内）"
+                      >
+                        <Play size={12} strokeWidth={2} /> 继续
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRetryBanner}
+                        title="重新执行失败的任务"
+                      >
+                        <RotateCcw size={12} strokeWidth={2} /> 重试
+                      </button>
+                      <button
+                        type="button"
+                        className="is-close"
+                        onClick={() => {
+                          retryInFlightRef.current = false;
+                          retrySchedulingRef.current = false;
+                          setRunError(null);
+                          setAutoRetry(null);
+                        }}
+                        aria-label="关闭"
+                        title="关闭"
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               {editing && (

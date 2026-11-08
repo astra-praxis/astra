@@ -182,17 +182,19 @@
   &__diff-error { color: var(--danger, #cf222e); }
 
   &__diff {
+    height: 55vh;
     max-height: 60vh;
-    margin: 0;
-    padding: 10px 12px;
-    overflow: auto;
+    min-height: 240px;
+    overflow: hidden;
+    border: 1px solid var(--divider, var(--border-color));
     border-radius: 8px;
     background: var(--bg-surface-hover, rgba(128, 128, 128, 0.06));
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 11.5px;
-    line-height: 1.5;
-    white-space: pre;
-    color: var(--text-primary);
+
+    // Monaco 容器占满：编辑器实例 absolute 填充
+    .monaco-view {
+      width: 100%;
+      height: 100%;
+    }
   }
 
   &__confirm {

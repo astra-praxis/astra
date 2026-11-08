@@ -759,20 +759,37 @@ test('same path merged across tools: kind takes the last, line counts accumulate
   assert.equal(card.files[0].deletions, 3);
 });
 
-test('failed run still shows its card; cancelled run stays silent', () => {
+test('failed run keeps its file card but does not append a terminal entry; cancelled run stays silent', () => {
   const failed = fileRunState();
   failed.startTool('t1', 'edit_file', 1);
   failed.completeTool('t1', [fileArtifact('x.rs', 'edit', 5, 1)], 2);
   failed.drive('run_failed', 3, { error: 'boom' });
   const failedEntries = failed.get().entries;
   assert.equal(failedEntries.find((e) => e.kind === 'file_changes').files.length, 1);
-  assert.equal(failedEntries.at(-1).kind, 'terminal');
+  assert.ok(
+    !failedEntries.some((e) => e.kind === 'terminal'),
+    'run_failed should not append a terminal entry (errors live in the dock banner, not the flow)',
+  );
 
   const cancelled = fileRunState();
   cancelled.startTool('t1', 'edit_file', 1);
   cancelled.completeTool('t1', [fileArtifact('x.rs', 'edit', 5, 1)], 2);
   cancelled.drive('run_cancelled', 3);
   assert.ok(!cancelled.get().entries.some((e) => e.kind === 'file_changes'));
+});
+
+test('run_failed sets runError banner via listener; run_completed clears it', async () => {
+  const { store, emit } = await harness();
+  assert.equal(store.getState().runError, null);
+  store.getState().setRunState(true, 'analyzing');
+  emit('agent-event', env('run_failed', 1, 'run-1', { error: 'boom' }));
+  assert.equal(store.getState().runError, 'boom');
+  emit('agent-run-settled', { session_id: 's', persistence_error: null });
+  store.getState().setRunState(true, 'analyzing');
+  emit('agent-event', env('run_completed', 2, 'run-2'));
+  assert.equal(store.getState().runError, null);
+  emit('agent-run-settled', { session_id: 's', persistence_error: null });
+  assert.equal(store.getState().runError, null);
 });
 
 test('no file artifacts: no card, and non-file artifacts are ignored', () => {

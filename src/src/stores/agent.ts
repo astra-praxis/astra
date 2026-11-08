@@ -98,8 +98,6 @@ export type Entry =
   | ({ kind: 'notice'; text: string } & EntryIdent)
   | ({ kind: 'user'; text: string; images?: UserImage[] } & EntryIdent)
   | ({ kind: 'assistant'; text: string; streaming: boolean } & EntryIdent)
-  /** 猫猫互动消息（& 命令触发，本地脚本台词，不经 agent 后端） */
-  | ({ kind: 'cat'; text: string } & EntryIdent)
   | ({
       /** 模型思考过程（reasoning），流式追加；参考 Zed 的 thinking 块 */
       kind: 'thinking';
@@ -296,6 +294,7 @@ export interface ParkedSession {
   projectPath: string;
   usage: AgentUsage | null;
   error: string;
+  runError: string | null;
   lastActive: number;
 }
 
@@ -522,10 +521,9 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
         }
         return [...withCard, withId({ kind: 'terminal' as const, outcome: 'completed' as const })];
       }
-      if (env.type === 'run_failed') {
-        return [...withCard, withId({ kind: 'terminal' as const, outcome: 'failed' as const, text: env.error })];
-      }
-      // run_cancelled：不追加“已取消”终态条目，直接收尾（用户主动停止无需提示）
+      // run_failed：不进对话流。错误横幅由事件监听层写入 runError，
+      // 显示在输入框上方（右侧 继续/重试，参考 Zed）；run_cancelled：
+      // 不追加“已取消”终态条目，直接收尾（用户主动停止无需提示）
       return withCard;
     }
     case 'compaction_completed':
@@ -616,6 +614,8 @@ interface AgentState extends RunWindow {
   status: string | null;
   persistenceErrors: Record<string, string>;
   error: string;
+  /** Run 失败横幅（不进对话流；显示在输入框上方，右侧提供 继续/重试，参考 Zed） */
+  runError: string | null;
   /** 项目绑定（空 = 纯聊天）；顶部工具栏选择，@ 只负责引用文件 */
   projectPath: string;
   /** 历史会话列表（save/list/delete 后经 refreshSessions 刷新） */
@@ -638,6 +638,8 @@ interface AgentState extends RunWindow {
 
   setInput: (v: string) => void;
   setError: (v: string) => void;
+  /** 设置/清除 Run 失败横幅（run_failed 事件写入；新 Run 或手动发送前清除） */
+  setRunError: (v: string | null) => void;
   /** Run 进行中排队的消息（按会话子队列 FIFO；发送调用留在页面组件，见文件头职责边界） */
   queue: QueuedMessage[];
   /** 排队消息（opts.front = 插到同会话子队首，供「打断并优先发送」用） */
@@ -653,8 +655,6 @@ interface AgentState extends RunWindow {
   /** checkpoint 恢复后用后端回传的历史重建条目（仅当会话一致且无运行中任务） */
   restoreEntries: (sessionId: string, entries: Entry[]) => void;
   pushTerminal: (outcome: 'completed' | 'failed', text?: string) => void;
-  /** 猫猫互动台词：本地脚本，只追加会话条目，不动运行状态 */
-  pushCat: (text: string) => void;
   /** Serve bot 反向通道通知：追加 notice 条目，不动运行状态 */
   pushBotNotice: (text: string) => void;
   /** 收到 ask_user 提问事件（追加问题卡条目） */
@@ -713,6 +713,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   persistenceErrors: {},
   status: null,
   error: '',
+  runError: null,
   projectPath: '',
   sessions: [],
   autoMode: parseAutoMode(
@@ -766,6 +767,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     localStorage.setItem('astra-agent-autocompact', String(n));
   },
   setError: (v) => set((s) => ({ error: v || persistenceMessage(s.persistenceErrors[s.sessionId]) })),
+  setRunError: (v) => set({ runError: v }),
   setProjectPath: (v) => {
     recordRecentProject(v);
     set({ projectPath: v });
@@ -815,13 +817,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             entries,
             usage: null,
             status: null,
+            runError: null,
           }),
     ),
   pushTerminal: (outcome, text) =>
     set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), withId({ kind: 'terminal' as const, outcome, text })] })),
-  /** 猫猫互动台词：本地脚本，只追加会话条目，不动运行状态 */
-  pushCat: (text) =>
-    set((s) => ({ entries: [...s.entries, withId({ kind: 'cat' as const, text })] })),
   /** Serve bot 反向通道通知：只追加条目；运行中也不打断（notice 是独立条目） */
   pushBotNotice: (text) =>
     set((s) => ({ entries: [...s.entries, withId({ kind: 'notice' as const, text })] })),
@@ -890,6 +890,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         sessionId: id,
         entries: [],
         error: '',
+        runError: null,
         input: '',
         usage: null,
         isDraft: true,
@@ -957,6 +958,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       projectPath: s.project_path ?? '',
       status: null,
       error: persistenceMessage(current.persistenceErrors[s.id]),
+      runError: null,
       usage: null,
     })),
   refreshSessions: async () => {
@@ -1012,6 +1014,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         input: '',
         usage: null,
         error: '',
+        runError: null,
         isDraft: true,
         parked,
         openTabs,
@@ -1065,6 +1068,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           input: '',
           usage: null,
           error: '',
+          runError: null,
           isDraft: true,
           parked: omitKey(s.parked, id),
           openTabs: [],
@@ -1089,6 +1093,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           input: '',
           usage: null,
           error: '',
+          runError: null,
           isDraft: true,
           parked: omitKey(s.parked, id),
           openTabs: [],
@@ -1154,7 +1159,7 @@ function persistenceMessage(error?: string | null): string {
 type FlatSession = Pick<
   AgentState,
   | 'sessionId' | 'isDraft' | 'entries' | 'input' | 'running' | 'settling' | 'status'
-  | 'activeRunId' | 'lastSequence' | 'endedRuns' | 'projectPath' | 'usage' | 'error'
+  | 'activeRunId' | 'lastSequence' | 'endedRuns' | 'projectPath' | 'usage' | 'error' | 'runError'
 >;
 
 function snapshotFlat(st: FlatSession): ParkedSession {
@@ -1177,6 +1182,7 @@ function hydrateFromParked(p: ParkedSession): FlatSession {
     projectPath: p.projectPath,
     usage: p.usage,
     error: p.error,
+    runError: p.runError,
   };
 }
 
@@ -1196,6 +1202,7 @@ function hydrateFromMeta(s: AgentSessionMeta, persistenceError?: string | null):
     projectPath: s.project_path ?? '',
     usage: null,
     error: persistenceMessage(persistenceError),
+    runError: null,
   };
 }
 
@@ -1419,6 +1426,7 @@ export async function refreshAgentStatus(): Promise<void> {
           projectPath: '',
           usage: null,
           error: persistenceMessage(status.persistence_errors[sid]),
+          runError: null,
           lastActive: Date.now(),
         };
         armSettleWatchdog(sid);
@@ -1459,7 +1467,13 @@ export function ensureAgentListeners(): Promise<void> {
           if (next === st) return;
           if (isTerminal(e.payload)) {
             armSettleWatchdog(e.payload.session_id);
-            useAgentStore.setState({ ...next, running: true, settling: true, status: 'persisting' });
+            useAgentStore.setState({
+              ...next,
+              runError: e.payload.type === 'run_failed' ? (e.payload.error ?? '运行失败') : null,
+              running: true,
+              settling: true,
+              status: 'persisting',
+            });
           } else {
             useAgentStore.setState(next);
           }
@@ -1475,7 +1489,15 @@ export function ensureAgentListeners(): Promise<void> {
           parked: {
             ...s.parked,
             [p.sessionId]: isTerminal(e.payload)
-              ? { ...p, ...next, running: true, settling: true, status: 'persisting', lastActive: Date.now() }
+              ? {
+                  ...p,
+                  ...next,
+                  runError: e.payload.type === 'run_failed' ? (e.payload.error ?? '运行失败') : null,
+                  running: true,
+                  settling: true,
+                  status: 'persisting',
+                  lastActive: Date.now(),
+                }
               : { ...p, ...next, lastActive: Date.now() },
           },
         }));

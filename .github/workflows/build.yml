@@ -150,29 +150,92 @@ jobs:
       - name: Install frontend dependencies (src/)
         run: pnpm --dir src install --frozen-lockfile
 
+      # ================= BUNDLER 工具缓存（Linux AppImage） =================
+      # tauri bundler 打包 AppImage 时需要 AppRun / linuxdeploy，从 GitHub releases
+      # 下载且**没有重试**——偶发 503 会让整个打包失败（已出现过两次）。
+      # 缓存目录固定为 dirs::cache_dir()/tauri = ~/.cache/tauri。
+      - name: Cache Linux bundler tools
+        if: matrix.platform == 'linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tauri
+          # 固定 key：工具内容不随项目变化，命中后整次构建不再联网下载
+          key: tauri-bundler-tools-linux-x86_64-v1
+
+      # 未命中缓存时带重试预下载（文件名与 bundler 期待的缓存文件名一致）
+      - name: Pre-download Linux bundler tools
+        if: matrix.platform == 'linux'
+        run: |
+          mkdir -p ~/.cache/tauri
+          fetch() {
+            dest="$1"; url="$2"
+            if [ -s "$dest" ]; then echo "cache hit: $dest"; return 0; fi
+            i=1
+            while [ "$i" -le 6 ]; do
+              if curl -fL --retry 3 --retry-delay 10 --retry-all-errors \
+                   --connect-timeout 20 --max-time 300 -o "$dest" "$url"; then
+                echo "downloaded: $dest"; return 0
+              fi
+              echo "attempt $i failed: $url"
+              sleep $((i * 10))
+              i=$((i + 1))
+            done
+            return 1
+          }
+
+          BASE=https://github.com/tauri-apps/binary-releases/releases/download
+          fetch ~/.cache/tauri/AppRun-x86_64 "$BASE/apprun-old/AppRun-x86_64" \
+            || echo "::warning::AppRun 预下载失败，交由 bundler 自行下载"
+          fetch ~/.cache/tauri/linuxdeploy-x86_64.AppImage "$BASE/linuxdeploy/linuxdeploy-x86_64.AppImage" \
+            || echo "::warning::linuxdeploy 预下载失败，交由 bundler 自行下载"
+          chmod +x ~/.cache/tauri/AppRun-x86_64 ~/.cache/tauri/linuxdeploy-x86_64.AppImage 2>/dev/null || true
+          ls -la ~/.cache/tauri
+        shell: bash
+
       # ================= BUILD =================
       # Linux 上显式指定 bundle 类型，避免读到 conf 里的 nsis/app/dmg；
       # Windows 构建两遍：默认 downloadBootstrapper（在线小包）+ offlineInstaller（WebView2 内置版）
+      # Linux 额外重试：bundler 的 AppImage 工具下载无重试，网络抖动时直接失败；
+      # 重跑时 vite/cargo 均命中缓存，代价可接受。
       - name: Build Tauri App
         run: |
-          if [ "${{ matrix.platform }}" = "linux" ]; then
-            pnpm tauri build --bundles appimage deb
-          elif [ "${{ matrix.platform }}" = "windows" ]; then
-            pnpm tauri build
-            mkdir -p bundle-keep
-            cp src-tauri/target/release/bundle/nsis/*.exe bundle-keep/
-            pnpm tauri build --config src-tauri/tauri.conf.webview2.json
-            for f in src-tauri/target/release/bundle/nsis/*.exe; do
-              mv "$f" "${f/-setup/-setup-offline}"
-            done
-            mv bundle-keep/*.exe src-tauri/target/release/bundle/nsis/
-            rmdir bundle-keep
-          else
-            pnpm tauri build
-          fi
+          build_once() {
+            if [ "${{ matrix.platform }}" = "linux" ]; then
+              pnpm tauri build --bundles appimage deb
+            elif [ "${{ matrix.platform }}" = "windows" ]; then
+              pnpm tauri build
+              mkdir -p bundle-keep
+              cp src-tauri/target/release/bundle/nsis/*.exe bundle-keep/
+              pnpm tauri build --config src-tauri/tauri.conf.webview2.json
+              for f in src-tauri/target/release/bundle/nsis/*.exe; do
+                mv "$f" "${f/-setup/-setup-offline}"
+              done
+              mv bundle-keep/*.exe src-tauri/target/release/bundle/nsis/
+              rmdir bundle-keep
+            else
+              pnpm tauri build
+            fi
+          }
+
+          max=1
+          if [ "${{ matrix.platform }}" = "linux" ]; then max=3; fi
+          attempt=1
+          while : ; do
+            if build_once; then exit 0; fi
+            if [ "$attempt" -ge "$max" ]; then
+              echo "::error::build failed after $attempt attempt(s)"
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            echo "::warning::build attempt $((attempt - 1)) failed, retrying ($attempt/$max)"
+            sleep 30
+          done
         shell: bash
         env:
           TAURI_SKIP_VALIDATION: true
+          # vite/rollup 打包 monaco + mermaid 峰值内存高，Node 默认堆上限（~4GB）
+          # 会触发 FATAL ERROR: JavaScript heap out of memory（SIGABRT / exit 134）
+          NODE_OPTIONS: --max-old-space-size=6144
 
       # ================= 上传构建产物（供 release job 使用） =================
       - name: Upload macOS artifacts

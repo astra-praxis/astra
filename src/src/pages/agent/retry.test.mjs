@@ -18,7 +18,7 @@ const { outputText } = ts.transpileModule(source, {
 });
 const exports = {};
 vm.runInNewContext(outputText, { exports, console });
-const { MAX_AUTO_RETRIES, nextAutoAttempt, finishAction, isDeadRun, bannerView } = exports;
+const { MAX_AUTO_RETRIES, RETRY_DELAY_MS, nextAutoAttempt, finishAction, isDeadRun, bannerView } = exports;
 
 /** vm 里产出的对象原型与本 realm 不同，深比较前先归一成纯数据 */
 function plain(value) {
@@ -40,6 +40,11 @@ function view(overrides = {}) {
 }
 
 const ERR = 'model request failed: error sending request for url (http://172.16.18.69/v1/chat/completions)';
+
+test('配额：3 次自动重试，退避 5s（对齐 Zed 瞬时网络错误的 FixedDelay）', () => {
+  assert.equal(MAX_AUTO_RETRIES, 3);
+  assert.equal(RETRY_DELAY_MS, 5000);
+});
 
 test('首次失败、会话空闲 → 进入第 1 次自动重试', () => {
   assert.equal(nextAutoAttempt(view({ runError: ERR })), 1);
@@ -91,6 +96,11 @@ test('失败且配额已用尽 → exhausted（横幅常驻等用户）', () => 
 
 test('不在序列中不推进', () => {
   assert.equal(finishAction(view({ started: true, runError: ERR, budget: 1 })), null);
+});
+
+test('死 Run 放弃后不再自动重试（避免每次再挂 30s）', () => {
+  // 看门狗触发：清了 autoRetry、打满配额、点亮错误。判定层不得再调度
+  assert.equal(nextAutoAttempt(view({ runError: '运行未能启动', budget: MAX_AUTO_RETRIES, hasLastRun: true })), null);
 });
 
 test('死 Run：已起跑、仍在 running 但一个事件都没有', () => {

@@ -14,6 +14,11 @@
 /** 一个「失败事件」内最多自动重试的次数 */
 export const MAX_AUTO_RETRIES = 3;
 
+/** 两次尝试之间的固定等待（ms）。对齐 Zed：瞬时网络/流错误走
+ *  FixedDelay { delay: BASE_RETRY_DELAY = 5s, max_attempts: 3 }。
+ *  退避期间横幅显示「自动重试中（n/3）」，真实 attempt 开跑后横幅隐藏。 */
+export const RETRY_DELAY_MS = 5000;
+
 export interface RetryView {
   /** 自动重试进行中的第 N 次（null = 未在序列中） */
   autoRetry: number | null;

@@ -20,7 +20,7 @@ import { useAgentStore, ensureAgentListeners, refreshAgentStatus, nextQueuedFor,
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter } from '@/hooks/useMention';
 import { EntryView, EntriesFooter, userMsgPreview, VIRTUOSO_COMPONENTS } from './EntryView';
-import { bannerView, finishAction, isDeadRun, nextAutoAttempt } from './retry';
+import { MAX_AUTO_RETRIES, RETRY_DELAY_MS, bannerView, finishAction, isDeadRun, nextAutoAttempt } from './retry';
 import { ThinkingButton, ContextUsage, RunningSubtasks } from './StatusWidgets';
 
 /** 运行中状态行的哨兵条目：占据列表最后一项（见 AgentPage 内 items 处注释） */
@@ -544,6 +544,10 @@ export default function AgentPage() {
         pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
       }
       setRunState(true, 'analyzing');
+      // 准入即算「已起跑」：不依赖观察到 running 翻转（React 把 setRunState(true)
+      // 与随后的失败回滚批到同一次提交时，翻转效应可能不跑，导致重试永远卡在第 1 次）。
+      // 此时 running 刚被置真，「成功」判定仍不可能提前成立
+      retryStartedRef.current = true;
 
       try {
         await invoke('agent_start_run', { req: buildRunReq(text, skillName) });
@@ -658,7 +662,8 @@ export default function AgentPage() {
     setAutoRetry(attempt);
   }, [runError, running, settling, autoRetry, rememberRetryError]);
   // 发送：autoRetry 每变化一次（1→2→3）调度一次隐形重发（不进对话流）；
-  // 800ms 间隔给上一轮 Run 结算留时间，避免瞬间连发
+  // RETRY_DELAY_MS（5s，对齐 Zed 的瞬时网络错误固定退避）在退避窗口内显示进度徽标，
+  // attempt 真正开跑后徽标由 runStreaming 隐藏
   useEffect(() => {
     if (autoRetry === null) return;
     const last = lastRunRef.current;
@@ -683,7 +688,7 @@ export default function AgentPage() {
           setRunError(retryErrorRef.current);
         },
       );
-    }, 800);
+    }, RETRY_DELAY_MS);
     autoRetryTimerRef.current = timer;
     return () => {
       if (autoRetryTimerRef.current === timer) autoRetryTimerRef.current = null;
@@ -720,6 +725,9 @@ export default function AgentPage() {
       retryStartedRef.current = false;
       setAutoRetry(null);
       setRunState(false, null);
+      // 死 Run = 后端根本没接上，继续自动重试只会每次再挂 30s；
+      // 直接打满配额，把控制权交回用户（横幅常驻 + 手动重试）
+      retryBudgetRef.current = MAX_AUTO_RETRIES;
       setRunError('运行未能启动（30 秒内没有任何事件）');
     }, 30_000);
     return () => clearTimeout(timer);
@@ -1118,7 +1126,7 @@ export default function AgentPage() {
                   )}
                   <span className="agent-run-error__msg">
                     {runBanner.kind === 'retrying'
-                      ? `自动重试中（${runBanner.attempt}/3）：${runBanner.message}`
+                      ? `自动重试中（${runBanner.attempt}/${MAX_AUTO_RETRIES}）：${runBanner.message}`
                       : runBanner.message}
                   </span>
                   {runBanner.kind === 'failed' && (
@@ -1144,7 +1152,7 @@ export default function AgentPage() {
                           // 关掉横幅 = 放弃本失败事件的自动重试（配额打满），
                           // 避免“关掉了又自己弹回来”
                           retryStartedRef.current = false;
-                          retryBudgetRef.current = 3;
+                          retryBudgetRef.current = MAX_AUTO_RETRIES;
                           setRunError(null);
                           setAutoRetry(null);
                           rememberRetryError(null);

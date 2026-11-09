@@ -20,6 +20,7 @@ import { useAgentStore, ensureAgentListeners, refreshAgentStatus, nextQueuedFor,
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter } from '@/hooks/useMention';
 import { EntryView, EntriesFooter, userMsgPreview, VIRTUOSO_COMPONENTS } from './EntryView';
+import { bannerView, finishAction, isDeadRun, nextAutoAttempt } from './retry';
 import { ThinkingButton, ContextUsage, RunningSubtasks } from './StatusWidgets';
 
 /** 运行中状态行的哨兵条目：占据列表最后一项（见 AgentPage 内 items 处注释） */
@@ -105,6 +106,9 @@ export default function AgentPage() {
   const setRunState = useAgentStore((s) => s.setRunState);
   const runError = useAgentStore((s) => s.runError);
   const setRunError = useAgentStore((s) => s.setRunError);
+  /** Run 正在流式产出（raw running 且未进入结算屏障）：此时 Run 自身就是状态信号，
+   *  横幅一律隐藏 —— 防御「Agent 在上方作答、下面还挂着错误 + 重试」 */
+  const runStreaming = useAgentStore((s) => s.running && !s.settling);
   const queue = useAgentStore((s) => s.queue);
   const enqueueMessage = useAgentStore((s) => s.enqueueMessage);
   const removeQueued = useAgentStore((s) => s.removeQueued);
@@ -413,26 +417,48 @@ export default function AgentPage() {
     [sessionId],
   );
 
-  /** 失败自动重试与隐形继续/重试的请求记忆：记录最近一次实际发出的请求
-   *  （auto-retry 用它静默重发；手动重试优先用它精确重发失败的那次）。
-   *  会话切换即清空，避免把别的会话的失败请求重发到当前会话 */
-  const retryCountRef = useRef(0);
+  /** 失败重试的请求记忆：记录最近一次实际发出的请求（自动重试静默重发同一次，
+   *  手动重试优先用它精确重发失败的那次）。会话切换即清空，避免跨会话重发 */
   const lastRunRef = useRef<{ text: string; skill: string | null } | null>(null);
-  /** 本次自动重试是否已真正发出（区分「已调度等待发送」与「已发出正在运行」：
-   *  只有已发出的尝试在 Run 结束后才结束徽标；调度中的尝试等定时器触发） */
-  const retryInFlightRef = useRef(false);
-  /** 判定阶段防重入（React StrictMode 挂载期 effect 双跑会重复计数）：
-   *  判定调度后即置位，真正发出后清位；会话切换 / 手动发送也清位 */
-  const retrySchedulingRef = useRef(false);
+  /** 本「失败事件」内已用掉的自动重试次数。只有 Run 正常结束（成功）或用户新发消息
+   *  才归零；手动重试不重置 —— 否则「点一下又白送 3 次」，看起来像无限循环 */
+  const retryBudgetRef = useRef(0);
+  /** 本次重试的 Run 是否已真正起跑（看到 running/settling 翻转）。「成功」判定必须等它：
+   *  否则重试调度后、起跑前的空闲瞬间会被误判为成功，序列提前结束（旧版「报错清了又出现」） */
+  const retryStartedRef = useRef(false);
+  /** 自动重试调度定时器（存 ref 而非 effect cleanup，避免 effect 重跑时把未到点的定时器清掉） */
+  const autoRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 自动重试进行中的第 N 次（null = 未在自动重试）；同时作为横幅「自动重试中（n/3）」的展示状态 */
   const [autoRetry, setAutoRetry] = useState<number | null>(null);
-  useEffect(() => {
-    retryCountRef.current = 0;
+  /** 重试期间横幅要显示的错误原文：重试真正发出时会清掉 runError（否则「Agent 正在上面
+   *  作答、下面还挂着上次的错误横幅」），文案单独存一份给「自动重试中（n/3）：…」用 */
+  const [retryError, setRetryError] = useState<string | null>(null);
+  /** retryError 的 ref 镜像：effect/定时器闭包里取最新值用（state 拿不到） */
+  const retryErrorRef = useRef<string | null>(null);
+  const rememberRetryError = useCallback((value: string | null) => {
+    retryErrorRef.current = value;
+    setRetryError(value);
+  }, []);
+  const resetRetryState = useCallback(() => {
+    retryBudgetRef.current = 0;
+    retryStartedRef.current = false;
+    if (autoRetryTimerRef.current !== null) {
+      clearTimeout(autoRetryTimerRef.current);
+      autoRetryTimerRef.current = null;
+    }
     lastRunRef.current = null;
-    retryInFlightRef.current = false;
-    retrySchedulingRef.current = false;
     setAutoRetry(null);
-  }, [sessionId]);
+    rememberRetryError(null);
+  }, [rememberRetryError]);
+  useEffect(() => {
+    resetRetryState();
+  }, [sessionId, resetRetryState]);
+  /** 失败横幅的展示状态（纯函数裁定，见 ./retry.ts）：Run 正在流式产出时一律隐藏
+   *  （其自身就是状态信号）；重试中显示进度；否则显示常驻错误 + 继续/重试/× */
+  const runBanner = useMemo(
+    () => bannerView(autoRetry, runError, retryError, runStreaming),
+    [autoRetry, runError, retryError, runStreaming],
+  );
 
   /** 构建 agent_start_run 请求体（手动发送 / 队列续发 / 隐形继续 / 重试共用） */
   const buildRunReq = useCallback(
@@ -535,14 +561,11 @@ export default function AgentPage() {
    *  即将开跑时调用 —— 队列路径借此保证「先准入后出队」，守卫拦截时消息不丢 */
   const doSend = useCallback(
     async (raw: string, skillName: string | null, text: string, onAdmitted?: () => void) => {
-      // 用户手动发送 = 接管失败处理：重置自动重试计数（下次失败重新获得 3 次配额）
-      retryCountRef.current = 0;
-      retryInFlightRef.current = false;
-      retrySchedulingRef.current = false;
-      setAutoRetry(null);
+      // 用户手动发送 = 新意图接管：重置重试配额（下次失败重新获得 3 次）
+      resetRetryState();
       await startRun(raw, skillName, text, true, onAdmitted);
     },
-    [startRun],
+    [startRun, resetRetryState],
   );
 
   /** 隐形继续 / 重试（Zed 式）：不改动当前对话、不在对话框内展示，
@@ -553,23 +576,37 @@ export default function AgentPage() {
     [startRun],
   );
 
+  /** 手动重试（横幅「继续 / 重试」或 ×后重新发起）：运行中直接忽略（不做静默无效动作）；
+   *  发出前清掉失败横幅 —— 重试过程中由 Run 自身状态表达，避免「作答中 + 错误横幅并存」；
+   *  若这次也失败，terminal 事件会把错误重新点亮 */
+  const startManualRetry = useCallback(
+    (text: string, skillName: string | null) => {
+      const st = useAgentStore.getState();
+      if (st.running || st.settling || st.sessionBusy) return;
+      retryStartedRef.current = false;
+      setRunError(null);
+      void resendRun(text, skillName);
+    },
+    [resendRun, setRunError],
+  );
+
   /** 错误横幅「重试」：优先重发最近一次失败请求（lastRunRef 精确记录），
    *  切回停靠会话等 lastRunRef 为空时从最后一条用户消息推导 */
   const handleRetryBanner = useCallback(() => {
     const last = lastRunRef.current;
     if (last) {
-      void resendRun(last.text, last.skill);
+      startManualRetry(last.text, last.skill);
       return;
     }
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
       if (e.kind === 'user') {
         const parsed = parseSendInput(e.text);
-        if (parsed) void resendRun(parsed.text, parsed.skill);
+        if (parsed) startManualRetry(parsed.text, parsed.skill);
         return;
       }
     }
-  }, [resendRun, entries, parseSendInput]);
+  }, [startManualRetry, entries, parseSendInput]);
 
   const handleSend = useCallback(async () => {
     const raw = input.trim();
@@ -583,88 +620,110 @@ export default function AgentPage() {
     await doSend(raw + spilled.displaySuffix + withFiles.displaySuffix, parsed.skill, withFiles.text);
   }, [input, running, parseSendInput, doSend, takeSpill, takePastedFiles]);
 
-  // ===== 失败自动重试（Zed 式，隐形，最多 3 次）：runError 出现且会话空闲时
-  //  静默重发最近一次请求；重试期间横幅显示「自动重试中（n/3）：错误信息」；
-  //  超过 3 次后停手，横幅常驻等用户手动 继续/重试/×。
-  //  会话切换（retryCountRef/lastRunRef 重置）与手动发送（doSend 重置）都重新计数。
-  //  拆成四个 effect：判定 + 发送 + 收尾 + 看门狗，各司其职：
-  //  - 判定与定时不能放同一个 effect：setAutoRetry 会让 effect 重跑，先执行上一次
-  //    cleanup 把还没到点的定时器清掉，导致永远卡在「自动重试中（1/3）」
-  //  - 收尾用 retryInFlightRef 区分「已调度未发出」与「已发出正在运行」，
-  //    只在整个尝试的 Run 结束（空闲）后才推进下一次/结束序列
-  //  - 收尾直接续下一次（autoRetry 1→2→3 不经过 null），横幅不闪断，
-  //    不会出现「报错被清了又出现」的假循环；成功（runError 被清）才结束序列
-  //  - 看门狗：尝试发出后 20s 仍未结算（running/settling 卡死，无终态事件）
-  //    → 强制结束序列回到常驻报错横幅，避免「自动重试中」无限转圈 */
+  // ===== 失败自动重试（Zed 式，隐形，最多 3 次）=====
+  //  语义：一次 Run 失败 = 一个「失败事件」，事件内最多自动重试 3 次；Run 正常结束
+  //  （成功）或用户新发消息才重置配额，手动重试不重置。
+  //  四条不变式（历史 bug 都出在这里）：
+  //  1. 重试真正发出时必须清掉 runError —— 否则「Agent 正在上面流式作答、下面还挂着
+  //     上次的错误横幅 + 重试按钮」；文案转存 retryError 供「自动重试中（n/3）」显示
+  //  2. 「成功」判定必须等 Run 真起跑（retryStartedRef）—— 否则调度后、起跑前的空闲
+  //     瞬间会被当成成功，序列提前结束（旧版的「报错清了又出现」假循环）
+  //  3. 收尾只在 Run 结算（!running && !settling）后推进，且直接续下一次（1→2→3
+  //     不经过 null），横幅不闪断
+  //  4. 看门狗只认「已起跑但一个事件都没到」（lastSequence === 0）的死 Run；长任务
+  //     （>30s 仍在输出）绝不能被误伤 —— 旧版 30s 无条件清 autoRetry，导致作答途中
+  //     横幅退回「常驻错误 + 重试按钮」
   const resendRunRef = useRef(resendRun);
   resendRunRef.current = resendRun;
-  // 判定（仅首触）：空闲 + 失败 + 未超 3 次 → 进入自动重试序列（第 1 次）
+  /** 状态机视图：纯决策函数（./retry.ts）的入参，ref 的当前值在这里统一读 */
+  const retryState = () => ({
+    autoRetry,
+    started: retryStartedRef.current,
+    budget: retryBudgetRef.current,
+    hasLastRun: lastRunRef.current !== null,
+    runError,
+    running,
+    settling,
+  });
+  // 起跑标记：调度后看到 running/settling 翻转，才算这次尝试真的跑起来了
   useEffect(() => {
-    if (autoRetry !== null || retrySchedulingRef.current) return; // 已在重试中，等待结果
-    if (!runError || running || settling) return;
-    if (retryCountRef.current >= 3) return;
-    const last = lastRunRef.current;
-    if (!last) return;
-    const attempt = retryCountRef.current + 1;
-    retryCountRef.current = attempt;
-    retrySchedulingRef.current = true;
+    if (autoRetry !== null && (running || settling)) retryStartedRef.current = true;
+  }, [autoRetry, running, settling]);
+  // 判定：空闲 + 有失败 + 配额未用尽 → 进入（或续）自动重试
+  useEffect(() => {
+    const attempt = nextAutoAttempt(retryState());
+    if (attempt === null) return;
+    retryBudgetRef.current = attempt;
+    rememberRetryError(runError);
     setAutoRetry(attempt);
-  }, [runError, running, settling, autoRetry]);
+  }, [runError, running, settling, autoRetry, rememberRetryError]);
   // 发送：autoRetry 每变化一次（1→2→3）调度一次隐形重发（不进对话流）；
-  // 延迟 800ms 给上一轮 Run 收尾留出间隔，避免瞬间连发造成「无限循环」观感
+  // 800ms 间隔给上一轮 Run 结算留时间，避免瞬间连发
   useEffect(() => {
     if (autoRetry === null) return;
     const last = lastRunRef.current;
     if (!last) return;
+    retryStartedRef.current = false;
     const timer = setTimeout(() => {
-      retrySchedulingRef.current = false;
-      retryInFlightRef.current = true;
+      autoRetryTimerRef.current = null;
+      // 重试真正发出前清掉上次的失败横幅（文案已在 retryError 里）
+      setRunError(null);
       void resendRunRef.current(last.text, last.skill).then(
         (ok) => {
+          // 守卫拦截未发出（会话被切换等）：结束序列并把错误横幅还原，
+          // 否则「重试没发出去 + 横幅也没了」会让用户完全失去失败信息
           if (ok) return;
-          // 守卫拦截未发出（会话被切换等）：结束本次序列，避免徽标悬挂
-          retryInFlightRef.current = false;
-          retrySchedulingRef.current = false;
+          retryStartedRef.current = false;
           setAutoRetry(null);
+          setRunError(retryErrorRef.current);
         },
         () => {
-          retryInFlightRef.current = false;
-          retrySchedulingRef.current = false;
+          retryStartedRef.current = false;
           setAutoRetry(null);
+          setRunError(retryErrorRef.current);
         },
       );
     }, 800);
-    return () => clearTimeout(timer);
+    autoRetryTimerRef.current = timer;
+    return () => {
+      if (autoRetryTimerRef.current === timer) autoRetryTimerRef.current = null;
+      clearTimeout(timer);
+    };
   }, [autoRetry]);
-  // 收尾：已发出的尝试在 Run 结束后（空闲）→ 未超 3 次直接续下一次（无闪烁）；
-  // 已超 3 次或 runError 已被清（真正成功）→ 结束序列，横幅随 runError 消失
+  // 收尾：尝试真正起跑、Run 结算后 → 失败则续下一次 / 成功或配额用尽则结束
   useEffect(() => {
-    if (autoRetry === null) return;
-    if (!retryInFlightRef.current) return; // 还没真正发出（等定时器）
-    if (running || settling) return; // 尝试仍在运行
-    retryInFlightRef.current = false;
-    if (!runError || retryCountRef.current >= 3) {
-      retrySchedulingRef.current = false;
-      setAutoRetry(null); // 成功（runError 已清）或耗尽：结束自动重试
-    } else {
-      const next = retryCountRef.current + 1;
-      retryCountRef.current = next;
-      setAutoRetry(next); // 直接续下一次，横幅保持「自动重试中（n/3）」不闪断
-    }
-  }, [autoRetry, running, settling, runError]);
-  // 看门狗：尝试发出后 30s 仍未结算（running/settling 卡死，无终态事件）→ 强制结束序列，
-  // 回到常驻报错横幅（右侧 继续/重试），避免「自动重试中」无限转圈；
-  // 正常长任务会在 30s 内产生事件推进状态，看门狗不会误伤
-  useEffect(() => {
-    if (autoRetry === null || !retryInFlightRef.current) return;
-    if (!running && !settling) return; // 已空闲，由收尾 effect 处理
-    const timer = setTimeout(() => {
-      retryInFlightRef.current = false;
-      retrySchedulingRef.current = false;
+    const action = finishAction(retryState());
+    if (action === null) return;
+    retryStartedRef.current = false;
+    if (action === 'success') {
+      // 成功：重置配额，横幅随 runError / autoRetry 一起消失
+      retryBudgetRef.current = 0;
+      rememberRetryError(null);
       setAutoRetry(null);
+      return;
+    }
+    if (action === 'exhausted') {
+      setAutoRetry(null); // 配额用尽：横幅回到常驻错误 + 继续/重试
+      return;
+    }
+    const next = retryBudgetRef.current + 1;
+    retryBudgetRef.current = next;
+    rememberRetryError(runError);
+    setAutoRetry(next); // 直接续下一次，横幅不闪断
+  }, [autoRetry, running, settling, runError, rememberRetryError]);
+  // 死 Run 看门狗：重试已起跑、30s 内一个事件都没到（lastSequence === 0）→ 后端没接上。
+  // 只在「零事件」时触发，正常长任务（>30s 仍在流式输出）不会误伤
+  useEffect(() => {
+    if (!isDeadRun(retryState(), useAgentStore.getState().lastSequence)) return;
+    const timer = setTimeout(() => {
+      if (useAgentStore.getState().lastSequence > 0) return; // 已起跑，交回收尾逻辑
+      retryStartedRef.current = false;
+      setAutoRetry(null);
+      setRunState(false, null);
+      setRunError('运行未能启动（30 秒内没有任何事件）');
     }, 30_000);
     return () => clearTimeout(timer);
-  }, [autoRetry, running, settling]);
+  }, [autoRetry, running, settling, runError, setRunState, setRunError]);
 
   /** 历史用户消息「编辑重发」：只记回退意图并回填输入框（真正回退发生在发送时，
    *  取消零损失）。其后有值得保留的内容（成功回复 / 完成终态）时弹确认 */
@@ -1050,21 +1109,23 @@ export default function AgentPage() {
               {/* Run 失败横幅（Zed 式）：不进对话流，挂在输入框上方；
                   自动重试中显示进度徽标（runError 被短暂清掉时也保持显示），
                   重试耗尽后常驻，右侧 继续/重试/× */}
-              {(runError !== null || autoRetry !== null) && (
-                <div className={`agent-run-error${autoRetry !== null ? ' is-retrying' : ''}`} role="alert">
-                  {autoRetry !== null ? (
+              {(runBanner.kind !== 'hidden') && (
+                <div className={`agent-run-error${runBanner.kind === 'retrying' ? ' is-retrying' : ''}`} role="alert">
+                  {runBanner.kind === 'retrying' ? (
                     <Loader2 size={14} strokeWidth={1.8} className="is-spinning" />
                   ) : (
                     <CircleAlert size={14} strokeWidth={1.8} />
                   )}
                   <span className="agent-run-error__msg">
-                    {autoRetry !== null ? `自动重试中（${autoRetry}/3）：${runError}` : runError}
+                    {runBanner.kind === 'retrying'
+                      ? `自动重试中（${runBanner.attempt}/3）：${runBanner.message}`
+                      : runBanner.message}
                   </span>
-                  {autoRetry === null && (
+                  {runBanner.kind === 'failed' && (
                     <div className="agent-run-error__actions">
                       <button
                         type="button"
-                        onClick={() => void resendRun('继续', null)}
+                        onClick={() => startManualRetry('继续', null)}
                         title="继续（不修改当前对话，不显示在对话框内）"
                       >
                         <Play size={12} strokeWidth={2} /> 继续
@@ -1080,10 +1141,13 @@ export default function AgentPage() {
                         type="button"
                         className="is-close"
                         onClick={() => {
-                          retryInFlightRef.current = false;
-                          retrySchedulingRef.current = false;
+                          // 关掉横幅 = 放弃本失败事件的自动重试（配额打满），
+                          // 避免“关掉了又自己弹回来”
+                          retryStartedRef.current = false;
+                          retryBudgetRef.current = 3;
                           setRunError(null);
                           setAutoRetry(null);
+                          rememberRetryError(null);
                         }}
                         aria-label="关闭"
                         title="关闭"

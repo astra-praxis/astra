@@ -7,12 +7,12 @@
  * - 事件流：Tauri `agent-event`（Envelope：type 标签 + snake_case 载荷）
  * - 权限确认卡：批准/拒绝 → agent_permission_decide，UI 状态由 permission_decided 事件回写
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openWithDefaultApp, openWithEditor } from '@/lib/openService';
-import { ArrowRight, AtSign, ChevronDown, ChevronUp, CircleAlert, FileText, FolderOpen, Loader2, PanelLeftClose, PanelLeftOpen, Pencil, Play, RotateCcw, Trash, X } from 'lucide-react';
+import { ArrowRight, AtSign, ChevronDown, CircleAlert, FileText, FolderOpen, GripVertical, Loader2, PanelLeftClose, PanelLeftOpen, Pencil, Play, RotateCcw, Trash, X } from 'lucide-react';
 import OrbArt from '@/components/illustrations/OrbArt';
 
 import { useChatToolbarStore } from '@/stores/chatToolbar';
@@ -112,7 +112,10 @@ export default function AgentPage() {
   const queue = useAgentStore((s) => s.queue);
   const enqueueMessage = useAgentStore((s) => s.enqueueMessage);
   const removeQueued = useAgentStore((s) => s.removeQueued);
-  const moveQueued = useAgentStore((s) => s.moveQueued);
+  const reorderQueued = useAgentStore((s) => s.reorderQueued);
+  /** 队列拖拽排序：draggingQueuedId 为被拖条目，queueDropTarget 为落点（after 决定插到目标前 / 后） */
+  const [draggingQueuedId, setDraggingQueuedId] = useState<string | null>(null);
+  const [queueDropTarget, setQueueDropTarget] = useState<{ id: string; after: boolean } | null>(null);
   /** 当前会话的排队消息（队列全局共享，切 tab 回来仍可见） */
   const queuedHere = useMemo(() => queue.filter((q) => q.sessionId === sessionId), [queue, sessionId]);
 
@@ -834,6 +837,39 @@ export default function AgentPage() {
     });
   }, [removeQueued, setInput]);
 
+  // ===== 队列拖拽排序 =====
+  //  拖拽把手在条目最左侧，整行可拖；落点以条目垂直中线为界（上半插入前、下半插入后）
+  const queueDragStart = useCallback((e: DragEvent<HTMLDivElement>, id: string) => {
+    setDraggingQueuedId(id);
+    setQueueDropTarget(null);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-astra-queue', id); // Firefox 不 setData 不会真正起拖；不用 text/plain 以免拖到输入框时粘出 id
+  }, []);
+
+  const queueDragOver = useCallback((e: DragEvent<HTMLDivElement>, id: string) => {
+    if (!draggingQueuedId || draggingQueuedId === id) return;
+    e.preventDefault(); // 不 preventDefault 则不允许放置
+    e.dataTransfer.dropEffect = 'move';
+    const rect = e.currentTarget.getBoundingClientRect();
+    const after = e.clientY > rect.top + rect.height / 2;
+    setQueueDropTarget((cur) => (cur && cur.id === id && cur.after === after ? cur : { id, after }));
+  }, [draggingQueuedId]);
+
+  const queueDropOn = useCallback((e: DragEvent<HTMLDivElement>, id: string) => {
+    e.preventDefault();
+    if (draggingQueuedId && draggingQueuedId !== id) {
+      const after = queueDropTarget?.id === id ? queueDropTarget.after : false;
+      reorderQueued(draggingQueuedId, id, after);
+    }
+    setDraggingQueuedId(null);
+    setQueueDropTarget(null);
+  }, [draggingQueuedId, queueDropTarget, reorderQueued]);
+
+  const queueDragEnd = useCallback(() => {
+    setDraggingQueuedId(null);
+    setQueueDropTarget(null);
+  }, []);
+
   /** 立即发送指定排队消息（Zed send_queued_message_now 语义）：
    *  本会话空闲时直接发；本会话运行中则取消当前 Run 后立即发（消息插队首，
    *  settled 后由续发 effect 发出）。其他会话的运行与本会话无关（P3 并发） */
@@ -1206,30 +1242,22 @@ export default function AgentPage() {
               {queuedHere.length > 0 && (
                 <div className="agent-dock__queue" role="list" aria-label="排队消息">
                   {queuedHere.map((q, i) => (
-                    <div key={q.id} className="agent-dock__queue-item" role="listitem">
+                    <div
+                      key={q.id}
+                      className={`agent-dock__queue-item${draggingQueuedId === q.id ? ' is-dragging' : ''}${queueDropTarget?.id === q.id ? (queueDropTarget.after ? ' is-drop-after' : ' is-drop-before') : ''}`}
+                      role="listitem"
+                      draggable
+                      onDragStart={(e) => queueDragStart(e, q.id)}
+                      onDragEnd={queueDragEnd}
+                      onDragOver={(e) => queueDragOver(e, q.id)}
+                      onDrop={(e) => queueDropOn(e, q.id)}
+                    >
+                      <span className="agent-dock__queue-handle" title="拖拽调整顺序">
+                        <GripVertical size={14} strokeWidth={1.8} />
+                      </span>
                       <span className="agent-dock__queue-badge">{i === 0 ? '下一条' : `#${i + 1}`}</span>
                       <span className="agent-dock__queue-text" title={q.raw}>{q.text || q.raw}</span>
                       <div className="agent-dock__queue-actions">
-                        <button
-                          type="button"
-                          className="agent-dock__queue-btn"
-                          disabled={i === 0}
-                          onClick={() => moveQueued(q.id, -1)}
-                          aria-label="上移排队消息"
-                          title="上移（提前发送）"
-                        >
-                          <ChevronUp size={14} strokeWidth={1.8} />
-                        </button>
-                        <button
-                          type="button"
-                          className="agent-dock__queue-btn"
-                          disabled={i === queuedHere.length - 1}
-                          onClick={() => moveQueued(q.id, 1)}
-                          aria-label="下移排队消息"
-                          title="下移（延后发送）"
-                        >
-                          <ChevronDown size={14} strokeWidth={1.8} />
-                        </button>
                         <button
                           type="button"
                           className="agent-dock__queue-btn"

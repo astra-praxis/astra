@@ -1420,12 +1420,39 @@ body .content:has(.agent-root) {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 6px 4px 10px;
+    padding: 4px 6px 4px 6px;
     background: var(--bg-body);
     border: 1px solid var(--border-color);
     border-radius: 10px;
     font-size: 12.5px;
     color: var(--text-secondary);
+
+    // 拖拽排序态的视觉反馈：被拖项淡出、落点用品牌色描一条插入线
+    &.is-dragging {
+      opacity: 0.45;
+    }
+
+    &.is-drop-before {
+      box-shadow: inset 0 2px 0 0 var(--brand-500);
+    }
+
+    &.is-drop-after {
+      box-shadow: inset 0 -2px 0 0 var(--brand-500);
+    }
+  }
+
+  // 拖拽把手（条目最左侧）：整行可拖，把手只做 affordance
+  &__queue-handle {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: -2px;
+    color: var(--text-muted);
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
   }
 
   &__queue-badge {

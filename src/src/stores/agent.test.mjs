@@ -648,35 +648,38 @@ test('message queue: enqueue appends to session sub-queue, remove deletes, front
   assert.equal(queue[0].text, '任务一');
 });
 
-test('message queue: moveQueued reorders the session sub-queue and leaves other sessions alone', () => {
+test('message queue: reorderQueued moves an item before/after a target and never crosses sessions', () => {
   const store = load().useAgentStore;
   store.getState().enqueueMessage('一', '一', null);
   store.getState().enqueueMessage('二', '二', null);
   store.getState().enqueueMessage('三', '三', null);
-  let queue = store.getState().queue;
   const texts = () => store.getState().queue.map((q) => q.text).join('|');
+  const idOf = (text) => store.getState().queue.find((q) => q.text === text).id;
   // vm 沙箱里的数组跨 realm，deepEqual（strict）会比原型，故用 join 比较
   assert.equal(texts(), '一|二|三');
-  // 上移第二条 → 一/二/三 变成 二/一/三
-  store.getState().moveQueued(queue[1].id, -1);
+  // 把「一」拖到「三」之后
+  store.getState().reorderQueued(idOf('一'), idOf('三'), true);
+  assert.equal(texts(), '二|三|一');
+  // 再把「一」拖回「二」之前
+  store.getState().reorderQueued(idOf('一'), idOf('二'), false);
+  assert.equal(texts(), '一|二|三');
+  // 把「一」拖到「二」之后
+  store.getState().reorderQueued(idOf('一'), idOf('二'), true);
   assert.equal(texts(), '二|一|三');
-  // 越界不变：子队首上移 / 子队尾下移
-  store.getState().moveQueued(store.getState().queue[0].id, -1);
+  // 拖到自己身上 / 未知目标：不变
+  store.getState().reorderQueued(idOf('一'), idOf('一'), true);
   assert.equal(texts(), '二|一|三');
-  store.getState().moveQueued(store.getState().queue.at(-1).id, 1);
+  store.getState().reorderQueued(idOf('一'), 'no-such-id', true);
   assert.equal(texts(), '二|一|三');
-  // 未知 id / delta 0 不变
-  store.getState().moveQueued('no-such-id', -1);
-  assert.equal(texts(), '二|一|三');
-  store.getState().moveQueued(store.getState().queue[0].id, 0);
-  assert.equal(texts(), '二|一|三');
-  // 跨会话隔离：其他会话的排队夹在中间时跳过，自身位置不被扰动
-  const mine = store.getState().queue.filter((q) => q.sessionId === store.getState().sessionId);
-  const other = { id: 'other-1', raw: '别人的', text: '别人的', skill: null, sessionId: 'other-session' };
-  store.setState({ queue: [mine[0], other, mine[1]] });
-  store.getState().moveQueued(mine[1].id, -1);
-  assert.equal(texts(), '一|别人的|二');
-  assert.equal(store.getState().queue[1].id, 'other-1');
+  // 跨会话拖拽 = 无效动作（其他会话的排队不属于本次排序）
+  const foreign = { id: 'other-1', raw: '别人的', text: '别人的', skill: null, sessionId: 'other-session' };
+  store.setState({ queue: [store.getState().queue[0], foreign, store.getState().queue[1]] });
+  assert.equal(texts(), '二|别人的|一');
+  store.getState().reorderQueued(idOf('一'), 'other-1', false);
+  assert.equal(texts(), '二|别人的|一');
+  // 同会话排序时其他会话项保持自己的相对顺序
+  store.getState().reorderQueued(idOf('一'), idOf('二'), true);
+  assert.equal(texts(), '二|一|别人的');
 });
 
 test('message queue: deleting or closing a session drops its queued messages', async () => {

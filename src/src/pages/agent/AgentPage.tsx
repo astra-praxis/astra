@@ -12,7 +12,7 @@ import { Virtuoso, type ListRange, type VirtuosoHandle } from 'react-virtuoso';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openWithDefaultApp, openWithEditor } from '@/lib/openService';
-import { ArrowRight, AtSign, ChevronDown, CircleAlert, FileText, FolderOpen, Loader2, PanelLeftClose, PanelLeftOpen, Pencil, Play, RotateCcw, Trash, X } from 'lucide-react';
+import { ArrowRight, AtSign, ChevronDown, ChevronUp, CircleAlert, FileText, FolderOpen, Loader2, PanelLeftClose, PanelLeftOpen, Pencil, Play, RotateCcw, Trash, X } from 'lucide-react';
 import OrbArt from '@/components/illustrations/OrbArt';
 
 import { useChatToolbarStore } from '@/stores/chatToolbar';
@@ -112,6 +112,7 @@ export default function AgentPage() {
   const queue = useAgentStore((s) => s.queue);
   const enqueueMessage = useAgentStore((s) => s.enqueueMessage);
   const removeQueued = useAgentStore((s) => s.removeQueued);
+  const moveQueued = useAgentStore((s) => s.moveQueued);
   /** 当前会话的排队消息（队列全局共享，切 tab 回来仍可见） */
   const queuedHere = useMemo(() => queue.filter((q) => q.sessionId === sessionId), [queue, sessionId]);
 
@@ -474,7 +475,7 @@ export default function AgentPage() {
         model:
           st.sourceType === 'provider'
             ? (st.overrideModelName ?? selectedProvider?.active_model ?? null)
-            : null,
+            : (st.runningModels.find((m) => m.port === st.selectedModelPort)?.name ?? null),
         project_root: projectPath || null,
         system_prompt: systemPrompt.trim() || null,
         auto_compact_tokens: useAgentStore.getState().autoCompactTokens,
@@ -490,9 +491,18 @@ export default function AgentPage() {
    *  校验 → 监听 → 守卫 → 清失败横幅 → 记录最近请求 → 调后端。
    *  返回是否真正发出；失败横幅（runError）由 startRun 与事件监听层共同维护：
    *  启动前清除（新动作接管），invoke 立即失败或 run_failed 事件时重新点亮。
-   *  visible = 前端展示动作：清输入框 + pushUser；隐形（继续/重试）不动输入框、不进对话流 */
+   *  visible = 前端展示动作：pushUser + 清输入框；隐形（继续/重试）不动输入框、不进对话流
+   *  opts.keepInput = 保留输入框草稿：队列续发的消息不是「当前输入框里的内容」，
+   *  用户可能正在打字，清掉就等于丢弃草稿（历史 bug：队列恰好触发时输入被清空） */
   const startRun = useCallback(
-    async (raw: string, skillName: string | null, text: string, visible: boolean, onAdmitted?: () => void): Promise<boolean> => {
+    async (
+      raw: string,
+      skillName: string | null,
+      text: string,
+      visible: boolean,
+      onAdmitted?: () => void,
+      opts?: { keepInput?: boolean },
+    ): Promise<boolean> => {
       const st = useChatToolbarStore.getState();
       if (st.sourceType === 'model' && !st.selectedModelPort) {
         setError('请先在标题栏选择一个运行中的本地模型');
@@ -538,7 +548,7 @@ export default function AgentPage() {
         // （run_completed / run_cancelled 由监听层清 runError）才消失，
         // 避免「报错后没提示成功就把报错清了」的假无限循环
         setRunError(null);
-        setInput('');
+        if (!opts?.keepInput) setInput('');
         setError('');
         onAdmitted?.();
         pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
@@ -562,12 +572,19 @@ export default function AgentPage() {
   );
 
   /** 实际发送（队列续发与手动发送共用）：onAdmitted 在全部守卫通过、
-   *  即将开跑时调用 —— 队列路径借此保证「先准入后出队」，守卫拦截时消息不丢 */
+   *  即将开跑时调用 —— 队列路径借此保证「先准入后出队」，守卫拦截时消息不丢。
+   *  opts.keepInput 透传给 startRun：队列路径必须保留输入框草稿 */
   const doSend = useCallback(
-    async (raw: string, skillName: string | null, text: string, onAdmitted?: () => void) => {
+    async (
+      raw: string,
+      skillName: string | null,
+      text: string,
+      onAdmitted?: () => void,
+      opts?: { keepInput?: boolean },
+    ) => {
       // 用户手动发送 = 新意图接管：重置重试配额（下次失败重新获得 3 次）
       resetRetryState();
-      await startRun(raw, skillName, text, true, onAdmitted);
+      await startRun(raw, skillName, text, true, onAdmitted, opts);
     },
     [startRun, resetRetryState],
   );
@@ -833,7 +850,8 @@ export default function AgentPage() {
         setError(`停止失败：${String(error)}`);
       }
     } else if (!st.running && !st.settling && !st.sessionBusy) {
-      void doSend(q.raw, q.skill, q.text);
+      // 立即发送的是一条排队消息，输入框里可能是用户正在打的新草稿 → 不清空
+      void doSend(q.raw, q.skill, q.text, undefined, { keepInput: true });
     } else {
       enqueueMessage(q.raw, q.text, q.skill, { front: true });
     }
@@ -854,7 +872,8 @@ export default function AgentPage() {
       if (st.running || st.settling || st.sessionBusy) return;
       if (st.queue.find((q) => q.id === head.id) == null) return; // 排队期间被删除
       st.removeQueued(head.id);
-      void doSendRef.current(head.raw, head.skill, head.text);
+      // keepInput：续发的是队列里的旧消息，不能清掉用户此刻正在打字的草稿
+      void doSendRef.current(head.raw, head.skill, head.text, undefined, { keepInput: true });
     }, 120);
     return () => clearTimeout(timer);
   }, [running, settling, queue, sessionId, runError, editing]);
@@ -1191,6 +1210,26 @@ export default function AgentPage() {
                       <span className="agent-dock__queue-badge">{i === 0 ? '下一条' : `#${i + 1}`}</span>
                       <span className="agent-dock__queue-text" title={q.raw}>{q.text || q.raw}</span>
                       <div className="agent-dock__queue-actions">
+                        <button
+                          type="button"
+                          className="agent-dock__queue-btn"
+                          disabled={i === 0}
+                          onClick={() => moveQueued(q.id, -1)}
+                          aria-label="上移排队消息"
+                          title="上移（提前发送）"
+                        >
+                          <ChevronUp size={14} strokeWidth={1.8} />
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-dock__queue-btn"
+                          disabled={i === queuedHere.length - 1}
+                          onClick={() => moveQueued(q.id, 1)}
+                          aria-label="下移排队消息"
+                          title="下移（延后发送）"
+                        >
+                          <ChevronDown size={14} strokeWidth={1.8} />
+                        </button>
                         <button
                           type="button"
                           className="agent-dock__queue-btn"

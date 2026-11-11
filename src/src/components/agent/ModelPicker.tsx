@@ -381,6 +381,11 @@ export default function ModelPicker() {
                     role="option"
                     aria-selected={active}
                     className={`mpick__item${active ? ' is-active' : ''}`}
+                    title={
+                      m.external
+                        ? '该模型由 astra 之外启动（终端/脚本）'
+                        : undefined
+                    }
                     onClick={() => pickLocal(m.port, `${m.name} :${m.port}`)}
                   >
                     <Cpu size={13} strokeWidth={1.8} />

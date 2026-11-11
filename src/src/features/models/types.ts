@@ -13,6 +13,10 @@ export interface RunningModelInfo extends ModelConfig {
   status: string;
   pid: number | null;
   started_at: number;
+  /** true = 由 astra 之外的进程启动（如终端/脚本），应用内无法停止 */
+  external?: boolean;
+  /** llama.cpp /props 报告的视觉能力（加载了 mmproj 时为 true） */
+  vision?: boolean;
 }
 
 export interface ModelFileInfo {

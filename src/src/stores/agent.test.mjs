@@ -648,6 +648,37 @@ test('message queue: enqueue appends to session sub-queue, remove deletes, front
   assert.equal(queue[0].text, '任务一');
 });
 
+test('message queue: moveQueued reorders the session sub-queue and leaves other sessions alone', () => {
+  const store = load().useAgentStore;
+  store.getState().enqueueMessage('一', '一', null);
+  store.getState().enqueueMessage('二', '二', null);
+  store.getState().enqueueMessage('三', '三', null);
+  let queue = store.getState().queue;
+  const texts = () => store.getState().queue.map((q) => q.text).join('|');
+  // vm 沙箱里的数组跨 realm，deepEqual（strict）会比原型，故用 join 比较
+  assert.equal(texts(), '一|二|三');
+  // 上移第二条 → 一/二/三 变成 二/一/三
+  store.getState().moveQueued(queue[1].id, -1);
+  assert.equal(texts(), '二|一|三');
+  // 越界不变：子队首上移 / 子队尾下移
+  store.getState().moveQueued(store.getState().queue[0].id, -1);
+  assert.equal(texts(), '二|一|三');
+  store.getState().moveQueued(store.getState().queue.at(-1).id, 1);
+  assert.equal(texts(), '二|一|三');
+  // 未知 id / delta 0 不变
+  store.getState().moveQueued('no-such-id', -1);
+  assert.equal(texts(), '二|一|三');
+  store.getState().moveQueued(store.getState().queue[0].id, 0);
+  assert.equal(texts(), '二|一|三');
+  // 跨会话隔离：其他会话的排队夹在中间时跳过，自身位置不被扰动
+  const mine = store.getState().queue.filter((q) => q.sessionId === store.getState().sessionId);
+  const other = { id: 'other-1', raw: '别人的', text: '别人的', skill: null, sessionId: 'other-session' };
+  store.setState({ queue: [mine[0], other, mine[1]] });
+  store.getState().moveQueued(mine[1].id, -1);
+  assert.equal(texts(), '一|别人的|二');
+  assert.equal(store.getState().queue[1].id, 'other-1');
+});
+
 test('message queue: deleting or closing a session drops its queued messages', async () => {
   const mod = load(
     async () => () => {},

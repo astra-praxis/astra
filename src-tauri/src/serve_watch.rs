@@ -101,16 +101,18 @@ pub(crate) fn spawn(app: AppHandle) {
 }
 
 async fn watch_loop(app: AppHandle) {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            app_log!(error, "serve-watch", "HTTP client init failed: {e}");
-            return;
-        }
-    };
+    // Serve 宿主永远在本机：必须绕过系统代理，否则轮询会被代理拦成 502
+    let client =
+        match crate::net_util::client_builder_for(&format!("http://127.0.0.1:{}", read_port()))
+            .timeout(Duration::from_secs(8))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                app_log!(error, "serve-watch", "HTTP client init failed: {e}");
+                return;
+            }
+        };
     let mut state = WatchState::default();
     loop {
         let token = match read_token() {

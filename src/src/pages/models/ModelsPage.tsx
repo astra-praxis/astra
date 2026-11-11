@@ -53,9 +53,17 @@ export default function ModelsPage() {
   }
 
   // ===== 状态查询 =====
+  function findRunning(model: ModelConfig): RunningModelInfo | undefined {
+    return runningInfo.find((r) => r.id === model.id || r.port === model.port);
+  }
+
   function isModelRunning(model: ModelConfig): boolean {
-    const info = runningInfo.find((r) => r.id === model.id || r.port === model.port);
-    return (info?.status ?? 'stopped') === 'running';
+    return (findRunning(model)?.status ?? 'stopped') === 'running';
+  }
+
+  /** 该端口上是外部启动的服务（应用内停不掉） */
+  function isModelExternal(model: ModelConfig): boolean {
+    return findRunning(model)?.external === true;
   }
 
   // ===== 启动/停止 =====
@@ -178,6 +186,7 @@ export default function ModelsPage() {
                 key={model.id}
                 model={model}
                 isRunning={isModelRunning(model)}
+                external={isModelExternal(model)}
                 isLoading={actionLoading === model.id}
                 onDelete={(m) => setDeleteTarget(m)}
                 onStop={stopModel}

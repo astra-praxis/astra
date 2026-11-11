@@ -14,6 +14,10 @@ export interface RunningModelInfo {
   model_name?: string;
   model_path?: string;
   started_at?: number;
+  /** true = 由 astra 之外的进程启动（如终端/脚本），应用内无法停止 */
+  external?: boolean;
+  /** llama.cpp /props 报告的视觉能力 */
+  vision?: boolean;
 }
 
 export interface ProviderConfig {

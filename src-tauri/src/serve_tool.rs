@@ -62,7 +62,7 @@ async fn call_serve(
 ) -> Result<Value> {
     let token = read_token()?;
     let url = format!("{}{}", base_url(), path);
-    let client = reqwest::Client::builder()
+    let client = crate::net_util::client_builder_for(&url)
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|e| Error::tool(tool, format!("HTTP 客户端创建失败: {e}")))?;
@@ -711,7 +711,9 @@ impl ServeBotChat {
             base_url(),
             token
         );
-        let client = reqwest::Client::new();
+        let client = crate::net_util::client_builder_for(&url)
+            .build()
+            .unwrap_or_default();
         let resp = client
             .get(&url)
             .timeout(Duration::from_secs(600))

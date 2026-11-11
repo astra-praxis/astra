@@ -402,7 +402,9 @@ async fn try_get_models_list(
         format!("{base}/models")
     };
 
-    let client = reqwest::Client::new();
+    let client = crate::net_util::client_builder_for(&url)
+        .build()
+        .map_err(|e| format!("/models 客户端创建失败: {}", e))?;
     let mut request = client.get(&url);
     match kind {
         // 同时发两种认证头：官方 Anthropic 认 x-api-key（忽略 Authorization），
@@ -445,7 +447,9 @@ async fn try_probe_models_via_chat(
         format!("{}/chat/completions", base_url)
     };
 
-    let client = reqwest::Client::new();
+    let client = crate::net_util::client_builder_for(&url)
+        .build()
+        .map_err(|e| format!("chat/completions 客户端创建失败: {}", e))?;
     // 故意使用非法模型名，期望网关返回包含可用模型列表的错误响应
     let payload = serde_json::json!({
         "model": "__probe_invalid_model__",

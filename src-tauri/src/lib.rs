@@ -6,6 +6,7 @@ mod agent_generation;
 mod app;
 mod extensions;
 mod memory;
+mod net_util;
 mod proc_util;
 mod providers;
 mod serve_console;
@@ -334,7 +335,11 @@ pub fn run() {
                     // 控制台子窗口）照常真正关闭，否则 X 无效且外链页面
                     // 的轮询/Webview 一直存活。
                     if window.label() == "main" {
-                        app_log!(info, "window", "close requested: label=main -> hide to tray");
+                        app_log!(
+                            info,
+                            "window",
+                            "close requested: label=main -> hide to tray"
+                        );
                         window.hide().ok();
                         api.prevent_close();
                     } else {

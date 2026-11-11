@@ -645,6 +645,9 @@ interface AgentState extends RunWindow {
   /** 排队消息（opts.front = 插到同会话子队首，供「打断并优先发送」用） */
   enqueueMessage: (raw: string, text: string, skill: string | null, opts?: { front?: boolean }, images?: UserImage[]) => void;
   removeQueued: (id: string) => void;
+  /** 调整同会话排队顺序（delta < 0 上移 / > 0 下移）：只与本会话相邻项交换，
+   *  其他会话的排队位置原样保留（子队列顺序即续发顺序，见 nextQueuedFor） */
+  moveQueued: (id: string, delta: number) => void;
   setProjectPath: (v: string) => void;
   /** 切换多级放权级别（同步到后端 + localStorage 持久化） */
   setAutoMode: (v: AutoMode) => void;
@@ -761,6 +764,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return { queue: [...s.queue, item] };
     }),
   removeQueued: (id) => set((s) => ({ queue: s.queue.filter((q) => q.id !== id) })),
+  moveQueued: (id, delta) =>
+    set((s) => {
+      const at = s.queue.findIndex((q) => q.id === id);
+      if (at < 0 || delta === 0) return {};
+      const sid = s.queue[at].sessionId;
+      const step = delta < 0 ? -1 : 1;
+      // 跳过其他会话的排队项：它们的位置不参与本次排序，也不应被打乱
+      let to = at + step;
+      while (to >= 0 && to < s.queue.length && s.queue[to].sessionId !== sid) to += step;
+      if (to < 0 || to >= s.queue.length) return {}; // 已在子队首/尾：不动
+      const queue = [...s.queue];
+      const moved = queue[at];
+      queue[at] = queue[to];
+      queue[to] = moved;
+      return { queue };
+    }),
   setAutoCompactTokens: (v) => {
     const n = Number.isFinite(v) && v >= 0 ? Math.floor(v) : 60000;
     set({ autoCompactTokens: n });

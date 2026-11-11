@@ -6,6 +6,8 @@ import './ModelCard.scss';
 interface ModelCardProps {
   model: ModelConfig;
   isRunning: boolean;
+  /** 运行中的实例是否由 astra 之外启动（外部实例无法在应用内停止） */
+  external?: boolean;
   isLoading: boolean;
   onDelete: (model: ModelConfig) => void;
   onStop: (model: ModelConfig) => void;
@@ -16,6 +18,7 @@ interface ModelCardProps {
 export default function ModelCard({
   model,
   isRunning,
+  external = false,
   isLoading,
   onDelete,
   onStop,
@@ -40,7 +43,7 @@ export default function ModelCard({
             isRunning ? 'model-card__status--running' : 'model-card__status--stopped'
           }`}
         >
-          {isRunning ? '运行中' : '已停止'}
+          {isRunning ? (external ? '外部运行中' : '运行中') : '已停止'}
         </span>
       </div>
 
@@ -71,14 +74,23 @@ export default function ModelCard({
         </div>
         <div className="model-card__actions">
           {isRunning ? (
-            <button
-              className="model-card__btn-stop"
-              onClick={() => onStop(model)}
-              disabled={isLoading}
-            >
-              <Square size={14} strokeWidth={1.8} />
-              停止
-            </button>
+            external ? (
+              <span
+                className="model-card__external"
+                title="该模型服务由 astra 之外启动（终端/脚本），请在外部停止"
+              >
+                外部启动
+              </span>
+            ) : (
+              <button
+                className="model-card__btn-stop"
+                onClick={() => onStop(model)}
+                disabled={isLoading}
+              >
+                <Square size={14} strokeWidth={1.8} />
+                停止
+              </button>
+            )
           ) : (
             <button
               className="model-card__btn-start"

@@ -118,7 +118,6 @@ export default function DownloaderPage() {
   // ===== 初始化 + 事件监听 =====
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
-    let disposed = false;
 
     (async () => {
       await loadTasks();
@@ -156,7 +155,6 @@ export default function DownloaderPage() {
     })();
 
     return () => {
-      disposed = true;
       for (const u of unlistens) u();
       if (noticeTimer.current) clearTimeout(noticeTimer.current);
     };

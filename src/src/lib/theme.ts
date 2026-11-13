@@ -13,7 +13,7 @@ interface ThemeState {
   setMode: (mode: ThemeMode) => void;
 }
 
-export const useThemeStore = create<ThemeState>((set, get) => ({
+export const useThemeStore = create<ThemeState>((set) => ({
   mode: 'system',
   setMode: (mode) => {
     set({ mode });

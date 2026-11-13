@@ -9,7 +9,7 @@
  * 本组件只负责创建/销毁编辑器实例，不参与业务状态。
  */
 import { useEffect, useRef } from 'react';
-import { createReadonlyMonaco, DIFF_LANGUAGE } from './monacoSetup';
+import { createReadonlyMonaco } from './monacoSetup';
 
 export { DIFF_LANGUAGE, languageForPath } from './monacoSetup';
 

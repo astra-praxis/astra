@@ -281,8 +281,6 @@ type RunState = RunWindow & { sessionId: string; running: boolean; status: strin
 
 // ===== 多会话（SESSION_RUNTIME_SPEC S0：retained 等价实现）=====
 
-export type SessionPhase = 'draft' | 'active';
-
 /** 驻留内存的非激活会话快照（= Zed retained_threads 条目，结构兼容 RunState） */
 export interface ParkedSession {
   sessionId: string;

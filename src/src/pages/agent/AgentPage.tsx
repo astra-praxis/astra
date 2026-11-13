@@ -88,7 +88,6 @@ export default function AgentPage() {
   const setInput = useAgentStore((s) => s.setInput);
   const running = useAgentStore((s) => s.running || s.sessionBusy);
   const settling = useAgentStore((s) => s.settling || s.sessionBusy);
-  const status = useAgentStore((s) => s.status);
   const error = useAgentStore((s) => s.error);
   const setError = useAgentStore((s) => s.setError);
   const projectPath = useAgentStore((s) => s.projectPath);
@@ -100,7 +99,6 @@ export default function AgentPage() {
   const thinkingEffort = useAgentStore((s) => s.thinkingEffort);
   const setThinkingEnabled = useAgentStore((s) => s.setThinkingEnabled);
   const setThinkingEffort = useAgentStore((s) => s.setThinkingEffort);
-  const imageRecognition = useAgentStore((s) => s.imageRecognition);
 
   const pushUser = useAgentStore((s) => s.pushUser);
   const setRunState = useAgentStore((s) => s.setRunState);

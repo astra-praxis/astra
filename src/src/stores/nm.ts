@@ -120,8 +120,3 @@ export const useNmStore = create<NmState>((set, get) => ({
     }
   },
 }));
-
-/** busy 状态便捷读取（非组件场景） */
-export function getNmBusy(): boolean {
-  return useNmStore.getState().scanning || useNmStore.getState().cleaning;
-}

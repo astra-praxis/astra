@@ -71,14 +71,3 @@ export function formatRelativeSec(ts: number | null): string {
   if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
   return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
-
-/** 秒级时间戳 → 今天显示 'HH:mm'，否则 'M/D HH:mm' */
-export function formatDayTimeSec(ts: number): string {
-  if (!ts) return '';
-  const d = new Date(ts * 1000);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  if (isToday) return time;
-  return `${d.getMonth() + 1}/${d.getDate()} ${time}`;
-}

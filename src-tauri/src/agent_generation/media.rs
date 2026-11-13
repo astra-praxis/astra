@@ -216,12 +216,6 @@ impl MediaStore {
         Ok(self.current_dir().join(asset_id))
     }
 
-    /// 供测试断言路径解析（命令层走 read_asset）。
-    #[cfg(test)]
-    pub fn asset_path(&self, asset_id: &str) -> Result<PathBuf, String> {
-        self.resolve_asset(asset_id)
-    }
-
     /// 读取资产字节（落盘时已限 100 MiB，此处再按上限复核）。
     pub async fn read_asset(&self, asset_id: &str) -> Result<Vec<u8>, String> {
         let path = self.resolve_asset(asset_id)?;

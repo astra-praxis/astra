@@ -17,12 +17,12 @@ jobs:
 
     steps:
       - name: Checkout astra
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: astra
 
       - name: Checkout astra-core
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: astra-praxis/astra-core
           ref: main
@@ -30,7 +30,7 @@ jobs:
           token: ${{ secrets.PAT }}
 
       - name: Checkout astra-memory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: astra-praxis/astra-memory
           ref: main
@@ -38,12 +38,12 @@ jobs:
           token: ${{ secrets.PAT }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -102,7 +102,7 @@ jobs:
 
       - name: Upload smoke logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: win-smoke-logs
           path: |

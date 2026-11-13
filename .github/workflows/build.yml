@@ -40,12 +40,12 @@ jobs:
     steps:
       # ================= 三仓库 checkout =================
       - name: Checkout astra
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: astra
 
       - name: Checkout astra-core
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: astra-praxis/astra-core
           ref: main
@@ -54,7 +54,7 @@ jobs:
           token: ${{ secrets.PAT }}
 
       - name: Checkout astra-memory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: astra-praxis/astra-memory
           ref: main
@@ -119,13 +119,13 @@ jobs:
 
       # ================= NODE =================
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
 
       # ================= PNPM =================
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -156,7 +156,7 @@ jobs:
       # 缓存目录固定为 dirs::cache_dir()/tauri = ~/.cache/tauri。
       - name: Cache Linux bundler tools
         if: matrix.platform == 'linux'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/tauri
           # 固定 key：工具内容不随项目变化，命中后整次构建不再联网下载
@@ -240,7 +240,7 @@ jobs:
       # ================= 上传构建产物（供 release job 使用） =================
       - name: Upload macOS artifacts
         if: matrix.platform == 'macos'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-artifacts
           path: |
@@ -251,7 +251,7 @@ jobs:
 
       - name: Upload Windows artifacts
         if: matrix.platform == 'windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-artifacts
           path: astra/src-tauri/target/release/bundle/nsis/*.exe
@@ -260,7 +260,7 @@ jobs:
 
       - name: Upload Linux artifacts
         if: matrix.platform == 'linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-artifacts
           path: |
@@ -278,7 +278,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # ================= 获取版本号 =================
       - name: Get version
@@ -292,19 +292,19 @@ jobs:
 
       # ================= 下载所有构建产物 =================
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-artifacts
           path: ./release-assets/macos
 
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: windows-artifacts
           path: ./release-assets/windows
 
       - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: linux-artifacts
           path: ./release-assets/linux
@@ -321,7 +321,7 @@ jobs:
       # ================= 创建 Release 并上传产物 =================
       # 产物文件名由 tauri 生成（astra_<version>_<arch>-setup.exe / .dmg）
       - name: Create Release & Upload Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Astra ${{ steps.version.outputs.version }}
           draft: false

@@ -103,6 +103,12 @@ export default function ServeConsolePage({ webMode = false }: { webMode?: boolea
         </p>
       </header>
 
+      {error && (
+        <div className="serve-console__error" role="alert">
+          {error}
+        </div>
+      )}
+
       <section className="serve-console__card">
         <div className="serve-console__row">
           <span className={`serve-console__dot${running ? ' is-on' : ''}`} />

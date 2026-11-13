@@ -55,11 +55,6 @@ interface DevConfig {
   port: number | null;
 }
 
-interface DevLogLine {
-  stream: string;
-  line: string;
-}
-
 // 从粘贴文本中提取 WISCPSID=xxx
 function extractWiscpsid(input: string): string {
   const m = input.match(/WISCPSID=([^\s;]+)/i);
@@ -72,7 +67,7 @@ function extractWiscpsid(input: string): string {
 export default function DevModePage() {
   const navigate = useNavigate();
   const { encoded } = useParams<{ encoded: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
 
   const projectPath = decodeURIComponent(encoded ?? '');
   const projectName = projectPath.split('/').pop() || '';
@@ -86,10 +81,8 @@ export default function DevModePage() {
   const [runningServers, setRunningServers] = useState<Record<string, DevServerInfo>>({});
   const [failedServers, setFailedServers] = useState<Record<string, number>>({});
   const [failedInfo, setFailedInfo] = useState<Record<string, DevServerInfo>>({});
-  const [logsMap, setLogsMap] = useState<Record<string, DevLogLine[]>>({});
   const [history, setHistory] = useState<DevHistoryEntry[]>([]);
   const [installing, setInstalling] = useState<Record<string, boolean>>({});
-  const [cmdLogs, setCmdLogs] = useState<Record<string, string[]>>({});
 
   // 运行中服务器的实时镜像（事件监听器内部读取用，避免闭包过期）
   const runningServersRef = useRef<Record<string, DevServerInfo>>({});
@@ -114,10 +107,6 @@ export default function DevModePage() {
   const runningList = Object.values(runningServers)
     .filter((s) => s.status === 'running')
     .sort((a, b) => a.started_at - b.started_at);
-  const runningBase = runningList.filter((s) => {
-    const c = cards.find((c) => c.folder_name === s.card_name);
-    return c && (c.category === 'main' || c.category === 'template');
-  });
   const runningCards = runningList.filter((s) => {
     const c = cards.find((c) => c.folder_name === s.card_name);
     return !c || c.category === 'card';
@@ -174,41 +163,12 @@ export default function DevModePage() {
     loadFavorite();
 
     async function init() {
-      const unlog = await listen<{ server_id: string; stream: string; line: string }>(
-        'dev-server-log',
-        (e) => {
-          const { server_id, stream, line } = e.payload;
-          setLogsMap((prev) => ({
-            ...prev,
-            [server_id]: [...(prev[server_id] ?? []), { stream, line }],
-          }));
-        }
-      );
-      unlisteners.push(unlog);
-
-      const uncmd = await listen<{ work_dir: string; command: string; stream: string; line: string }>(
-        'dev-cmd-line',
-        (e) => {
-          const key = `${e.payload.work_dir}:${e.payload.command}`;
-          setCmdLogs((prev) => ({
-            ...prev,
-            [key]: [...(prev[key] ?? []), `[${e.payload.stream}] ${e.payload.line}`],
-          }));
-        }
-      );
-      unlisteners.push(uncmd);
-
       const uncdone = await listen<{
         work_dir: string;
         command: string;
         exit_code: number;
         success: boolean;
       }>('dev-cmd-done', (e) => {
-        const key = `${e.payload.work_dir}:${e.payload.command}`;
-        setCmdLogs((prev) => ({
-          ...prev,
-          [key]: [...(prev[key] ?? []), `─── 完成 (退出码 ${e.payload.exit_code}) ───`],
-        }));
         // 记录日志
         if (e.payload.command === 'install') {
           if (e.payload.success) {
@@ -241,11 +201,6 @@ export default function DevModePage() {
               `${info?.card_name ?? e.payload.server_id} 启动失败 (退出码 ${e.payload.exit_code})`
             );
           } else {
-            setLogsMap((prev) => {
-              const ns = { ...prev };
-              delete ns[e.payload.server_id];
-              return ns;
-            });
             logs.info('dev-server', `${info?.card_name ?? e.payload.server_id} 已停止`);
           }
         }
@@ -257,7 +212,6 @@ export default function DevModePage() {
         setRunningServers({});
         setFailedServers({});
         setFailedInfo({});
-        setLogsMap({});
       });
       unlisteners.push(unall);
 
@@ -327,11 +281,6 @@ export default function DevModePage() {
           delete fi[sid];
           return fi;
         });
-        setLogsMap((prev) => {
-          const ns = { ...prev };
-          delete ns[sid];
-          return ns;
-        });
       }
     }
     const command = devCommandForCard(card);
@@ -382,7 +331,6 @@ export default function DevModePage() {
   async function runInstall(card: DevCardInfo, subDir: DevSubDir) {
     const k = `${card.folder_name}:${subDir.key}`;
     setInstalling((prev) => ({ ...prev, [k]: true }));
-    setCmdLogs((prev) => ({ ...prev, [`${subDir.work_dir}:install`]: [] }));
     logs.info('install', `${card.display_name}/${subDir.label} pnpm install`);
     try {
       await invoke<string>('run_card_command', {

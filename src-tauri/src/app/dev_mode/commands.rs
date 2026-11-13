@@ -159,52 +159,16 @@ pub async fn run_card_command(
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
 
-    // 提前 clone，避免 move 后无法使用
-    let wd_for_stdout = work_dir.clone();
-    let key_for_stdout = subdir_key.clone();
-    let cmd_for_stdout = command_name.clone();
-    let wd_for_stderr = work_dir.clone();
-    let key_for_stderr = subdir_key.clone();
-    let cmd_for_stderr = command_name.clone();
-
-    // 读取 stdout
-    let app_for_stdout = app.clone();
+    // 读取 stdout（仅排空管道，避免子进程写满缓冲区导致阻塞）
     let stdout_handle = tokio::task::spawn_blocking(move || {
         let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                let _ = app_for_stdout.emit(
-                    "dev-cmd-line",
-                    serde_json::json!({
-                        "work_dir": wd_for_stdout,
-                        "subdir_key": key_for_stdout,
-                        "command": cmd_for_stdout,
-                        "stream": "stdout",
-                        "line": line,
-                    }),
-                );
-            }
-        }
+        for _ in reader.lines() {}
     });
 
-    // 读取 stderr
-    let app_for_stderr = app.clone();
+    // 读取 stderr（同上，仅排空）
     let stderr_handle = tokio::task::spawn_blocking(move || {
         let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                let _ = app_for_stderr.emit(
-                    "dev-cmd-line",
-                    serde_json::json!({
-                        "work_dir": wd_for_stderr,
-                        "subdir_key": key_for_stderr,
-                        "command": cmd_for_stderr,
-                        "stream": "stderr",
-                        "line": line,
-                    }),
-                );
-            }
-        }
+        for _ in reader.lines() {}
     });
 
     // 等待子进程（在 blocking 线程等待，不阻塞异步运行时）
@@ -378,17 +342,6 @@ pub fn start_dev_server(
                         }),
                     );
                 }
-                let _ = app_bg.emit(
-                    "dev-server-log",
-                    serde_json::json!({
-                        "server_id": sid_bg,
-                        "card_name": card_name,
-                        "subdir_key": subdir_key,
-                        "work_dir": work_dir,
-                        "stream": "stdout",
-                        "line": line,
-                    }),
-                );
             }
         }
         // stdout EOF → 启动等待线程获取真实退出码
@@ -437,14 +390,6 @@ pub fn start_dev_server(
                         }),
                     );
                 }
-                let _ = app_err.emit(
-                    "dev-server-log",
-                    serde_json::json!({
-                        "server_id": sid_err,
-                        "stream": "stderr",
-                        "line": line,
-                    }),
-                );
             }
         }
     });

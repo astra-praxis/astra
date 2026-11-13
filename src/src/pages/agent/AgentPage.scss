@@ -1230,25 +1230,9 @@ body .content:has(.agent-root) {
   max-width: 90%;
   word-break: break-word;
 
-  // 终态行不靠色：失败只用更重的字重说明
-  &.is-failed {
-    color: var(--text-primary);
-    font-weight: 600;
-  }
-  &.is-cancelled {
-    color: var(--text-secondary);
-  }
+  // 终态行只有「完成」一种（失败走输入框上方的错误横幅，不进对话流）
   &.is-completed {
     color: var(--text-muted);
-  }
-
-  .aentry__hint {
-    flex-basis: 100%;
-    padding-top: 2px;
-    border-top: 1px solid var(--divider, var(--border-color));
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--text-secondary);
   }
 }
 

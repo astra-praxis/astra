@@ -771,7 +771,7 @@ export default function AgentPage() {
         .some(
           (e) =>
             (e.kind === 'assistant' && e.text.trim()) ||
-            (e.kind === 'terminal' && e.outcome === 'completed'),
+            e.kind === 'terminal',
         );
       if (dropsContent) {
         const turns = turnsBack - 1;

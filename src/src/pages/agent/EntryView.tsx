@@ -395,23 +395,8 @@ export const EntryView = memo(function EntryView({
       return <div className="aentry aentry--terminal" role="status">{entry.text}</div>;
     case 'terminal':
       return (
-        <div className={`aentry aentry--terminal is-${entry.outcome}`}>
-          {entry.outcome === 'completed' && (
-            <>
-              <CircleCheck size={13} strokeWidth={1.8} /> 任务完成
-            </>
-          )}
-          {entry.outcome === 'failed' && (
-            <>
-              <CircleX size={13} strokeWidth={1.8} /> 任务失败{entry.text ? `：${entry.text}` : ''}
-              {entry.text?.includes('UnsupportedModel') && (
-                <div className="aentry__hint">
-                  所选模型与当前模型服务端点不兼容（如火山编码计划端点仅支持计划内编码模型）。
-                  请在模型列表选择兼容模型，或改用标准 API 端点后新建会话。
-                </div>
-              )}
-            </>
-          )}
+        <div className="aentry aentry--terminal is-completed">
+          <CircleCheck size={13} strokeWidth={1.8} /> 任务完成
         </div>
       );
   }

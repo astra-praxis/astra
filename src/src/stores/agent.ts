@@ -151,7 +151,7 @@ export type Entry =
       runId: string;
       files: FileChangeItem[];
     } & EntryIdent)
-  | ({ kind: 'terminal'; outcome: 'completed' | 'failed'; text?: string } & EntryIdent);
+  | ({ kind: 'terminal' } & EntryIdent);
 
 /** 用户附带图片（规范 PNG 的 base64 与尺寸，与后端 AgentImageInput / NormalizedImage 对齐） */
 export interface UserImage {
@@ -525,7 +525,7 @@ function applyEnvelopeInner(prev: Entry[], env: AgentEnvelope): Entry[] {
         if (lastNonCard && lastNonCard.kind === 'assistant' && lastNonCard.text.trim()) {
           return withCard;
         }
-        return [...withCard, withId({ kind: 'terminal' as const, outcome: 'completed' as const })];
+        return [...withCard, withId({ kind: 'terminal' as const })];
       }
       // run_failed：不进对话流。错误横幅由事件监听层写入 runError，
       // 显示在输入框上方（右侧 继续/重试，参考 Zed）；run_cancelled：
@@ -665,7 +665,6 @@ interface AgentState extends RunWindow {
   pushUser: (text: string, images?: UserImage[]) => void;
   /** checkpoint 恢复后用后端回传的历史重建条目（仅当会话一致且无运行中任务） */
   restoreEntries: (sessionId: string, entries: Entry[]) => void;
-  pushTerminal: (outcome: 'completed' | 'failed', text?: string) => void;
   /** Serve bot 反向通道通知：追加 notice 条目，不动运行状态 */
   pushBotNotice: (text: string) => void;
   /** 收到 ask_user 提问事件（追加问题卡条目） */
@@ -846,8 +845,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             runError: null,
           }),
     ),
-  pushTerminal: (outcome, text) =>
-    set((s) => ({ ...transitionRun(s, false, null), entries: [...normalizeEntries(s.entries), withId({ kind: 'terminal' as const, outcome, text })] })),
   /** Serve bot 反向通道通知：只追加条目；运行中也不打断（notice 是独立条目） */
   pushBotNotice: (text) =>
     set((s) => ({ entries: [...s.entries, withId({ kind: 'notice' as const, text })] })),

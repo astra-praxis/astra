@@ -250,26 +250,92 @@ pub(crate) fn set_active_workspace(
 fn resolve_editor_command(command: &str, dirs: &[std::path::PathBuf]) -> std::path::PathBuf {
     // 已含路径分隔符：视为明确路径，直接交给 std
     if command.contains('/') || command.contains('\\') {
-        return std::path::PathBuf::from(command);
-    }
-    // Windows 下 CLI 入口常是 .cmd/.bat（code.cmd / zed.cmd），逐扩展名试
-    #[cfg(windows)]
-    let names: Vec<String> = ["", ".exe", ".cmd", ".bat"]
-        .iter()
-        .map(|ext| format!("{command}{ext}"))
-        .collect();
-    #[cfg(not(windows))]
-    let names: Vec<String> = vec![command.to_string()];
-    for dir in dirs {
-        for name in &names {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return candidate;
+        let direct = std::path::PathBuf::from(command);
+        // 用户可能指到 VS Code 的 bin/code（POSIX sh 脚本），同名 .cmd 才是可执行入口
+        if cfg!(windows) {
+            if let Some(fixed) = windows_executable_sibling(&direct) {
+                return fixed;
             }
         }
+        return direct;
     }
-    // 解析不到：原样返回，让 std 报出同样的 ENOENT 错误
-    std::path::PathBuf::from(command)
+    let names = editor_candidate_names(command, cfg!(windows));
+    choose_editor_candidate(&names, dirs, cfg!(windows))
+        .unwrap_or_else(|| std::path::PathBuf::from(command))
+}
+
+/// 在候选目录中按优先级挑选编辑器入口；挑不到返回 None。
+///
+/// `windows` 作为参数而非 `cfg!` 内联，是为了让 Windows 挑选规则
+/// （跳过同名 POSIX 脚本）在任意平台都能被单测覆盖。
+fn choose_editor_candidate(
+    names: &[String],
+    dirs: &[std::path::PathBuf],
+    windows: bool,
+) -> Option<std::path::PathBuf> {
+    for dir in dirs {
+        for name in names {
+            let candidate = dir.join(name);
+            if !candidate.is_file() {
+                continue;
+            }
+            // Windows 下无扩展名候选只接受真正的 PE 镜像，否则继续找：
+            // 同名的 sh 脚本无法 CreateProcess
+            if windows && candidate.extension().is_none() && !is_pe_image(&candidate) {
+                continue;
+            }
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// 候选文件名（按优先级）。
+///
+/// Windows 必须把无扩展名放最后：VS Code / Cursor 的 `bin` 目录里
+/// `code`（POSIX sh 脚本）、`code.cmd`、`code.ps1` 并存，先命中脚本会被
+/// CreateProcess 拒绝（193「%1 不是有效的 Win32 应用程序」）。
+fn editor_candidate_names(command: &str, windows: bool) -> Vec<String> {
+    if windows {
+        [".exe", ".cmd", ".bat", ""]
+            .iter()
+            .map(|ext| format!("{command}{ext}"))
+            .collect()
+    } else {
+        vec![command.to_string()]
+    }
+}
+
+/// Windows 可执行镜像判定：PE 文件以 `MZ` 开头。
+/// 用于排除同名非 PE 文件——VS Code / Cursor 的 `bin/code` 是 POSIX sh 脚本，
+/// 直接 CreateProcess 会失败（193「%1 不是有效的 Win32 应用程序」）。
+fn is_pe_image(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    std::fs::File::open(path)
+        .and_then(|mut f| {
+            let mut head = [0u8; 2];
+            f.read_exact(&mut head)?;
+            Ok(head)
+        })
+        .map(|head| head == *b"MZ")
+        .unwrap_or(false)
+}
+
+/// 把「无扩展名且不是 PE」的同名入口纠正为可执行的兄弟文件
+/// （`bin/code` → `bin/code.cmd`）。找不到时返回 None，由调用方原样使用。
+fn windows_executable_sibling(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if !path.is_file() || path.extension().is_some() || is_pe_image(path) {
+        return None;
+    }
+    for ext in [".cmd", ".bat", ".exe"] {
+        let mut sibling = path.as_os_str().to_os_string();
+        sibling.push(ext);
+        let sibling = std::path::PathBuf::from(sibling);
+        if sibling.is_file() {
+            return Some(sibling);
+        }
+    }
+    None
 }
 
 /// Windows 批处理入口（code.cmd / zed.cmd 等）不能被 CreateProcess 直接执行
@@ -421,10 +487,18 @@ pub(crate) fn open_in_editor(
             editor_command,
             e
         );
-        return Err(format!(
-            "启动编辑器失败: {}（请确认 {} 已安装且在系统 PATH 中）",
-            e, editor_command
-        ));
+        // Windows 193 = ERROR_BAD_EXE_FORMAT（「%1 不是有效的 Win32 应用程序」）：
+        // 典型原因是入口指到了 VS Code 的 bin/code（POSIX sh 脚本），或 .ps1 等
+        // 解释器文件。原文只有占位符，对用户没有信息量，换成可操作中文提示。
+        let hint = if cfg!(windows) && e.raw_os_error() == Some(193) {
+            format!(
+                "{} 不是 Windows 可执行程序（多半是 POSIX 脚本或无扩展名入口），请在设置里改指向 code.cmd 或 code.exe",
+                editor.display()
+            )
+        } else {
+            format!("请确认 {} 已安装且在系统 PATH 中", editor_command)
+        };
+        return Err(format!("启动编辑器失败: {}（{}）", e, hint));
     }
     app_log!(
         info,
@@ -634,13 +708,65 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
+    /// VS Code / Cursor 的 bin 布局：无扩展名的 `code` 是 POSIX sh 脚本，与
+    /// code.cmd / code.ps1 并存。Windows 上必须命中 code.cmd——选到脚本会被
+    /// CreateProcess 拒绝（193「%1 不是有效的 Win32 应用程序」）。
     #[test]
-    fn resolve_editor_tries_windows_extensions() {
+    fn windows_candidate_selection_skips_posix_script() {
         let dir = tempfile::tempdir().unwrap();
-        let code = dir.path().join("code.cmd");
-        std::fs::write(&code, "@echo off\r\n").unwrap();
+        std::fs::write(dir.path().join("code"), "#!/usr/bin/env sh\n").unwrap();
+        std::fs::write(dir.path().join("code.ps1"), "# ps1\n").unwrap();
+        let code_cmd = dir.path().join("code.cmd");
+        std::fs::write(&code_cmd, "@echo off\r\n").unwrap();
         let dirs = vec![dir.path().to_path_buf()];
-        assert_eq!(resolve_editor_command("code", &dirs), code);
+
+        let names = editor_candidate_names("code", true);
+        assert_eq!(
+            names,
+            vec![
+                "code.exe".to_string(),
+                "code.cmd".to_string(),
+                "code.bat".to_string(),
+                "code".to_string()
+            ],
+            "无扩展名必须排最后"
+        );
+        assert_eq!(choose_editor_candidate(&names, &dirs, true), Some(code_cmd));
+
+        // 只有脚本、没有同名可执行入口：Windows 上不能挑脚本，回退为原命令名
+        let script_only = tempfile::tempdir().unwrap();
+        std::fs::write(script_only.path().join("code"), "#!/usr/bin/env sh\n").unwrap();
+        let only = vec![script_only.path().to_path_buf()];
+        assert_eq!(choose_editor_candidate(&names, &only, true), None);
+
+        // 真正的 PE 镜像（MZ 头）即使无扩展名也可用
+        let pe_dir = tempfile::tempdir().unwrap();
+        std::fs::write(pe_dir.path().join("zed"), b"MZ\x90\x00").unwrap();
+        let zed_names = editor_candidate_names("zed", true);
+        let pe_dirs = vec![pe_dir.path().to_path_buf()];
+        assert_eq!(
+            choose_editor_candidate(&zed_names, &pe_dirs, true),
+            Some(pe_dir.path().join("zed"))
+        );
+    }
+
+    /// 明确路径指到脚本本身时，纠正为同名 .cmd
+    #[test]
+    fn windows_explicit_script_path_resolves_to_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("code"), "#!/usr/bin/env sh\n").unwrap();
+        let code_cmd = dir.path().join("code.cmd");
+        std::fs::write(&code_cmd, "@echo off\r\n").unwrap();
+        assert_eq!(
+            windows_executable_sibling(&dir.path().join("code")),
+            Some(code_cmd)
+        );
+        // 已带扩展名或已是 PE：不纠正
+        assert_eq!(
+            windows_executable_sibling(&dir.path().join("code.cmd")),
+            None
+        );
+        std::fs::write(dir.path().join("zed"), b"MZ\x90\x00").unwrap();
+        assert_eq!(windows_executable_sibling(&dir.path().join("zed")), None);
     }
 }

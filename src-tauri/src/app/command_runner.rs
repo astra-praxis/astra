@@ -3,9 +3,7 @@
 //! 提供安全的命令执行能力，支持流式输出和超时控制。
 
 use serde::{Deserialize, Serialize};
-use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -31,30 +29,6 @@ pub struct CommandResult {
 /// - `command`: 要执行的 shell 命令
 /// - `cwd`: 工作目录（可选）
 /// - `timeout_secs`: 超时秒数（默认 300 秒）
-/// 补充 PATH 环境变量（打包后可能不完整）。
-/// Windows 下 GUI 进程继承的 PATH 通常完整，直接沿用；
-/// Unix 下补常见安装目录（homebrew / 系统目录），并用
-/// `join_paths` 按平台分隔符拼接（Windows 是 `;`，Unix 是 `:`）。
-fn full_command_path() -> OsString {
-    let existing = std::env::var_os("PATH").unwrap_or_default();
-    #[cfg(windows)]
-    let extra: Vec<PathBuf> = Vec::new();
-    #[cfg(not(windows))]
-    let extra: Vec<PathBuf> = [
-        "/usr/local/bin",
-        "/opt/homebrew/bin",
-        "/opt/local/bin",
-        "/usr/bin",
-        "/bin",
-    ]
-    .iter()
-    .map(PathBuf::from)
-    .collect();
-    let mut dirs: Vec<PathBuf> = extra;
-    dirs.push(existing.into());
-    std::env::join_paths(&dirs).unwrap_or_default()
-}
-
 #[tauri::command]
 pub async fn run_command(
     app: AppHandle,
@@ -72,7 +46,7 @@ pub async fn run_command(
         c.arg("-c").arg(&command);
         c
     };
-    cmd.env("PATH", full_command_path())
+    cmd.env("PATH", crate::proc_util::full_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     crate::proc_util::hide_window(&mut cmd);

@@ -95,25 +95,8 @@ pub(crate) fn start_llama_server(
         &server_path
     };
 
-    // 补充 PATH（打包后可能不完整）：Windows 直接沿用，Unix 补常见目录，
-    // join_paths 按平台分隔符拼接
-    let existing = std::env::var_os("PATH").unwrap_or_default();
-    #[cfg(windows)]
-    let extra: Vec<std::path::PathBuf> = Vec::new();
-    #[cfg(not(windows))]
-    let extra: Vec<std::path::PathBuf> = [
-        "/usr/local/bin",
-        "/opt/homebrew/bin",
-        "/opt/local/bin",
-        "/usr/bin",
-        "/bin",
-    ]
-    .iter()
-    .map(std::path::PathBuf::from)
-    .collect();
-    let mut dirs: Vec<std::path::PathBuf> = extra;
-    dirs.push(existing.into());
-    let full_path = std::env::join_paths(&dirs).unwrap_or_default();
+    // 补充 PATH（打包后可能不完整）
+    let full_path = crate::proc_util::full_path();
 
     let mut cmd = Command::new(server_bin);
     cmd.arg("serve")

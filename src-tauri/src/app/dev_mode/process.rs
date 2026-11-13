@@ -122,3 +122,16 @@ pub(crate) fn setup_process_group(cmd: &mut Command) {
 
 #[cfg(not(unix))]
 pub(crate) fn setup_process_group(_cmd: &mut Command) {}
+
+/// spawn 失败时追加的中文提示。
+///
+/// `ErrorKind::NotFound` 只代表「程序或工作目录找不到」，早先直接透出
+/// `No such file or directory (os error 2)`，极易被误判为卡片目录不存在；
+/// 实际最常见原因是子进程 `PATH` 为空（找不到 `sh`），故在提示里点名两者。
+pub(crate) fn spawn_failure_hint(err: &std::io::Error, work_dir: &str) -> String {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        format!("（未找到 shell 或工作目录不可用: {}）", work_dir)
+    } else {
+        String::new()
+    }
+}

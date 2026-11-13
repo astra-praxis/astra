@@ -149,12 +149,14 @@ pub async fn run_card_command(
     cmd.arg(shell_flag)
         .arg(&run_cmd)
         .current_dir(&work_dir)
-        .env("PATH", build_full_path())
+        .env("PATH", crate::proc_util::full_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     setup_process_group(&mut cmd);
     crate::proc_util::hide_window(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| format!("启动命令失败: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("启动命令失败: {}{}", e, spawn_failure_hint(&e, &work_dir)))?;
 
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
@@ -239,11 +241,12 @@ pub fn start_dev_server(
         "-c"
     };
 
+    let full_path = crate::proc_util::full_path();
     let mut cmd = Command::new(shell);
     cmd.arg(shell_flag)
         .arg(&run_command)
         .current_dir(&work_dir)
-        .env("PATH", build_full_path())
+        .env("PATH", &full_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     setup_process_group(&mut cmd);
@@ -254,11 +257,17 @@ pub fn start_dev_server(
             app_log!(
                 error,
                 "dev_mode",
-                "start_dev_server spawn failed: {} ({})",
+                "start_dev_server spawn failed: {} cwd={} path_dirs={} ({})",
                 run_command,
+                work_dir,
+                std::env::split_paths(&full_path).count(),
                 e
             );
-            return Err(format!("启动服务器失败: {}", e));
+            return Err(format!(
+                "启动服务器失败: {}{}",
+                e,
+                spawn_failure_hint(&e, &work_dir)
+            ));
         }
     };
 

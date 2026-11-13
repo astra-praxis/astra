@@ -447,7 +447,9 @@ pub(crate) fn open_in_editor(
     if let Some(existing) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&existing));
     }
-    let full_path = std::env::join_paths(&dirs).unwrap_or_default();
+    // 拼装失败时退回继承的 PATH，绝不返回空串（空 PATH 会让后续 spawn 全部报 os error 2）
+    let full_path = std::env::join_paths(&dirs)
+        .unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default());
 
     let editor = resolve_editor_command(&editor_command, &dirs);
     #[cfg(windows)]

@@ -37,7 +37,11 @@ export interface AgentEnvelope {
   /** 完整参数快照（超长字符串已截断）：写文件内容 / 完整命令预览用 */
   args?: Record<string, unknown>;
   result_summary?: string;
+  /** 失败横幅的错误文案（已由宿主中文化） */
   error?: string;
+  /** `run_failed` 专用：这次失败是否值得自动重试（宿主按 HTTP 状态判定，
+   *  401/403/404/400 这类确定性失败为 false） */
+  retryable?: boolean;
   summary?: string;
   final_text?: string;
   decision?: string;
@@ -295,6 +299,8 @@ export interface ParkedSession {
   usage: AgentUsage | null;
   error: string;
   runError: string | null;
+  /** `runError` 是否值得自动重试（undefined = 旧载荷/未知，按可重试处理） */
+  runRetryable?: boolean;
   lastActive: number;
 }
 
@@ -616,6 +622,8 @@ interface AgentState extends RunWindow {
   error: string;
   /** Run 失败横幅（不进对话流；显示在输入框上方，右侧提供 继续/重试，参考 Zed） */
   runError: string | null;
+  /** `runError` 是否值得自动重试（宿主按 HTTP 状态判定；undefined = 旧载荷，按可重试处理） */
+  runRetryable?: boolean;
   /** 项目绑定（空 = 纯聊天）；顶部工具栏选择，@ 只负责引用文件 */
   projectPath: string;
   /** 历史会话列表（save/list/delete 后经 refreshSessions 刷新） */
@@ -1178,6 +1186,7 @@ type FlatSession = Pick<
   AgentState,
   | 'sessionId' | 'isDraft' | 'entries' | 'input' | 'running' | 'settling' | 'status'
   | 'activeRunId' | 'lastSequence' | 'endedRuns' | 'projectPath' | 'usage' | 'error' | 'runError'
+  | 'runRetryable'
 >;
 
 function snapshotFlat(st: FlatSession): ParkedSession {
@@ -1201,6 +1210,7 @@ function hydrateFromParked(p: ParkedSession): FlatSession {
     usage: p.usage,
     error: p.error,
     runError: p.runError,
+    runRetryable: p.runRetryable,
   };
 }
 
@@ -1488,6 +1498,7 @@ export function ensureAgentListeners(): Promise<void> {
             useAgentStore.setState({
               ...next,
               runError: e.payload.type === 'run_failed' ? (e.payload.error ?? '运行失败') : null,
+              runRetryable: e.payload.type === 'run_failed' ? e.payload.retryable : undefined,
               running: true,
               settling: true,
               status: 'persisting',
@@ -1511,6 +1522,7 @@ export function ensureAgentListeners(): Promise<void> {
                   ...p,
                   ...next,
                   runError: e.payload.type === 'run_failed' ? (e.payload.error ?? '运行失败') : null,
+                  runRetryable: e.payload.type === 'run_failed' ? e.payload.retryable : undefined,
                   running: true,
                   settling: true,
                   status: 'persisting',

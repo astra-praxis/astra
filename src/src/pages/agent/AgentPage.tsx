@@ -105,6 +105,9 @@ export default function AgentPage() {
   const pushUser = useAgentStore((s) => s.pushUser);
   const setRunState = useAgentStore((s) => s.setRunState);
   const runError = useAgentStore((s) => s.runError);
+  // 宿主按 HTTP 状态给出的「是否值得自动重试」；非重试性失败（401/403/404/400）
+  // 不进自动重试序列，直接常驻横幅等用户处理（否则白等 3 × 5s 并把队列烧掉）
+  const runRetryable = useAgentStore((s) => s.runRetryable);
   const setRunError = useAgentStore((s) => s.setRunError);
   /** Run 正在流式产出（raw running 且未进入结算屏障）：此时 Run 自身就是状态信号，
    *  横幅一律隐藏 —— 防御「Agent 在上方作答、下面还挂着错误 + 重试」 */
@@ -666,6 +669,7 @@ export default function AgentPage() {
     budget: retryBudgetRef.current,
     hasLastRun: lastRunRef.current !== null,
     runError,
+    runRetryable,
     running,
     settling,
   });
@@ -680,7 +684,7 @@ export default function AgentPage() {
     retryBudgetRef.current = attempt;
     rememberRetryError(runError);
     setAutoRetry(attempt);
-  }, [runError, running, settling, autoRetry, rememberRetryError]);
+  }, [runError, running, settling, autoRetry, runRetryable, rememberRetryError]);
   // 发送：autoRetry 每变化一次（1→2→3）调度一次隐形重发（不进对话流）；
   // RETRY_DELAY_MS（5s，对齐 Zed 的瞬时网络错误固定退避）在退避窗口内显示进度徽标，
   // attempt 真正开跑后徽标由 runStreaming 隐藏

@@ -30,6 +30,9 @@ export interface RetryView {
   hasLastRun: boolean;
   /** 失败横幅的错误原文（null = 当前没有失败） */
   runError: string | null;
+  /** `runError` 是否值得自动重试（false = 401/403/404/400 这类确定性失败，
+   *  自动重试只会白等并烧掉队列配额；undefined = 旧载荷/未知，按可重试处理） */
+  runRetryable?: boolean;
   /** 本会话 Run 正在跑 */
   running: boolean;
   /** 结算屏障中（含 sessionBusy；此时状态还不可信） */
@@ -40,6 +43,7 @@ export interface RetryView {
 export function nextAutoAttempt(v: RetryView): number | null {
   if (v.autoRetry !== null) return null; // 已在序列中，由 finishAction 推进
   if (!v.runError || v.running || v.settling) return null; // 失败且已结算才调度
+  if (v.runRetryable === false) return null; // 确定性失败（4xx 除 408/425/429），重试无意义
   if (v.budget >= MAX_AUTO_RETRIES) return null; // 配额用尽，等用户手动
   if (!v.hasLastRun) return null;
   return v.budget + 1;

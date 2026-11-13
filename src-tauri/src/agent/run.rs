@@ -16,6 +16,37 @@ use tauri::{AppHandle, Emitter, State};
 use crate::providers;
 
 use super::*;
+
+/// 事件 → 界面载荷。
+///
+/// 英文原文（`HTTP 400 Bad Request [InvalidParameter] ... Request id ...`、
+/// `tool 'x' failed: pandoc failed ...` 这类）已经由 `log_event` 原样落盘，这里
+/// 只替换**展示**文案：
+///
+/// * `run_failed`：错误横幅中文化，并额外带上 `retryable` —— 前端的自动重试
+///   状态机据此放弃 401/403/404/400 这类确定性失败（重试必然同样失败，只是
+///   白等 3 × 5s 并把排队消息一起烧掉）；
+/// * `tool_call_failed`：工具卡片中文化。注意回填给**模型**的错误仍是原文
+///   （runtime 写进 tool result，不经过这里）：模型要靠具体原因换做法。
+///
+/// 其余事件原样序列化：`Envelope` 是 `#[serde(flatten)]` 的扁平 JSON，附加
+/// 字段不会破坏前端解析。
+fn ui_payload(env: &Envelope) -> serde_json::Value {
+    let mut value = serde_json::to_value(env).unwrap_or_else(|_| json!({}));
+    match &env.event {
+        agent_core::RunEvent::RunFailed { error } => {
+            app_log!(warn, "agent", "run failed: {error}");
+            value["retryable"] = json!(crate::friendly::is_retryable(error));
+            value["error"] = json!(crate::friendly::run(error));
+        }
+        agent_core::RunEvent::ToolCallFailed { error, .. } => {
+            app_log!(warn, "agent", "tool failed: {error}");
+            value["error"] = json!(crate::friendly::tool(error));
+        }
+        _ => {}
+    }
+    value
+}
 // ===== 命令 =====
 
 /// 用户附带图片的传输形状（与 astra-core `ImageContent` 对齐：base64 规范 PNG）
@@ -597,7 +628,7 @@ pub async fn agent_start_run(
             if let Some(dir) = &log_dir {
                 log_event(dir, &env);
             }
-            let _ = forward_app.emit("agent-event", &env);
+            let _ = forward_app.emit("agent-event", ui_payload(&env));
         }
         // 先结算后记忆：流关闭即释放准入并通知 UI（底部 loading 随渲染
         // 完成立即消失），记忆提交放在 settled 之后后台执行——开 agent
@@ -647,4 +678,63 @@ pub async fn agent_start_run(
     });
 
     Ok(session_id)
+}
+
+#[cfg(test)]
+mod ui_payload_tests {
+    use super::*;
+
+    fn payload(event: agent_core::RunEvent) -> serde_json::Value {
+        ui_payload(&event.with_meta("sess", "run_1", 7))
+    }
+
+    #[test]
+    fn run_failed_is_translated_and_flags_non_retryable() {
+        let v = payload(agent_core::RunEvent::RunFailed {
+            error: "model request failed: HTTP 404 Not Found [UnsupportedModel]: The requested \
+                    model does not support the coding plan feature"
+                .into(),
+        });
+        assert_eq!(v["type"], "run_failed");
+        assert_eq!(v["retryable"], false);
+        let text = v["error"].as_str().unwrap();
+        assert!(text.contains("开放"), "{text}");
+        assert!(!text.contains("HTTP"), "{text}");
+        assert!(!text.contains("UnsupportedModel"), "{text}");
+    }
+
+    #[test]
+    fn transient_failures_stay_retryable() {
+        let v = payload(agent_core::RunEvent::RunFailed {
+            error: "model request failed: error sending request for url (http://127.0.0.1:8080/v1)"
+                .into(),
+        });
+        assert_eq!(v["retryable"], true);
+        assert!(v["error"].as_str().unwrap().contains("连不上"));
+    }
+
+    #[test]
+    fn tool_failures_are_translated_for_the_card_only() {
+        let v = payload(agent_core::RunEvent::ToolCallFailed {
+            tool_call_id: "t1".into(),
+            tool_name: "extract_document".into(),
+            error: "pandoc failed: Unknown input format 'pdf'".into(),
+        });
+        assert_eq!(v["type"], "tool_call_failed");
+        // 事件里没有 retryable：自动重试只看 run 级失败
+        assert!(v.get("retryable").is_none());
+        let text = v["error"].as_str().unwrap();
+        assert!(text.contains("格式暂时读不了"), "{text}");
+        assert!(!text.contains("pandoc"), "{text}");
+    }
+
+    #[test]
+    fn other_events_pass_through_untouched() {
+        let v = payload(agent_core::RunEvent::MessageDelta {
+            text: "你好".into(),
+        });
+        assert_eq!(v["type"], "message_delta");
+        assert_eq!(v["text"], "你好");
+        assert_eq!(v["session_id"], "sess");
+    }
 }

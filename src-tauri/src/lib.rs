@@ -5,6 +5,7 @@ mod agent;
 mod agent_generation;
 mod app;
 mod extensions;
+mod friendly;
 mod memory;
 mod net_util;
 mod proc_util;

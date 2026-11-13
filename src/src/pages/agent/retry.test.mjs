@@ -67,6 +67,16 @@ test('没有可重发的请求（lastRunRef 为空）不调度', () => {
   assert.equal(nextAutoAttempt(view({ runError: ERR, hasLastRun: false })), null);
 });
 
+test('确定性失败（宿主标记 retryable=false）不进自动重试，直接等用户', () => {
+  // 401/403/404/400 这类失败重试必然同样失败：自动重试只会白等 3 × 5s，
+  // 而排队消息在此期间被烧掉（模型配置错了的典型场景）
+  assert.equal(nextAutoAttempt(view({ runError: 'API Key 无效或已过期。', runRetryable: false })), null);
+  // 瞬时失败（网络抖动 / 429 / 5xx）仍按原策略重试
+  assert.equal(nextAutoAttempt(view({ runError: ERR, runRetryable: true })), 1);
+  // 旧载荷没有该字段：按可重试处理，行为不变
+  assert.equal(nextAutoAttempt(view({ runError: ERR, runRetryable: undefined })), 1);
+});
+
 test('调度后、Run 起跑前的空闲瞬间绝不能被判成成功（假循环回归）', () => {
   // 旧实现用「runError 被清」当成功信号：重试发出时清掉错误 →
   // 起跑前这一瞬 runError 为 null → 序列提前结束 → 下一次失败又弹回来

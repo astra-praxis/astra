@@ -177,25 +177,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                })
-                .build(),
-        )
         .setup(|app| {
             use tauri::{
                 menu::{Menu, MenuItem},
                 tray::TrayIconBuilder,
                 Manager,
             };
-            use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
             // ===== 本地账户绑定与单实例锁（多账户 P0，冷切换架构） =====
             // 账户身份由启动参数 --account=<id> 决定；无参数 → legacy 模式
@@ -271,7 +258,7 @@ pub fn run() {
                 app_log!(error, "skills", "builtin skills install failed: {error}");
             }
 
-            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, Some("Alt+Space"))?;
+            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, Some("CmdOrCtrl+Q"))?;
             let menu = Menu::with_items(app, &[&show_item, &separator, &quit_item])?;
@@ -318,14 +305,6 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-
-            // 注册全局快捷键 Alt+Space 唤醒窗口。冲突时只降级不阻断启动——
-            // Alt+Space 被 PowerToys Run / uTools / Listary 等启动器默认占用，
-            // setup 返回 Err 会导致应用直接退出（Windows 首发秒退的根因）。
-            if let Err(error) = app.global_shortcut().register("Alt+Space") {
-                elog!("[shortcut] Alt+Space register failed (likely in use): {error}");
-                app_log!(warn, "shortcut", "Alt+Space register failed: {error}");
-            }
 
             Ok(())
         })

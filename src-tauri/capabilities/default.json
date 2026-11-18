@@ -17,8 +17,6 @@
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
     "fs:allow-read-dir",
-    "fs:allow-exists",
-    "global-shortcut:default",
-    "global-shortcut:allow-register"
+    "fs:allow-exists"
   ]
 }

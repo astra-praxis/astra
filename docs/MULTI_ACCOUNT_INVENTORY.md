@@ -34,21 +34,18 @@
 
 ## 0. 已核实的架构事实（影响 P0 方案）
 
-1. **未启用 single-instance 插件**：`lib.rs` 只注册 opener / dialog / fs /
-   global-shortcut 四个插件，Cargo.toml 无 `tauri-plugin-single-instance`。
-   双进程可同时打开并写同一套数据目录，P0-1 必须补。
-2. **`~/.astra` 归属 astra-core**：`resolve_astra_home()` 实现在
+1. **`~/.astra` 归属 astra-core**：`resolve_astra_home()` 实现在
    `astra-core/crates/astra-config/src/lib.rs:139`，支持 `ASTRA_HOME` 环境变量覆盖。
    astra 宿主（attach_extensions / mcp_config_tool）与 astra-core 运行时共用。
    ⇒ **冷切换的关键杠杆：按账户启动进程时注入不同的 `ASTRA_HOME`，
    MCP/ACP 配置的账户化在 astra-core 侧零改动。**
-3. **AgentState 是 Tauri 全局 State**（`agent/state.rs`）：threads 单例锁、
+2. **AgentState 是 Tauri 全局 State**（`agent/state.rs`）：threads 单例锁、
    active 单槽、session_files、memory host 全部内嵌。P0 不做账户化重构，
    冷切换下每个进程只服务一个账户，AgentState 天然单账户。
-4. **`memory.key` 是现成的 DEK 雏形**：`memory/host.rs` 已用 XChaCha20-Poly1305
+3. **`memory.key` 是现成的 DEK 雏形**：`memory/host.rs` 已用 XChaCha20-Poly1305
    加密记忆库，仅主密钥明文落盘。P0-3 只需把该密钥改为「KEK 包装后落盘」，
    加密数据本体不动。
-5. **`providers.json` 明文存 API Key**（`providers.rs`），且被 `memory/host.rs`
+4. **`providers.json` 明文存 API Key**（`providers.rs`），且被 `memory/host.rs`
    （AgentSummaryClient）与模型 backend 多处读取，加密时需同步所有读取入口。
 
 ## 1. 全量存储清单

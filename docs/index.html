@@ -3,37 +3,46 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Astra — 本地优先的 AI Agent 桌面应用</title>
-<meta name="description" content="Astra：把项目交给一个具备 23+ 工具、MCP 扩展、技能系统与长期记忆的 AI Agent。本地运行，权限可控，基于 Tauri 2 + 自研 Rust Agent Runtime。" />
-<meta name="keywords" content="Astra, AI Agent, 桌面智能体, Tauri, Rust, MCP, 本地优先, AI 工作台, AI Assistant, Desktop Agent" />
+<!--
+  Replaceable images
+  ------------------
+  icon.png       Official A logo. Nav, product mock, favicon.
+  og-image.png   Social card, 1200×630.
+
+  PRODUCT_IMAGES is the first thing in the script at the bottom of this file.
+  Set heroWindow or workingUi to a screenshot path to replace that HTML mock.
+  Leave the string empty to keep the mock.
+-->
+<title>Astra — 装在你电脑上的 AI Agent</title>
+<meta name="description" content="Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。支持 MCP 和技能，可以开多个会话，也能回看产出的文件。" />
+<meta name="keywords" content="Astra, AI Agent, 桌面, macOS, Windows, Linux, MCP" />
 <meta name="author" content="Astra Contributors" />
 <meta name="robots" content="index, follow" />
-<meta name="theme-color" content="#0a0e1f" />
+<meta name="theme-color" content="#f3f4f8" />
 <link rel="canonical" href="https://astra-praxis.github.io/astra/" />
 <link rel="icon" type="image/png" href="icon.png" />
 <link rel="apple-touch-icon" href="icon.png" />
 
-<!-- Open Graph -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Astra" />
-<meta property="og:title" content="Astra — 本地优先的 AI Agent 桌面应用" />
-<meta property="og:description" content="把项目交给一个具备 23+ 工具、MCP 扩展、技能系统与长期记忆的 AI Agent。本地运行，权限可控。" />
+<meta property="og:title" content="Astra — 装在你电脑上的 AI Agent" />
+<meta property="og:description" content="Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。" />
 <meta property="og:url" content="https://astra-praxis.github.io/astra/" />
 <meta property="og:image" content="https://astra-praxis.github.io/astra/og-image.png" />
+<meta property="og:image:type" content="image/png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="Astra — AI 桌面智能体工作台" />
+<meta property="og:image:alt" content="Astra，适用于 macOS、Windows 和 Linux" />
 <meta property="og:locale" content="zh_CN" />
 <meta property="og:locale:alternate" content="en_US" />
 
-<!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Astra — 本地优先的 AI Agent 桌面应用" />
-<meta name="twitter:description" content="把项目交给一个具备 23+ 工具、MCP 扩展、技能系统与长期记忆的 AI Agent。本地运行，权限可控。" />
+<meta name="twitter:title" content="Astra — 装在你电脑上的 AI Agent" />
+<meta name="twitter:description" content="Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。" />
 <meta name="twitter:image" content="https://astra-praxis.github.io/astra/og-image.png" />
+<meta name="twitter:image:alt" content="Astra，适用于 macOS、Windows 和 Linux" />
 
-<!-- JSON-LD 结构化数据 -->
-<script type="application/ld+json">
+<script type="application/ld+json" id="ldjson">
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
@@ -42,486 +51,1226 @@
   "operatingSystem": "macOS, Windows, Linux",
   "url": "https://astra-praxis.github.io/astra/",
   "image": "https://astra-praxis.github.io/astra/og-image.png",
-  "description": "本地优先的 AI Agent 桌面应用：23+ 内置工具、MCP 扩展、技能系统与长期记忆，基于 Tauri 2 与自研 Rust Agent Runtime。",
+  "downloadUrl": "https://github.com/astra-praxis/astra/releases/latest",
+  "description": "Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。支持 MCP 和技能，可以开多个会话，也能回看产出的文件。",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "featureList": [
-    "本地 Agent 运行时",
-    "23+ 内置工具与权限管控",
-    "MCP 协议扩展",
-    "技能系统",
-    "长期记忆",
-    "多会话管理"
-  ],
-  "softwareVersion": "0.3.3"
+    "编辑文件",
+    "写入和命令等待批准",
+    "记忆留在本机",
+    "MCP 与技能",
+    "多个会话",
+    "回看产出的文件"
+  ]
 }
 </script>
 <style>
   :root {
-    --bg: #0a0e1f;
-    --bg-soft: #11162e;
-    --card: rgba(255, 255, 255, 0.04);
-    --card-border: rgba(255, 255, 255, 0.09);
-    --text: #eef1ff;
-    --text-dim: #9aa3c7;
-    --accent: #6366f1;
-    --accent2: #a855f7;
-    --accent3: #38bdf8;
-    --grad: linear-gradient(135deg, #4facfe 0%, #6366f1 45%, #a855f7 100%);
+    --bg: #f3f4f8;
+    --surface: #ffffff;
+    --ink: #1c2233;
+    --secondary: #4f5a75;
+    --muted: #8891a8;
+    --line: #e2e6f0;
+    --line-strong: #c8cede;
+    --divider: #eef0f6;
+    --brand: #6366f1;
+    --brand-dark: #4338ca;
+    --brand-soft: #f4f4fe;
+    --brand-line: #d0d1fb;
+    --sidebar: #0d1120;
+    --sidebar-text: #8b93ad;
+    --sidebar-text-strong: #dfe3f0;
+    --user: #0d1120;
+    --user-text: #dfe3f0;
+    --shadow: 0 24px 48px rgba(15, 20, 40, 0.12);
+    --font: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
+    margin: 0;
     background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
     line-height: 1.6;
-    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
   }
-  ::selection { background: rgba(99, 102, 241, 0.4); }
+  img { max-width: 100%; }
+  a { color: inherit; }
+  button, input { font-family: inherit; }
+  ::selection { background: #d0d1fb; }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-  /* ---------- 背景装饰 ---------- */
-  .bg-orbs { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-  .orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.35; }
-  .orb-1 { width: 560px; height: 560px; top: -180px; left: -120px; background: radial-gradient(circle, #4338ca, transparent 70%); }
-  .orb-2 { width: 480px; height: 480px; top: 30%; right: -160px; background: radial-gradient(circle, #7c3aed, transparent 70%); }
-  .orb-3 { width: 420px; height: 420px; bottom: -140px; left: 28%; background: radial-gradient(circle, #0ea5e9, transparent 70%); opacity: 0.22; }
-  .stars { position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    background-image:
-      radial-gradient(1px 1px at 12% 22%, rgba(255,255,255,.7) 50%, transparent 51%),
-      radial-gradient(1px 1px at 68% 8%, rgba(255,255,255,.5) 50%, transparent 51%),
-      radial-gradient(1.5px 1.5px at 84% 38%, rgba(255,255,255,.6) 50%, transparent 51%),
-      radial-gradient(1px 1px at 32% 62%, rgba(255,255,255,.45) 50%, transparent 51%),
-      radial-gradient(1px 1px at 55% 85%, rgba(255,255,255,.55) 50%, transparent 51%),
-      radial-gradient(1.5px 1.5px at 8% 78%, rgba(255,255,255,.4) 50%, transparent 51%),
-      radial-gradient(1px 1px at 92% 70%, rgba(255,255,255,.5) 50%, transparent 51%),
-      radial-gradient(1px 1px at 44% 30%, rgba(255,255,255,.35) 50%, transparent 51%);
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  .site-nav {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: rgba(255, 255, 255, 0.92);
+    border-bottom: 1px solid var(--divider);
+    backdrop-filter: blur(10px);
+  }
+  .nav-inner {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 16px;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; display: block; }
+  .nav-links { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+  .nav-links a {
+    color: var(--secondary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-links a.nav-dl {
+    color: #fff;
+    background: var(--brand);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-weight: 600;
+  }
+  .nav-links a.nav-dl:hover { background: #4f46e5; color: #fff; }
+  .lang-toggle {
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .lang-toggle:hover { color: var(--ink); border-color: var(--line-strong); }
+
+  .hero { padding: 56px 0 28px; }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+    gap: 40px;
+    align-items: center;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(32px, 4vw, 42px);
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+    font-weight: 700;
+  }
+  .lede { margin: 14px 0 0; color: var(--secondary); font-size: 16px; }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--brand); color: #fff; }
+  .btn-primary:hover { background: #4f46e5; }
+  .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+  .btn-ghost:hover { border-color: var(--line-strong); }
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 18px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--secondary);
+    font-size: 13px;
   }
 
-  .wrap { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 56px 0; }
+  .sec-head { max-width: 640px; margin-bottom: 22px; }
+  .sec-head h2 {
+    margin: 0;
+    font-size: 26px;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  .sec-head p { margin: 8px 0 0; color: var(--secondary); }
 
-  /* ---------- 导航 ---------- */
-  nav { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(14px);
-    background: rgba(10, 14, 31, 0.72); border-bottom: 1px solid rgba(255,255,255,0.06); }
-  .nav-inner { max-width: 1080px; margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; gap: 28px; }
-  .nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: 0.5px; }
-  .nav-logo img { width: 30px; height: 30px; border-radius: 8px; }
-  .nav-links { margin-left: auto; display: flex; gap: 22px; align-items: center; }
-  .nav-links a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color .2s; }
-  .nav-links a:hover { color: var(--text); }
-  .nav-cta { padding: 7px 16px !important; border: 1px solid rgba(99,102,241,.5); border-radius: 10px; color: var(--text) !important; background: rgba(99,102,241,.12); }
-  .lang-toggle { margin-left: 6px; padding: 6px 12px; border-radius: 9px; border: 1px solid var(--card-border);
-    background: var(--card); color: var(--text-dim); font-size: 12.5px; font-weight: 700; cursor: pointer;
-    transition: color .2s, border-color .2s; font-family: inherit; }
-  .lang-toggle:hover { color: var(--text); border-color: rgba(99,102,241,.5); }
+  .outcomes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .outcome {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 18px 16px;
+  }
+  .outcome h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+  .outcome p { margin: 0; color: var(--secondary); font-size: 14px; }
 
-  /* ---------- Hero ---------- */
-  .hero { text-align: center; padding: 108px 0 84px; }
-  .hero-badge { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim);
-    border: 1px solid var(--card-border); border-radius: 999px; padding: 6px 16px; background: var(--card); margin-bottom: 28px; }
-  .hero-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; box-shadow: 0 0 10px #34d399; }
-  .hero-icon { width: 96px; height: 96px; border-radius: 24px; margin-bottom: 30px;
-    box-shadow: 0 12px 60px rgba(99, 102, 241, 0.45), 0 0 0 1px rgba(255,255,255,0.08); }
-  h1 { font-size: clamp(38px, 6.5vw, 64px); font-weight: 800; letter-spacing: -1px; line-height: 1.15; }
-  .grad-text { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .hero-sub { max-width: 640px; margin: 22px auto 0; font-size: clamp(15px, 2vw, 18px); color: var(--text-dim); }
-  .hero-actions { margin-top: 40px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-  .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-size: 15px; font-weight: 600;
-    padding: 13px 28px; border-radius: 13px; transition: transform .15s, box-shadow .2s, background .2s; }
-  .btn-primary { background: var(--grad); color: #fff; box-shadow: 0 8px 30px rgba(99, 102, 241, 0.4); }
-  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(99, 102, 241, 0.55); }
-  .btn-ghost { color: var(--text); border: 1px solid var(--card-border); background: var(--card); }
-  .btn-ghost:hover { background: rgba(255,255,255,0.08); transform: translateY(-2px); }
-  .hero-meta { margin-top: 26px; font-size: 13px; color: var(--text-dim); display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
-  .hero-meta span { display: inline-flex; align-items: center; gap: 6px; }
+  .dl-panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px;
+  }
+  .dl-status { margin: 12px 0 0; color: var(--secondary); font-size: 13px; min-height: 1.4em; }
+  .dl-list { list-style: none; margin: 18px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .dl-list a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--ink);
+    background: var(--bg);
+  }
+  .dl-list a:hover { border-color: var(--line-strong); }
+  .dl-list .name { font-weight: 600; font-size: 14px; }
+  .dl-list .meta { margin-left: auto; color: var(--secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .dl-list .yours {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--brand-dark);
+    background: var(--brand-soft);
+    border-radius: 999px;
+    padding: 2px 8px;
+  }
+  .dl-list li.is-yours a { background: var(--brand-soft); border-color: var(--brand-line); }
+  .dl-list li.is-offline .name { font-weight: 500; color: var(--secondary); }
+  .releases-link { margin: 14px 0 0; font-size: 13px; }
+  .releases-link a { color: var(--secondary); }
 
-  /* ---------- 区块通用 ---------- */
-  section { padding: 76px 0; }
-  .sec-head { text-align: center; margin-bottom: 52px; }
-  .sec-kicker { font-size: 13px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .sec-title { font-size: clamp(26px, 4vw, 38px); font-weight: 800; margin-top: 10px; letter-spacing: -0.5px; }
-  .sec-desc { color: var(--text-dim); max-width: 560px; margin: 14px auto 0; font-size: 15px; }
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 28px 0 48px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  footer p { margin: 0; }
+  footer .quiet { margin-top: 6px; }
+  footer .foot-links { margin-top: 10px; display: flex; gap: 16px; }
+  footer .foot-links a { color: var(--secondary); text-decoration: none; }
+  footer .foot-links a:hover { color: var(--ink); }
 
-  /* ---------- 特性网格 ---------- */
-  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
-  .feature { background: var(--card); border: 1px solid var(--card-border); border-radius: 18px; padding: 28px;
-    transition: transform .2s, border-color .2s, background .2s; }
-  .feature:hover { transform: translateY(-4px); border-color: rgba(99,102,241,.45); background: rgba(99,102,241,.06); }
-  .feature-icon { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center;
-    font-size: 22px; margin-bottom: 16px; background: rgba(99,102,241,.14); border: 1px solid rgba(99,102,241,.3); }
-  .feature h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
-  .feature p { font-size: 14px; color: var(--text-dim); }
-  .feature code { font-family: "SF Mono", ui-monospace, Consolas, monospace; font-size: 12.5px;
-    background: rgba(255,255,255,.07); padding: 1px 6px; border-radius: 5px; color: #93c5fd; }
+  /* Scaled product window. --dw / --dh are the mock's design size in px. */
+  .scaler { width: 100%; container-type: inline-size; }
+  .scaler-sizer {
+    /* Extra pixels leave room for the window shadow, which otherwise gets clipped. */
+    height: calc((var(--dh) + 40) * 1px * min(1, 100cqi / ((var(--dw) + 48) * 1px)));
+    overflow: hidden;
+  }
+  .scaler-inner {
+    width: calc((var(--dw) + 48) * 1px);
+    height: calc((var(--dh) + 40) * 1px);
+    padding: 4px 24px 32px;
+    transform-origin: top left;
+    transform: scale(min(1, 100cqi / ((var(--dw) + 48) * 1px)));
+  }
+  .shot-frame .shot { width: 100%; height: auto; display: block; border-radius: 12px; box-shadow: var(--shadow); }
+  .shot-frame .shot[hidden], .shot-frame .mock[hidden] { display: none !important; }
+  .window-plain { width: 100%; }
+  .appwin.appwin--fluid { width: 100%; height: auto; }
+  .appwin.appwin--fluid .stream { overflow: visible; }
+  @supports not (container-type: inline-size) {
+    .scaler { overflow-x: auto; }
+    .scaler-sizer { height: auto; overflow: visible; }
+    .scaler-inner { transform: none; }
+  }
 
-  /* ---------- 对话演示 ---------- */
-  .demo { background: var(--bg-soft); border: 1px solid var(--card-border); border-radius: 20px;
-    max-width: 780px; margin: 0 auto; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.45); }
-  .demo-bar { display: flex; align-items: center; gap: 8px; padding: 13px 18px; border-bottom: 1px solid var(--card-border); background: rgba(255,255,255,.03); }
-  .demo-dot { width: 11px; height: 11px; border-radius: 50%; }
-  .demo-title { margin-left: 10px; font-size: 12.5px; color: var(--text-dim); }
-  .demo-body { padding: 26px 24px; display: flex; flex-direction: column; gap: 16px; font-size: 14.5px; }
-  .bubble { max-width: 86%; padding: 12px 16px; border-radius: 15px; }
-  .bubble-user { align-self: flex-end; background: var(--grad); color: #fff; border-bottom-right-radius: 5px; }
-  .bubble-ai { align-self: flex-start; background: rgba(255,255,255,.06); border: 1px solid var(--card-border); border-bottom-left-radius: 5px; }
-  .tool-call { align-self: flex-start; display: flex; align-items: center; gap: 9px; font-family: ui-monospace, "SF Mono", Consolas, monospace;
-    font-size: 12.5px; color: #86efac; background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.25);
-    border-radius: 10px; padding: 9px 14px; }
-  .tool-call.pending { color: #fcd34d; background: rgba(252, 211, 77, .07); border-color: rgba(252, 211, 77, .3); }
-  .spinner { width: 12px; height: 12px; border: 2px solid rgba(252,211,77,.3); border-top-color: #fcd34d; border-radius: 50%; animation: spin .8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .artifact-card { align-self: flex-start; display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.05);
-    border: 1px solid var(--card-border); border-radius: 13px; padding: 12px 18px; }
-  .artifact-icon { width: 36px; height: 36px; border-radius: 9px; background: var(--grad); display: flex; align-items: center; justify-content: center; font-size: 17px; }
-  .artifact-name { font-size: 13.5px; font-weight: 600; }
-  .artifact-meta { font-size: 12px; color: var(--text-dim); }
+  .appwin {
+    width: calc(var(--dw) * 1px);
+    height: calc(var(--dh) * 1px);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    color: var(--ink);
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .tb {
+    height: 40px;
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 0 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--divider);
+    user-select: none;
+  }
+  .traffic { display: flex; gap: 6px; }
+  .traffic i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .traffic i:nth-child(1) { background: #ff5f57; }
+  .traffic i:nth-child(2) { background: #febc2e; }
+  .traffic i:nth-child(3) { background: #28c840; }
+  .tb-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  .tb-title img { width: 16px; height: 16px; border-radius: 4px; display: block; }
+  .shell { flex: 1; min-height: 0; display: flex; }
+  .side {
+    width: 176px;
+    flex-shrink: 0;
+    background: var(--sidebar);
+    color: var(--sidebar-text);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .side-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 12px 6px;
+    color: var(--sidebar-text-strong);
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .side-head img { width: 22px; height: 22px; border-radius: 6px; display: block; }
+  .side nav { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; }
+  .side nav > span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .side nav > span.on { background: var(--brand); color: #fff; }
+  .side svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .side-foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--sidebar-text-strong);
+    font-size: 12px;
+  }
+  .av {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    padding: 6px 8px 0;
+    flex-shrink: 0;
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 160px;
+    padding: 5px 8px;
+    font-size: 12px;
+    color: var(--secondary);
+    background: #f6f7fb;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid transparent;
+  }
+  .tab.on {
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 500;
+    border-color: var(--line);
+    border-bottom-color: var(--surface);
+  }
+  .tab .wait { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
+  .tab-add {
+    width: 22px;
+    height: 22px;
+    margin: 0 0 4px 4px;
+    border-radius: 6px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .stream {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 12px 14px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .user {
+    background: var(--user);
+    color: var(--user-text);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.28);
+  }
+  .asst { font-size: 13px; line-height: 1.65; color: var(--ink); padding: 2px 2px 0; }
+  .perm {
+    border-left: 2px solid var(--line);
+    margin: 2px 0 0;
+    padding: 2px 0 2px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .perm-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--secondary);
+    font-size: 12.5px;
+  }
+  .perm-head svg { width: 14px; height: 14px; }
+  .perm-head code, .perm pre {
+    font-family: var(--mono);
+  }
+  .perm-head code { font-size: 12px; font-weight: 600; color: var(--ink); }
+  .perm pre {
+    margin: 0;
+    padding-left: 2px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--secondary);
+    white-space: pre-wrap;
+  }
+  .perm-actions { display: flex; gap: 8px; }
+  .allow, .deny {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+  }
+  .allow { background: var(--ink); color: var(--surface); }
+  .deny { color: var(--secondary); border: 1px solid var(--line); }
+  .allow svg, .deny svg { width: 13px; height: 13px; }
+  .dock {
+    flex-shrink: 0;
+    margin: 8px 12px 12px;
+    padding: 10px 12px 8px;
+    background: var(--surface);
+    border: 1.5px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(15, 20, 40, 0.06);
+  }
+  .dock-ph { min-height: 28px; font-size: 13.5px; color: var(--muted); }
+  .dock-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .dock-left, .dock-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .iconbtn, .folder, .model {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--secondary);
+  }
+  .iconbtn svg, .folder svg, .model svg { width: 14px; height: 14px; }
+  .folder {
+    max-width: 140px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: var(--brand-soft);
+    color: var(--brand-dark);
+    border: 1px solid var(--brand-line);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .model {
+    font-size: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 3px 8px;
+  }
+  .send {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--brand);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .send svg { width: 15px; height: 15px; }
 
-  /* ---------- 权限流程 ---------- */
-  .perm-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; max-width: 860px; margin: 0 auto; }
-  .perm-step { position: relative; background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 24px 22px; }
-  .perm-num { position: absolute; top: -13px; left: 20px; width: 26px; height: 26px; border-radius: 50%;
-    background: var(--grad); color: #fff; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
-  .perm-step h4 { font-size: 15px; margin: 8px 0 6px; }
-  .perm-step p { font-size: 13.5px; color: var(--text-dim); }
-
-  /* ---------- 技术栈 ---------- */
-  .stack { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 760px; margin: 0 auto; }
-  .stack-chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 999px;
-    background: var(--card); border: 1px solid var(--card-border); font-size: 14px; font-weight: 600; }
-  .stack-chip small { color: var(--text-dim); font-weight: 400; }
-
-  /* ---------- CTA ---------- */
-  .cta { text-align: center; padding: 60px 28px; background: linear-gradient(135deg, rgba(99,102,241,.14), rgba(168,85,247,.1));
-    border: 1px solid rgba(99,102,241,.35); border-radius: 26px; }
-  .cta h2 { font-size: clamp(24px, 4vw, 34px); font-weight: 800; margin-bottom: 12px; }
-  .cta p { color: var(--text-dim); margin-bottom: 30px; }
-
-  footer { border-top: 1px solid rgba(255,255,255,.06); margin-top: 60px; padding: 34px 24px 44px; text-align: center;
-    color: var(--text-dim); font-size: 13.5px; }
-  footer a { color: var(--text-dim); }
-  footer .foot-links { display: flex; gap: 22px; justify-content: center; margin-bottom: 14px; }
-  footer .foot-links a:hover { color: var(--text); }
-
+  @media (max-width: 980px) {
+    .outcomes { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 800px) {
+    .hero { padding-top: 36px; }
+    .hero-grid { grid-template-columns: 1fr; gap: 28px; }
+    .nav-links a:not(.nav-dl) { display: none; }
+    section { padding: 40px 0; }
+  }
   @media (max-width: 640px) {
-    .nav-links a:not(.nav-cta) { display: none; }
-    .hero { padding: 72px 0 56px; }
-    section { padding: 52px 0; }
+    .wrap, .nav-inner { padding-left: 16px; padding-right: 16px; }
+    .outcomes { grid-template-columns: 1fr; }
+    .dl-panel { padding: 16px; }
+    .dl-list a { align-items: flex-start; flex-wrap: wrap; }
+    .dl-list .meta { margin-left: 0; }
+    .appwin--fluid .dock-bar { flex-wrap: wrap; row-gap: 8px; }
+    .hero-actions .btn { flex: 1 1 auto; }
   }
 </style>
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-blocks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+  <symbol id="i-skill" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+</svg>
 
-<div class="bg-orbs">
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
-</div>
-<div class="stars"></div>
-
-<nav>
+<header class="site-nav">
   <div class="nav-inner">
-    <div class="nav-logo">
-      <img src="icon.png" alt="Astra logo" width="30" height="30" onerror="this.style.display='none'" />
+    <a class="brand" href="./">
+      <img src="icon.png" alt="" width="28" height="28" />
       Astra
-    </div>
-    <div class="nav-links">
-      <a href="#features" data-i18n="nav_features">功能</a>
-      <a href="#demo" data-i18n="nav_demo">演示</a>
-      <a href="#stack" data-i18n="nav_stack">技术栈</a>
-      <a class="nav-cta" href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener" data-i18n="nav_download">下载</a>
-      <button class="lang-toggle" id="langToggle" aria-label="Switch language">EN</button>
-    </div>
-  </div>
-</nav>
-
-<header class="wrap hero">
-  <div class="hero-badge"><span class="dot"></span><span data-i18n="hero_badge">macOS · Windows · Linux 免费下载</span></div>
-  <br />
-  <img class="hero-icon" src="icon.png" alt="Astra" width="96" height="96" onerror="this.style.display='none'" />
-  <h1><span data-i18n="hero_title_1">把项目交给</span><br /><span class="grad-text" data-i18n="hero_title_2">真正能干活的 AI Agent</span></h1>
-  <p class="hero-sub" data-i18n="hero_sub">
-    Astra 是一个本地优先的桌面 AI Agent：23+ 内置工具、MCP 扩展、技能系统与认知记忆，
-    读写文件、执行命令、生成图片与文档——每一步都在你的权限边界内。
-  </p>
-  <div class="hero-actions">
-    <a class="btn btn-primary" href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener" data-i18n="hero_download">⬇ 免费下载</a>
-    <a class="btn btn-ghost" href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener" data-i18n="hero_github">⭐ GitHub 仓库</a>
-  </div>
-  <div class="hero-meta">
-    <span data-i18n="hero_meta_1">🔒 本地优先，记忆加密存储</span>
-    <span data-i18n="hero_meta_2">⚡ Tauri 2，安装包仅 ~10MB</span>
-    <span data-i18n="hero_meta_3">🧩 兼容 MCP 协议</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#capabilities" data-i18n="nav_cap">能做什么</a>
+      <a href="#ui" data-i18n="nav_ui">界面</a>
+      <a class="nav-dl" href="#download" data-i18n="nav_dl">下载</a>
+      <button class="lang-toggle" id="langToggle" type="button" aria-label="Switch language">EN</button>
+    </nav>
   </div>
 </header>
 
-<section class="wrap" id="features">
-  <div class="sec-head">
-    <div class="sec-kicker">Features</div>
-    <h2 class="sec-title" data-i18n="feat_title">一个 Agent，全链路干活</h2>
-    <p class="sec-desc" data-i18n="feat_desc">不是聊天玩具，是具备完整工具链与权限体系的工作伙伴。</p>
-  </div>
-  <div class="features">
-    <div class="feature">
-      <div class="feature-icon">🛠️</div>
-      <h3 data-i18n="f1_h">23+ 内置工具</h3>
-      <p data-i18n-html="f1_p">文件读写 <code>edit_file</code>、路径搜索 <code>find_path</code>、Shell 执行与后台任务、
-        网页抓取 <code>fetch</code>、图像生成、<code>build_docx</code> 文档产出……开箱即用。</p>
-    </div>
-    <div class="feature">
-      <div class="feature-icon">🔐</div>
-      <h3 data-i18n="f2_h">权限边界可控</h3>
-      <p data-i18n-html="f2_p">只读操作自动放行，写入与命令执行弹出确认卡，完整展示 diff 与命令内容。
-        工具级 allow / deny 名单，敏感操作绝不静默执行。</p>
-    </div>
-    <div class="feature">
-      <div class="feature-icon">🧠</div>
-      <h3 data-i18n="f3_h">认知记忆</h3>
-      <p data-i18n-html="f3_p">对话结束自动提炼长期记忆，加密 SQLite 存储、密钥不出本机。
-        新会话自动召回上下文——Agent 记得你的偏好与项目背景。</p>
-    </div>
-    <div class="feature">
-      <div class="feature-icon">🧩</div>
-      <h3 data-i18n="f4_h">MCP 扩展生态</h3>
-      <p data-i18n-html="f4_p">兼容 Model Context Protocol。在对话里说一句「帮我安装 Playwright MCP」，
-        AI 自动下载依赖写好配置，重启会话即生效。</p>
-    </div>
-    <div class="feature">
-      <div class="feature-icon">📦</div>
-      <h3 data-i18n="f5_h">Artifact 沉淀</h3>
-      <p data-i18n-html="f5_p">Agent 产出的代码、文档、图片以卡片形式管理，支持 Markdown 渲染、
-        代码高亮、图片视频预览，一键在编辑器中打开。</p>
-    </div>
-    <div class="feature">
-      <div class="feature-icon">⚡</div>
-      <h3 data-i18n="f6_h">本地 &amp; 轻量</h3>
-      <p data-i18n-html="f6_p">Tauri 2 + 系统 WebView，安装包仅 ~10MB。支持 OpenAI 兼容 API 与
-        llama.cpp 本地模型，数据不出你的机器。</p>
-    </div>
-  </div>
-</section>
+<main>
+  <div class="wrap hero">
+    <div class="hero-grid">
+      <div>
+        <h1 data-i18n="h1">装在你电脑上的 AI Agent</h1>
+        <p class="lede" data-i18n="lede">打开就能用。它可以读、改项目里的文件。写入和执行命令之前会先停下来，等你批准。记住的内容留在这台机器上。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest">
+            <span class="js-dl-label" data-i18n="dl_primary">下载</span>
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener">GitHub</a>
+        </div>
+        <ul class="facts">
+          <li data-i18n="fact_os">macOS、Windows、Linux</li>
+          <li data-i18n="fact_mem">记忆留在本机</li>
+          <li data-i18n="fact_perm">写入和命令会等你批准</li>
+        </ul>
+      </div>
 
-<section class="wrap" id="demo">
-  <div class="sec-head">
-    <div class="sec-kicker">Demo</div>
-    <h2 class="sec-title" data-i18n="demo_title">看它怎么工作</h2>
-    <p class="sec-desc" data-i18n="demo_desc">权限确认 → 工具执行 → Artifact 沉淀，全程可见、可控。</p>
-  </div>
-  <div class="demo">
-    <div class="demo-bar">
-      <span class="demo-dot" style="background:#ff5f57"></span>
-      <span class="demo-dot" style="background:#febc2e"></span>
-      <span class="demo-dot" style="background:#28c840"></span>
-      <span class="demo-title" data-i18n="demo_window">Astra — Agent 会话</span>
-    </div>
-    <div class="demo-body">
-      <div class="bubble bubble-user" data-i18n="demo_user">帮我把这个仓库的 README 翻译成英文，顺便生成一张宣传图放进 docs/</div>
-      <div class="tool-call pending"><span class="spinner"></span><span data-i18n="demo_tool_pending">edit_file · 等待确认（写入操作）</span></div>
-      <div class="tool-call">✓ edit_file — README.md · <span data-i18n="demo_diff">+42 −18</span></div>
-      <div class="tool-call">✓ generate_image — promo.png · 1024×1024</div>
-      <div class="bubble bubble-ai" data-i18n-html="demo_ai">已完成：README 英文版已写入，宣传图保存在 <b>docs/promo.png</b>。两个变更都是你在确认卡里批准过的，随时可以在 Artifact 面板里回看。</div>
-      <div class="artifact-card">
-        <div class="artifact-icon">🖼️</div>
-        <div>
-          <div class="artifact-name">promo.png</div>
-          <div class="artifact-meta" data-i18n="demo_artifact">generate_image · 刚刚 · 点击预览</div>
+      <!-- heroWindow: see PRODUCT_IMAGES -->
+      <div class="scaler shot-frame" style="--dw:720;--dh:508" data-shot="heroWindow">
+        <img class="shot" alt="" hidden data-i18n-alt="shot_hero" />
+        <div class="scaler-sizer mock">
+          <div class="scaler-inner">
+            <div class="appwin" aria-hidden="true">
+              <div class="tb">
+                <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+                <div class="tb-title"><img src="icon.png" alt="" width="16" height="16" />ASTRA</div>
+                <div></div>
+              </div>
+              <div class="shell">
+                <aside class="side">
+                  <div class="side-head"><img src="icon.png" alt="" width="22" height="22" /><span>Astra</span></div>
+                  <nav>
+                    <span class="on"><svg><use href="#i-bot"/></svg><span data-i18n="ui_agent">Agent</span></span>
+                    <span><svg><use href="#i-server"/></svg><span data-i18n="ui_serve">Agent 服务</span></span>
+                    <span><svg><use href="#i-folder"/></svg><span data-i18n="ui_ws">工作空间</span></span>
+                    <span><svg><use href="#i-blocks"/></svg><span data-i18n="ui_ext">扩展管理</span></span>
+                    <span><svg><use href="#i-skill"/></svg><span data-i18n="ui_skill">技能管理</span></span>
+                  </nav>
+                  <div class="side-foot">
+                    <span class="av" data-i18n="ui_av">本</span>
+                    <span data-i18n="ui_account">本地账户</span>
+                  </div>
+                </aside>
+                <div class="col">
+                  <div class="tabs">
+                    <div class="tab on"><span data-i18n="ui_tab1">首页样式</span></div>
+                    <div class="tab"><span data-i18n="ui_tab2">笔记</span><i class="wait"></i></div>
+                    <div class="tab-add">+</div>
+                  </div>
+                  <div class="stream">
+                    <div class="user" data-i18n="ui_user">把首页标题的字重改成 600，跟设置页的区块标题对齐。</div>
+                    <div class="asst" data-i18n="ui_asst">看过设置页了。那边的区块标题是 600，首页现在是 700。我改 Home.scss 里这一处。</div>
+                    <div class="perm">
+                      <div class="perm-head">
+                        <svg><use href="#i-alert"/></svg>
+                        <svg><use href="#i-file"/></svg>
+                        <code>edit_file</code>
+                      </div>
+                      <pre>src/pages/home/Home.scss
+- font-weight: 700;
++ font-weight: 600;</pre>
+                      <div class="perm-actions">
+                        <span class="allow"><svg><use href="#i-check"/></svg><span data-i18n="ui_allow">批准</span></span>
+                        <span class="deny"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="dock">
+                    <div class="dock-ph" data-i18n="ui_ph">接着说，或用 @ 引用文件</div>
+                    <div class="dock-bar">
+                      <div class="dock-left">
+                        <span class="iconbtn"><svg><use href="#i-panel"/></svg></span>
+                        <span class="folder"><svg><use href="#i-folder"/></svg>astra</span>
+                      </div>
+                      <div class="dock-right">
+                        <span class="model"><span data-i18n="ui_model">本地模型</span><svg><use href="#i-chev"/></svg></span>
+                        <span class="send"><svg><use href="#i-up"/></svg></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
-</section>
 
-<section class="wrap" id="permission">
-  <div class="sec-head">
-    <div class="sec-kicker">Safety</div>
-    <h2 class="sec-title" data-i18n="perm_title">权限确认，三步闭环</h2>
-  </div>
-  <div class="perm-flow">
-    <div class="perm-step">
-      <div class="perm-num">1</div>
-      <h4 data-i18n="p1_h">Agent 发起请求</h4>
-      <p data-i18n="p1_p">写入文件、执行命令等敏感操作触发确认卡，完整展示 diff 或命令。</p>
+  <section class="wrap" id="capabilities">
+    <div class="sec-head">
+      <h2 data-i18n="cap_h">用的时候会碰到这些</h2>
+      <p data-i18n="cap_p">这些是用的时候会直接看到的事。</p>
     </div>
-    <div class="perm-step">
-      <div class="perm-num">2</div>
-      <h4 data-i18n="p2_h">你做决定</h4>
-      <p data-i18n="p2_p">批准或拒绝，一次一议；只读操作按策略自动放行，不打断心流。</p>
+    <div class="outcomes">
+      <article class="outcome">
+        <h3 data-i18n="c1_h">改文件</h3>
+        <p data-i18n="c1_p">它可以读项目里的文件，也可以改。</p>
+      </article>
+      <article class="outcome">
+        <h3 data-i18n="c2_h">写入和命令会等你</h3>
+        <p data-i18n="c2_p">写文件或跑命令之前，对话里会先出现确认。你看到内容，再决定批不批准。</p>
+      </article>
+      <article class="outcome">
+        <h3 data-i18n="c3_h">记忆留在这台机器上</h3>
+        <p data-i18n="c3_p">它记住的东西存在本机。</p>
+      </article>
+      <article class="outcome">
+        <h3 data-i18n="c4_h">可以接 MCP，也可以用技能</h3>
+        <p data-i18n="c4_p">外部工具用 MCP 接进来。常做的事可以做成技能。</p>
+      </article>
+      <article class="outcome">
+        <h3 data-i18n="c5_h">可以同时开好几个会话</h3>
+        <p data-i18n="c5_p">标签上能留着多段对话。切走以后，原来那段还在。</p>
+      </article>
+      <article class="outcome">
+        <h3 data-i18n="c6_h">产出的文件可以再打开</h3>
+        <p data-i18n="c6_p">它写出的文档和结果会留在列表里，之后还能查看。</p>
+      </article>
     </div>
-    <div class="perm-step">
-      <div class="perm-num">3</div>
-      <h4 data-i18n="p3_h">结果可追溯</h4>
-      <p data-i18n="p3_p">每次工具调用与产出都有记录，Artifact 面板随时回看。</p>
-    </div>
-  </div>
-</section>
+  </section>
 
-<section class="wrap" id="stack">
-  <div class="sec-head">
-    <div class="sec-kicker">Tech Stack</div>
-    <h2 class="sec-title" data-i18n="stack_title">自研 Rust Agent Runtime</h2>
-    <p class="sec-desc" data-i18n="stack_desc">工具系统、权限策略、事件协议、Artifact 全部自主实现——不是套壳，是从底座自建。</p>
-  </div>
-  <div class="stack">
-    <span class="stack-chip">🦀 Rust <small data-i18n="stack_rust">· Agent Runtime</small></span>
-    <span class="stack-chip">⚡ Tauri 2 <small data-i18n="stack_tauri">· 桌面框架</small></span>
-    <span class="stack-chip">⚛️ React 19 <small data-i18n="stack_react">· 前端</small></span>
-    <span class="stack-chip">🔌 MCP <small data-i18n="stack_mcp">· 扩展协议</small></span>
-    <span class="stack-chip">🧠 CME <small data-i18n="stack_cme">· 认知记忆</small></span>
-    <span class="stack-chip">🦙 llama.cpp <small data-i18n="stack_llama">· 本地模型</small></span>
-  </div>
-</section>
+  <section class="wrap" id="ui">
+    <div class="sec-head">
+      <h2 data-i18n="ui_h">确认就在这段对话里</h2>
+      <p data-i18n="ui_p">要写文件或执行命令时，确认出现在回复下面。你能看到路径和改动，再点批准或拒绝。</p>
+    </div>
+    <!-- workingUi: see PRODUCT_IMAGES -->
+    <div class="window-plain shot-frame" data-shot="workingUi">
+      <img class="shot" alt="" hidden data-i18n-alt="shot_ui" />
+      <div class="mock">
+          <div class="appwin appwin--fluid" aria-hidden="true">
+            <div class="tb">
+              <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+              <div class="tb-title"><img src="icon.png" alt="" width="16" height="16" />ASTRA</div>
+              <div></div>
+            </div>
+            <div class="shell">
+              <div class="col">
+                <div class="tabs">
+                  <div class="tab on"><span data-i18n="ui_tab1">首页样式</span></div>
+                  <div class="tab"><span data-i18n="ui_tab2">笔记</span><i class="wait"></i></div>
+                  <div class="tab-add">+</div>
+                </div>
+                <div class="stream">
+                  <div class="user" data-i18n="ui_user">把首页标题的字重改成 600，跟设置页的区块标题对齐。</div>
+                  <div class="asst" data-i18n="ui_asst">看过设置页了。那边的区块标题是 600，首页现在是 700。我改 Home.scss 里这一处。</div>
+                  <div class="perm">
+                    <div class="perm-head">
+                      <svg><use href="#i-alert"/></svg>
+                      <svg><use href="#i-file"/></svg>
+                      <code>edit_file</code>
+                    </div>
+                    <pre>src/pages/home/Home.scss
+- font-weight: 700;
++ font-weight: 600;</pre>
+                    <div class="perm-actions">
+                      <span class="allow"><svg><use href="#i-check"/></svg><span data-i18n="ui_allow">批准</span></span>
+                      <span class="deny"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
+                    </div>
+                  </div>
+                </div>
+                <div class="dock">
+                  <div class="dock-ph" data-i18n="ui_ph">接着说，或用 @ 引用文件</div>
+                  <div class="dock-bar">
+                    <div class="dock-left">
+                      <span class="iconbtn"><svg><use href="#i-panel"/></svg></span>
+                      <span class="folder"><svg><use href="#i-folder"/></svg>astra</span>
+                    </div>
+                    <div class="dock-right">
+                      <span class="model"><span data-i18n="ui_model">本地模型</span><svg><use href="#i-chev"/></svg></span>
+                      <span class="send"><svg><use href="#i-up"/></svg></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+      </div>
+    </div>
+  </section>
 
-<section class="wrap">
-  <div class="cta">
-    <h2 data-i18n="cta_h">现在就试试 Astra</h2>
-    <p data-i18n="cta_p">免费、开源、本地运行。下载安装包，几分钟内让 Agent 开始干活。</p>
-    <a class="btn btn-primary" href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener" data-i18n="cta_btn">⬇ 下载最新版</a>
-  </div>
-</section>
+  <section class="wrap" id="download">
+    <div class="sec-head">
+      <h2 data-i18n="dl_h">下载</h2>
+      <p data-i18n="dl_p">按钮按你的系统选安装包。版本和大小来自 GitHub 上最新的正式版。Windows 默认是较小的在线安装包，离线包单独列在下面。</p>
+    </div>
+    <div class="dl-panel">
+      <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest">
+        <span class="js-dl-label" data-i18n="dl_primary">下载</span>
+      </a>
+      <p class="dl-status" id="dlStatus" data-i18n="dl_loading">正在读取最新版本…</p>
+      <ul class="dl-list" id="dlList">
+        <li data-kind="mac"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">macOS</span></a></li>
+        <li data-kind="win"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Windows</span></a></li>
+        <li data-kind="win-offline" class="is-offline"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name" data-i18n="dl_win_offline">Windows 离线安装包</span></a></li>
+        <li data-kind="linux-deb"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Linux (.deb)</span></a></li>
+        <li data-kind="linux-appimage"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Linux (AppImage)</span></a></li>
+      </ul>
+      <p class="releases-link"><a href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener" data-i18n="dl_all">全部版本</a></p>
+    </div>
+  </section>
+</main>
 
 <footer>
-  <div class="foot-links">
-    <a href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener">GitHub</a>
-    <a href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener">Releases</a>
+  <div class="wrap">
+    <p data-i18n="foot">Astra · MIT License</p>
+    <p class="quiet">Rust · Tauri · MCP</p>
+    <div class="foot-links">
+      <a href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener">Releases</a>
+    </div>
   </div>
-  <div data-i18n="footer_note">Astra · 本地优先的 AI Agent 桌面应用 · MIT License</div>
 </footer>
 
 <script>
 (function () {
   'use strict';
 
+  /*
+   * PRODUCT_IMAGES
+   * Replace either path with a real screenshot, relative to this page.
+   * Example: heroWindow: 'shots/agent-window.png'
+   * An empty string keeps the HTML mock. A broken path falls back to the mock.
+   */
+  var PRODUCT_IMAGES = {
+    heroWindow: '',
+    workingUi: ''
+  };
+
+  var RELEASES = 'https://github.com/astra-praxis/astra/releases/latest';
+  var RELEASES_API = 'https://api.github.com/repos/astra-praxis/astra/releases/latest';
+  var KIND_ORDER = ['mac', 'win', 'win-other', 'win-offline', 'linux-deb', 'linux-appimage', 'linux-other'];
+
   var I18N = {
     zh: {
-      doc_title: 'Astra — 本地优先的 AI Agent 桌面应用',
-      doc_desc: 'Astra：把项目交给一个具备 23+ 工具、MCP 扩展、技能系统与长期记忆的 AI Agent。本地运行，权限可控，基于 Tauri 2 + 自研 Rust Agent Runtime。',
-      nav_features: '功能', nav_demo: '演示', nav_stack: '技术栈', nav_download: '下载',
-      hero_badge: 'macOS · Windows · Linux 免费下载',
-      hero_title_1: '把项目交给', hero_title_2: '真正能干活的 AI Agent',
-      hero_sub: 'Astra 是一个本地优先的桌面 AI Agent：23+ 内置工具、MCP 扩展、技能系统与认知记忆，读写文件、执行命令、生成图片与文档——每一步都在你的权限边界内。',
-      hero_download: '⬇ 免费下载', hero_github: '⭐ GitHub 仓库',
-      hero_meta_1: '🔒 本地优先，记忆加密存储',
-      hero_meta_2: '⚡ Tauri 2，安装包仅 ~10MB',
-      hero_meta_3: '🧩 兼容 MCP 协议',
-      feat_title: '一个 Agent，全链路干活',
-      feat_desc: '不是聊天玩具，是具备完整工具链与权限体系的工作伙伴。',
-      f1_h: '23+ 内置工具',
-      f1_p: '文件读写 <code>edit_file</code>、路径搜索 <code>find_path</code>、Shell 执行与后台任务、网页抓取 <code>fetch</code>、图像生成、<code>build_docx</code> 文档产出……开箱即用。',
-      f2_h: '权限边界可控',
-      f2_p: '只读操作自动放行，写入与命令执行弹出确认卡，完整展示 diff 与命令内容。工具级 allow / deny 名单，敏感操作绝不静默执行。',
-      f3_h: '认知记忆',
-      f3_p: '对话结束自动提炼长期记忆，加密 SQLite 存储、密钥不出本机。新会话自动召回上下文——Agent 记得你的偏好与项目背景。',
-      f4_h: 'MCP 扩展生态',
-      f4_p: '兼容 Model Context Protocol。在对话里说一句「帮我安装 Playwright MCP」，AI 自动下载依赖写好配置，重启会话即生效。',
-      f5_h: 'Artifact 沉淀',
-      f5_p: 'Agent 产出的代码、文档、图片以卡片形式管理，支持 Markdown 渲染、代码高亮、图片视频预览，一键在编辑器中打开。',
-      f6_h: '本地 & 轻量',
-      f6_p: 'Tauri 2 + 系统 WebView，安装包仅 ~10MB。支持 OpenAI 兼容 API 与 llama.cpp 本地模型，数据不出你的机器。',
-      demo_title: '看它怎么工作',
-      demo_desc: '权限确认 → 工具执行 → Artifact 沉淀，全程可见、可控。',
-      demo_window: 'Astra — Agent 会话',
-      demo_user: '帮我把这个仓库的 README 翻译成英文，顺便生成一张宣传图放进 docs/',
-      demo_tool_pending: 'edit_file · 等待确认（写入操作）',
-      demo_diff: '+42 −18',
-      demo_ai: '已完成：README 英文版已写入，宣传图保存在 <b>docs/promo.png</b>。两个变更都是你在确认卡里批准过的，随时可以在 Artifact 面板里回看。',
-      demo_artifact: 'generate_image · 刚刚 · 点击预览',
-      perm_title: '权限确认，三步闭环',
-      p1_h: 'Agent 发起请求', p1_p: '写入文件、执行命令等敏感操作触发确认卡，完整展示 diff 或命令。',
-      p2_h: '你做决定', p2_p: '批准或拒绝，一次一议；只读操作按策略自动放行，不打断心流。',
-      p3_h: '结果可追溯', p3_p: '每次工具调用与产出都有记录，Artifact 面板随时回看。',
-      stack_title: '自研 Rust Agent Runtime',
-      stack_desc: '工具系统、权限策略、事件协议、Artifact 全部自主实现——不是套壳，是从底座自建。',
-      stack_rust: '· Agent Runtime', stack_tauri: '· 桌面框架', stack_react: '· 前端',
-      stack_mcp: '· 扩展协议', stack_cme: '· 认知记忆', stack_llama: '· 本地模型',
-      cta_h: '现在就试试 Astra',
-      cta_p: '免费、开源、本地运行。下载安装包，几分钟内让 Agent 开始干活。',
-      cta_btn: '⬇ 下载最新版',
-      footer_note: 'Astra · 本地优先的 AI Agent 桌面应用 · MIT License',
-      toggle_label: 'EN'
+      doc_title: 'Astra — 装在你电脑上的 AI Agent',
+      doc_desc: 'Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。支持 MCP 和技能，可以开多个会话，也能回看产出的文件。',
+      og_desc: 'Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。',
+      og_alt: 'Astra，适用于 macOS、Windows 和 Linux',
+      nav_cap: '能做什么', nav_ui: '界面', nav_dl: '下载',
+      h1: '装在你电脑上的 AI Agent',
+      lede: '打开就能用。它可以读、改项目里的文件。写入和执行命令之前会先停下来，等你批准。记住的内容留在这台机器上。',
+      fact_os: 'macOS、Windows、Linux',
+      fact_mem: '记忆留在本机',
+      fact_perm: '写入和命令会等你批准',
+      cap_h: '用的时候会碰到这些',
+      cap_p: '这些是用的时候会直接看到的事。',
+      c1_h: '改文件', c1_p: '它可以读项目里的文件，也可以改。',
+      c2_h: '写入和命令会等你', c2_p: '写文件或跑命令之前，对话里会先出现确认。你看到内容，再决定批不批准。',
+      c3_h: '记忆留在这台机器上', c3_p: '它记住的东西存在本机。',
+      c4_h: '可以接 MCP，也可以用技能', c4_p: '外部工具用 MCP 接进来。常做的事可以做成技能。',
+      c5_h: '可以同时开好几个会话', c5_p: '标签上能留着多段对话。切走以后，原来那段还在。',
+      c6_h: '产出的文件可以再打开', c6_p: '它写出的文档和结果会留在列表里，之后还能查看。',
+      ui_h: '确认就在这段对话里',
+      ui_p: '要写文件或执行命令时，确认出现在回复下面。你能看到路径和改动，再点批准或拒绝。',
+      dl_h: '下载',
+      dl_p: '按钮按你的系统选安装包。版本和大小来自 GitHub 上最新的正式版。Windows 默认是较小的在线安装包，离线包单独列在下面。',
+      dl_primary: '下载',
+      dl_loading: '正在读取最新版本…',
+      dl_fail: '暂时读不到最新版本，按钮会打开 Releases 页面。',
+      dl_current: '当前版本 {version}',
+      dl_win_offline: 'Windows 离线安装包',
+      dl_all: '全部版本',
+      dl_yours: '你的系统',
+      dl_btn_mac: '下载 macOS 版',
+      dl_btn_win: '下载 Windows 版',
+      dl_btn_linux: '下载 Linux 版',
+      dl_btn_unknown: '查看最新版本',
+      arch_arm_mac: 'Apple 芯片',
+      arch_arm: 'arm64',
+      arch_x64: 'x64',
+      foot: 'Astra · MIT License',
+      toggle_label: 'EN',
+      og_locale: 'zh_CN',
+      ui_agent: 'Agent', ui_serve: 'Agent 服务', ui_ws: '工作空间', ui_ext: '扩展管理', ui_skill: '技能管理',
+      ui_account: '本地账户', ui_av: '本',
+      ui_tab1: '首页样式', ui_tab2: '笔记',
+      ui_user: '把首页标题的字重改成 600，跟设置页的区块标题对齐。',
+      ui_asst: '看过设置页了。那边的区块标题是 600，首页现在是 700。我改 Home.scss 里这一处。',
+      ui_allow: '批准', ui_deny: '拒绝',
+      ui_ph: '接着说，或用 @ 引用文件',
+      ui_model: '本地模型',
+      shot_hero: 'Astra 的会话窗口',
+      shot_ui: 'Astra 会话里的确认',
+      features: ['编辑文件', '写入和命令等待批准', '记忆留在本机', 'MCP 与技能', '多个会话', '回看产出的文件']
     },
     en: {
-      doc_title: 'Astra — Local-first AI Agent Desktop App',
-      doc_desc: 'Astra: hand your projects to an AI Agent with 23+ built-in tools, MCP extensions, skills and long-term memory. Runs locally with a strict permission boundary. Built on Tauri 2 + a custom Rust Agent Runtime.',
-      nav_features: 'Features', nav_demo: 'Demo', nav_stack: 'Tech Stack', nav_download: 'Download',
-      hero_badge: 'Free for macOS · Windows · Linux',
-      hero_title_1: 'Hand your projects to', hero_title_2: 'an AI Agent that gets things done',
-      hero_sub: 'Astra is a local-first desktop AI Agent: 23+ built-in tools, MCP extensions, a skill system and cognitive memory. Read and write files, run commands, generate images and documents — every step inside your permission boundary.',
-      hero_download: '⬇ Download Free', hero_github: '⭐ GitHub Repository',
-      hero_meta_1: '🔒 Local-first, encrypted memory',
-      hero_meta_2: '⚡ Tauri 2, ~10MB installer',
-      hero_meta_3: '🧩 MCP compatible',
-      feat_title: 'One Agent, Full-Cycle Work',
-      feat_desc: 'Not a chat toy — a working partner with a complete toolchain and permission system.',
-      f1_h: '23+ Built-in Tools',
-      f1_p: 'File editing <code>edit_file</code>, path search <code>find_path</code>, shell execution with background tasks, web fetching <code>fetch</code>, image generation, <code>build_docx</code> document output — all out of the box.',
-      f2_h: 'Controllable Permission Boundary',
-      f2_p: 'Read-only operations run automatically; writes and commands pop up a confirmation card with the full diff or command. Tool-level allow / deny lists — sensitive actions never run silently.',
-      f3_h: 'Cognitive Memory',
-      f3_p: 'Long-term memories are distilled after each conversation, stored in an encrypted SQLite database with the key kept on your machine. New sessions recall context automatically — the Agent remembers your preferences and project background.',
-      f4_h: 'MCP Extension Ecosystem',
-      f4_p: 'Compatible with Model Context Protocol. Just say "install the Playwright MCP for me" in the chat — the Agent downloads dependencies and writes the config, effective after a new session.',
-      f5_h: 'Artifact Management',
-      f5_p: 'Code, documents and images produced by the Agent are managed as cards, with Markdown rendering, syntax highlighting, image and video previews, and one-click open in your editor.',
-      f6_h: 'Local & Lightweight',
-      f6_p: 'Tauri 2 + system WebView — the installer is only ~10MB. Works with OpenAI-compatible APIs and local llama.cpp models. Your data never leaves your machine.',
-      demo_title: 'See How It Works',
-      demo_desc: 'Permission confirmation → tool execution → artifact management. Visible and controllable throughout.',
-      demo_window: 'Astra — Agent Session',
-      demo_user: 'Translate this repo\'s README into English and generate a promo image into docs/',
-      demo_tool_pending: 'edit_file · awaiting confirmation (write operation)',
-      demo_diff: '+42 −18',
-      demo_ai: 'Done: the English README is written and the promo image saved to <b>docs/promo.png</b>. Both changes were approved by you in the confirmation cards — review them anytime in the Artifact panel.',
-      demo_artifact: 'generate_image · just now · click to preview',
-      perm_title: 'Permission Confirmation in 3 Steps',
-      p1_h: 'Agent Requests', p1_p: 'Sensitive operations like file writes and commands trigger a confirmation card showing the full diff or command.',
-      p2_h: 'You Decide', p2_p: 'Approve or deny, one at a time; read-only operations pass automatically by policy, so your flow is never interrupted.',
-      p3_h: 'Everything Traceable', p3_p: 'Every tool call and artifact is recorded — review them anytime in the Artifact panel.',
-      stack_title: 'A Custom Rust Agent Runtime',
-      stack_desc: 'The tool system, permission policy, event protocol and artifacts are all implemented in-house — built from the ground up, not a wrapper.',
-      stack_rust: '· Agent Runtime', stack_tauri: '· Desktop Framework', stack_react: '· Frontend',
-      stack_mcp: '· Extension Protocol', stack_cme: '· Cognitive Memory', stack_llama: '· Local Models',
-      cta_h: 'Try Astra Today',
-      cta_p: 'Free, open source, runs locally. Download the installer and let the Agent get to work in minutes.',
-      cta_btn: '⬇ Download Latest',
-      footer_note: 'Astra · Local-first AI Agent Desktop App · MIT License',
-      toggle_label: '中文'
+      doc_title: 'Astra — an AI agent on your computer',
+      doc_desc: 'Astra runs on your computer. It can edit files. Writes and commands wait for your approval. Memory stays on the machine. MCP and skills are supported. You can keep several sessions open and review the files it produces.',
+      og_desc: 'Astra runs on your computer. It can edit files. Writes and commands wait for your approval. Memory stays on the machine.',
+      og_alt: 'Astra, for macOS, Windows, and Linux',
+      nav_cap: 'What it does', nav_ui: 'Interface', nav_dl: 'Download',
+      h1: 'An AI agent on your computer',
+      lede: 'Open it and use it. It can read and edit files in a project. It stops before writing or running a command, and waits for you to approve. What it remembers stays on this machine.',
+      fact_os: 'macOS, Windows, and Linux',
+      fact_mem: 'Memory stays on this machine',
+      fact_perm: 'Writes and commands wait for approval',
+      cap_h: 'What you run into',
+      cap_p: 'These are the things you actually see while using it.',
+      c1_h: 'Edit files', c1_p: 'It can read files in a project and change them.',
+      c2_h: 'Writes and commands wait', c2_p: 'Before it writes a file or runs a command, a confirmation shows up in the conversation. You see the change, then approve or refuse.',
+      c3_h: 'Memory stays on the machine', c3_p: 'What it keeps is stored on this computer.',
+      c4_h: 'MCP and skills', c4_p: 'External tools connect through MCP. Things you do often can be saved as skills.',
+      c5_h: 'Several sessions at once', c5_p: 'More than one conversation can stay open in tabs. Switching away leaves the others where they are.',
+      c6_h: 'Open the files it produced', c6_p: 'Documents and other results stay in a list you can open later.',
+      ui_h: 'The confirmation sits in the conversation',
+      ui_p: 'When it needs to write a file or run a command, the confirmation shows up under the reply. You see the path and the change, then approve or refuse.',
+      dl_h: 'Download',
+      dl_p: 'The button picks an installer for your system. Version and size come from the latest stable GitHub release. On Windows the default is the smaller online installer. The offline installer is listed separately.',
+      dl_primary: 'Download',
+      dl_loading: 'Reading the latest release…',
+      dl_fail: 'The latest release could not be read. The button opens the Releases page.',
+      dl_current: 'Current release {version}',
+      dl_win_offline: 'Windows offline installer',
+      dl_all: 'All releases',
+      dl_yours: 'Your system',
+      dl_btn_mac: 'Download for macOS',
+      dl_btn_win: 'Download for Windows',
+      dl_btn_linux: 'Download for Linux',
+      dl_btn_unknown: 'See the latest release',
+      arch_arm_mac: 'Apple Silicon',
+      arch_arm: 'arm64',
+      arch_x64: 'x64',
+      foot: 'Astra · MIT License',
+      toggle_label: '中文',
+      og_locale: 'en_US',
+      ui_agent: 'Agent', ui_serve: 'Agent service', ui_ws: 'Workspace', ui_ext: 'Extensions', ui_skill: 'Skills',
+      ui_account: 'Local account', ui_av: 'L',
+      ui_tab1: 'Home styles', ui_tab2: 'Notes',
+      ui_user: 'Set the home page title to weight 600, same as the section titles on the settings page.',
+      ui_asst: 'I checked the settings page. Those section titles are 600, and the home title is 700. I will change that one rule in Home.scss.',
+      ui_allow: 'Approve', ui_deny: 'Refuse',
+      ui_ph: 'Continue, or use @ to mention a file',
+      ui_model: 'Local model',
+      shot_hero: 'Astra session window',
+      shot_ui: 'Confirmation in an Astra session',
+      features: ['Edit files', 'Writes and commands wait for approval', 'Memory stays on the machine', 'MCP and skills', 'Several sessions', 'Review produced files']
     }
   };
 
-  var toggle = document.getElementById('langToggle');
+  var lang = 'zh';
+  var release = null;
+  var releaseFailed = false;
+  var platform = detectPlatform();
+  var arch = 'unknown';
 
-  function applyLang(lang) {
-    var dict = I18N[lang] || I18N.zh;
+  function detectPlatform() {
+    var ua = navigator.userAgent || '';
+    var plat = navigator.platform || '';
+    if (/Android/i.test(ua)) return 'unknown';
+    if (/Win/i.test(plat) || /Windows/i.test(ua)) return 'win';
+    if (/Mac/i.test(plat) || /Macintosh|Mac OS/i.test(ua)) return 'mac';
+    if (/Linux/i.test(plat) || /Linux/i.test(ua)) return 'linux';
+    return 'unknown';
+  }
+
+  function detectArch() {
+    var ua = navigator.userAgent || '';
+    if (/aarch64|arm64/i.test(ua)) return Promise.resolve('arm');
+    try {
+      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        return navigator.userAgentData.getHighEntropyValues(['architecture']).then(function (d) {
+          var a = (d && d.architecture) || '';
+          if (/arm/i.test(a)) return 'arm';
+          if (a) return 'x64';
+          return 'unknown';
+        }).catch(function () { return 'unknown'; });
+      }
+    } catch (e) {}
+    return Promise.resolve('unknown');
+  }
+
+  function dict() { return I18N[lang] || I18N.zh; }
+
+  function setMeta(selector, attr, value) {
+    var el = document.querySelector(selector);
+    if (el && value != null) el.setAttribute(attr, value);
+  }
+
+  function applyLang(next) {
+    lang = next === 'en' ? 'en' : 'zh';
+    var d = dict();
     document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN';
-    document.title = dict.doc_title;
-    var meta = document.querySelector('meta[name="description"]');
-    if (meta) meta.setAttribute('content', dict.doc_desc);
+    document.title = d.doc_title;
+    setMeta('meta[name="description"]', 'content', d.doc_desc);
+    setMeta('meta[property="og:title"]', 'content', d.doc_title);
+    setMeta('meta[property="og:description"]', 'content', d.og_desc);
+    setMeta('meta[property="og:image:alt"]', 'content', d.og_alt);
+    setMeta('meta[property="og:locale"]', 'content', d.og_locale);
+    setMeta('meta[name="twitter:title"]', 'content', d.doc_title);
+    setMeta('meta[name="twitter:description"]', 'content', d.og_desc);
+    setMeta('meta[name="twitter:image:alt"]', 'content', d.og_alt);
     document.querySelectorAll('[data-i18n]').forEach(function (el) {
       var key = el.getAttribute('data-i18n');
-      if (dict[key] != null) el.textContent = dict[key];
+      if (d[key] != null) el.textContent = d[key];
     });
-    document.querySelectorAll('[data-i18n-html]').forEach(function (el) {
-      var key = el.getAttribute('data-i18n-html');
-      if (dict[key] != null) el.innerHTML = dict[key];
+    document.querySelectorAll('[data-i18n-alt]').forEach(function (el) {
+      var key = el.getAttribute('data-i18n-alt');
+      if (d[key] != null) el.alt = d[key];
     });
-    toggle.textContent = dict.toggle_label;
+    var toggle = document.getElementById('langToggle');
+    if (toggle) {
+      toggle.textContent = d.toggle_label;
+      toggle.setAttribute('aria-label', lang === 'en' ? '切换到中文' : 'Switch to English');
+    }
+    writeJsonLd();
+    renderDownload();
     try { localStorage.setItem('astra-lang', lang); } catch (e) {}
   }
 
-  toggle.addEventListener('click', function () {
-    var current = document.documentElement.lang.indexOf('en') === 0 ? 'en' : 'zh';
-    applyLang(current === 'en' ? 'zh' : 'en');
+  function writeJsonLd() {
+    var el = document.getElementById('ldjson');
+    if (!el) return;
+    var d = dict();
+    var data;
+    try { data = JSON.parse(el.textContent); } catch (e) { data = {}; }
+    data['@context'] = 'https://schema.org';
+    data['@type'] = 'SoftwareApplication';
+    data.name = 'Astra';
+    data.applicationCategory = 'DeveloperApplication';
+    data.operatingSystem = 'macOS, Windows, Linux';
+    data.url = 'https://astra-praxis.github.io/astra/';
+    data.image = 'https://astra-praxis.github.io/astra/og-image.png';
+    data.downloadUrl = 'https://github.com/astra-praxis/astra/releases/latest';
+    data.description = d.doc_desc;
+    data.featureList = d.features;
+    data.offers = { '@type': 'Offer', price: '0', priceCurrency: 'USD' };
+    if (release && release.tag_name) data.softwareVersion = String(release.tag_name).replace(/^v/, '');
+    else delete data.softwareVersion;
+    el.textContent = JSON.stringify(data);
+  }
+
+  function kindOf(name) {
+    var n = String(name || '');
+    var lower = n.toLowerCase();
+    if (lower.endsWith('.dmg')) return 'mac';
+    if (lower.endsWith('.exe') || lower.endsWith('.msi')) {
+      if (lower.indexOf('offline') !== -1) return 'win-offline';
+      if (lower.indexOf('setup') !== -1) return 'win';
+      return 'win-other';
+    }
+    if (lower.endsWith('.deb')) return 'linux-deb';
+    if (lower.endsWith('.appimage')) return 'linux-appimage';
+    if (lower.endsWith('.rpm')) return 'linux-other';
+    return null;
+  }
+
+  function formatMB(bytes) {
+    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes <= 0) return '';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  function archOf(name) {
+    if (/aarch64|arm64/i.test(name)) return 'arm';
+    if (/x64|amd64|x86_64/i.test(name)) return 'x64';
+    return '';
+  }
+
+  function archText(name, kind) {
+    var a = archOf(name);
+    var d = dict();
+    if (a === 'arm') return kind === 'mac' ? d.arch_arm_mac : d.arch_arm;
+    if (a === 'x64') return d.arch_x64;
+    return '';
+  }
+
+  function assetLabel(asset) {
+    var d = dict();
+    var base = {
+      mac: 'macOS',
+      win: 'Windows',
+      'win-other': 'Windows',
+      'win-offline': d.dl_win_offline,
+      'linux-deb': 'Linux (.deb)',
+      'linux-appimage': 'Linux (AppImage)',
+      'linux-other': 'Linux'
+    }[asset.kind] || asset.name;
+    var archLabel = archText(asset.name, asset.kind);
+    return archLabel ? base + ' · ' + archLabel : base;
+  }
+
+  function prefer(list, wantArch) {
+    if (!list.length) return null;
+    if (wantArch === 'arm' || wantArch === 'x64') {
+      var hit = list.filter(function (a) { return archOf(a.name) === wantArch; });
+      if (hit.length) return hit[0];
+    }
+    return list[0];
+  }
+
+  function chosenAsset(assets) {
+    function ofKind(kind) {
+      return assets.filter(function (a) { return a.kind === kind; });
+    }
+    if (platform === 'mac') return prefer(ofKind('mac'), arch);
+    if (platform === 'win') {
+      var online = ofKind('win');
+      if (online.length) return prefer(online, arch === 'arm' ? 'arm' : 'x64');
+      var other = ofKind('win-other');
+      if (other.length) return prefer(other, arch === 'arm' ? 'arm' : 'x64');
+      return null;
+    }
+    if (platform === 'linux') {
+      var deb = ofKind('linux-deb');
+      if (deb.length) return prefer(deb, arch);
+      var image = ofKind('linux-appimage');
+      if (image.length) return prefer(image, arch);
+      var rpm = ofKind('linux-other');
+      if (rpm.length) return prefer(rpm, arch);
+    }
+    return null;
+  }
+
+  function buttonLabel(asset) {
+    var d = dict();
+    var text = d.dl_btn_unknown;
+    if (asset) {
+      if (asset.kind === 'mac') text = d.dl_btn_mac;
+      else if (asset.kind === 'win' || asset.kind === 'win-other') text = d.dl_btn_win;
+      else if (asset.kind.indexOf('linux') === 0) text = d.dl_btn_linux;
+      var size = formatMB(asset.size);
+      if (size) text += ' · ' + size;
+    }
+    return text;
+  }
+
+  function versionText(rel) {
+    if (!rel) return '';
+    if (rel.tag_name) return String(rel.tag_name).replace(/^v/, '');
+    if (rel.name) return String(rel.name).replace(/^Astra\s+/i, '');
+    return '';
+  }
+
+  function renderDownload() {
+    var d = dict();
+    var status = document.getElementById('dlStatus');
+    var list = document.getElementById('dlList');
+    var assets = [];
+    if (release && release.assets) {
+      release.assets.forEach(function (raw) {
+        var kind = kindOf(raw.name);
+        if (!kind) return;
+        assets.push({ name: raw.name, kind: kind, size: raw.size, url: raw.browser_download_url });
+      });
+      assets.sort(function (a, b) {
+        var ao = KIND_ORDER.indexOf(a.kind);
+        var bo = KIND_ORDER.indexOf(b.kind);
+        if (ao !== bo) return ao - bo;
+        return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+      });
+    }
+    var picked = assets.length ? chosenAsset(assets) : null;
+    var href = picked && picked.url ? picked.url : RELEASES;
+    document.querySelectorAll('.js-dl').forEach(function (a) { a.href = href; });
+    document.querySelectorAll('.js-dl-label').forEach(function (el) {
+      el.textContent = assets.length || releaseFailed ? buttonLabel(picked) : d.dl_primary;
+    });
+    if (status) {
+      if (release) status.textContent = d.dl_current.replace('{version}', versionText(release));
+      else if (releaseFailed) status.textContent = d.dl_fail;
+      else status.textContent = d.dl_loading;
+    }
+    if (!list || !assets.length) {
+      markFallback(list, picked);
+      return;
+    }
+    list.textContent = '';
+    assets.forEach(function (asset) {
+      var li = document.createElement('li');
+      li.setAttribute('data-kind', asset.kind);
+      if (asset.kind === 'win-offline') li.className = 'is-offline';
+      var yours = picked && asset.url === picked.url;
+      if (yours) li.classList.add('is-yours');
+      var a = document.createElement('a');
+      a.href = asset.url;
+      a.rel = 'noopener';
+      var name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = assetLabel(asset);
+      a.appendChild(name);
+      if (yours) {
+        var tag = document.createElement('span');
+        tag.className = 'yours';
+        tag.textContent = d.dl_yours;
+        a.appendChild(tag);
+      }
+      var size = formatMB(asset.size);
+      if (size) {
+        var meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = size;
+        a.appendChild(meta);
+      }
+      li.appendChild(a);
+      list.appendChild(li);
+    });
+  }
+
+  function markFallback(list) {
+    if (!list || (release && release.assets && release.assets.length)) return;
+    var want = platform === 'mac' ? 'mac' : platform === 'win' ? 'win' : platform === 'linux' ? 'linux-deb' : '';
+    var d = dict();
+    list.querySelectorAll('li').forEach(function (li) {
+      var on = want && li.getAttribute('data-kind') === want;
+      li.classList.toggle('is-yours', !!on);
+      var link = li.querySelector('a');
+      if (!link) return;
+      var old = link.querySelector('.yours');
+      if (old) old.remove();
+      if (on) {
+        var tag = document.createElement('span');
+        tag.className = 'yours';
+        tag.textContent = d.dl_yours;
+        var name = link.querySelector('.name');
+        if (name && name.nextSibling) link.insertBefore(tag, name.nextSibling);
+        else link.appendChild(tag);
+      }
+    });
+  }
+
+  function applyShots() {
+    Object.keys(PRODUCT_IMAGES).forEach(function (key) {
+      var path = PRODUCT_IMAGES[key];
+      if (!path) return;
+      var slot = document.querySelector('[data-shot="' + key + '"]');
+      if (!slot) return;
+      var img = slot.querySelector('img.shot');
+      var mock = slot.querySelector('.mock');
+      if (!img) return;
+      img.addEventListener('error', function () {
+        img.hidden = true;
+        if (mock) mock.hidden = false;
+      });
+      img.src = path;
+      img.hidden = false;
+      if (mock) mock.hidden = true;
+    });
+  }
+
+  document.getElementById('langToggle').addEventListener('click', function () {
+    applyLang(lang === 'en' ? 'zh' : 'en');
   });
 
-  // 首次访问按浏览器语言；之后按 localStorage 记忆的选择
+  applyShots();
+
   var saved = null;
   try { saved = localStorage.getItem('astra-lang'); } catch (e) {}
-  if (saved === 'en' || saved === 'zh') {
-    applyLang(saved);
-  } else if (navigator.language && navigator.language.indexOf('zh') !== 0) {
-    applyLang('en');
-  }
+  if (saved === 'en' || saved === 'zh') applyLang(saved);
+  else if (navigator.language && navigator.language.toLowerCase().indexOf('zh') !== 0) applyLang('en');
+  else applyLang('zh');
+
+  var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
+  Promise.all([
+    fetch(RELEASES_API, {
+      headers: { Accept: 'application/vnd.github+json' },
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (res) {
+      if (!res.ok) throw new Error(String(res.status));
+      return res.json();
+    }).then(function (data) {
+      if (!data || data.draft || data.prerelease) throw new Error('skip');
+      return data;
+    }).catch(function () { return null; }),
+    detectArch()
+  ]).then(function (pair) {
+    clearTimeout(timer);
+    arch = pair[1] || 'unknown';
+    if (pair[0]) release = pair[0];
+    else releaseFailed = true;
+    writeJsonLd();
+    renderDownload();
+  });
 })();
 </script>
-
 </body>
 </html>

@@ -18,7 +18,7 @@
 <meta name="keywords" content="Astra, AI Agent, 桌面, macOS, Windows, Linux, MCP" />
 <meta name="author" content="Astra Contributors" />
 <meta name="robots" content="index, follow" />
-<meta name="theme-color" content="#f3f4f8" />
+<meta name="theme-color" content="#090a0d" />
 <link rel="canonical" href="https://astra-praxis.github.io/astra/" />
 <link rel="icon" type="image/png" href="icon.png" />
 <link rel="apple-touch-icon" href="icon.png" />
@@ -59,22 +59,25 @@
 </script>
 <style>
   :root {
-    --bg: #f3f4f8;
-    --surface: #ffffff;
-    --ink: #1c2233;
-    --secondary: #4f5a75;
-    --muted: #8891a8;
-    --line: #e2e6f0;
-    --divider: #eef0f6;
-    --brand: #6366f1;
-    --brand-dark: #4338ca;
-    --brand-soft: #f4f4fe;
-    --brand-line: #d0d1fb;
-    --sidebar: #0d1120;
-    --side-text: #8b93ad;
-    --side-strong: #dfe3f0;
-    --user: #0d1120;
-    --user-text: #dfe3f0;
+    color-scheme: dark;
+    --bg: #090a0d;
+    --window: #101218;
+    --surface: #161920;
+    --ink: #eceef3;
+    --secondary: #a8afbd;
+    --muted: #7d8594;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --divider: rgba(255, 255, 255, 0.06);
+    --brand: #6a70c8;
+    --brand-dark: #d5d8f2;
+    --brand-soft: rgba(255, 255, 255, 0.05);
+    --brand-line: rgba(255, 255, 255, 0.12);
+    --sidebar: #07080b;
+    --side-text: #8e96a8;
+    --side-strong: #e6e8ee;
+    --user: #1b2030;
+    --user-text: #e7e9f0;
     --font: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
@@ -91,13 +94,13 @@
   }
   a { color: inherit; }
   button { font-family: inherit; }
-  ::selection { background: #d0d1fb; }
+  ::selection { background: rgba(255, 255, 255, 0.16); }
   :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
   .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
 
   .bar {
     position: sticky; top: 0; z-index: 5;
-    background: rgba(255,255,255,.94);
+    background: rgba(9, 10, 13, 0.86);
     border-bottom: 1px solid var(--divider);
   }
   .bar-inner {
@@ -113,8 +116,8 @@
     height: 32px; padding: 0 12px; border-radius: 8px;
     display: inline-flex; align-items: center; box-sizing: border-box;
   }
-  .nav a.go { color: #fff; background: var(--brand); font-weight: 600; }
-  .nav a.go:hover { background: #4f46e5; color: #fff; }
+  .nav a.go { color: #111318; background: var(--ink); font-weight: 600; }
+  .nav a.go:hover { background: #fff; color: #111318; }
   .lang {
     border: 1px solid var(--line); background: var(--surface); color: var(--secondary);
     font-size: 13px; font-weight: 600; cursor: pointer;
@@ -130,9 +133,10 @@
     text-decoration: none; font-size: 14px; font-weight: 600;
     border-radius: 10px; border: 1px solid transparent;
   }
-  .btn-primary { background: var(--brand); color: #fff; }
-  .btn-primary:hover { background: #4f46e5; }
-  .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+  .btn-primary { background: var(--ink); color: #111318; }
+  .btn-primary:hover { background: #fff; }
+  .btn-ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+  .btn-ghost:hover { background: rgba(255, 255, 255, 0.04); }
 
   section { padding: 48px 0 0; }
   h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: -0.015em; }
@@ -146,11 +150,11 @@
   /* App window — sizes and colors follow the desktop app. */
   .win {
     display: flex; flex-direction: column;
-    background: var(--bg);
-    border: 1px solid rgba(28, 34, 51, 0.08);
+    background: var(--window);
+    border: 1px solid var(--line);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 1px 2px rgba(15, 20, 40, 0.04), 0 18px 44px rgba(15, 20, 40, 0.10);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 60px rgba(0, 0, 0, 0.45);
     text-align: left;
     color: var(--ink);
   }
@@ -182,7 +186,7 @@
     display: flex; align-items: center; gap: 10px;
     padding: 10px 12px; border-radius: 10px; font-size: 14px; font-weight: 500;
   }
-  .side nav span.item.on { background: var(--brand); color: #fff; }
+  .side nav span.item.on { background: #2a3148; color: var(--side-strong); }
   .side svg { width: 18px; height: 18px; flex: 0 0 18px; }
   .side-f {
     margin-top: auto; display: flex; align-items: center; gap: 9px;
@@ -191,9 +195,9 @@
   }
   .av {
     width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; font-size: 12px; font-weight: 600; flex-shrink: 0;
+    background: #2c3344; color: var(--side-strong); font-size: 12px; font-weight: 600; flex-shrink: 0;
   }
-  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--window); }
   .tabs {
     display: flex; align-items: flex-end; gap: 2px;
     padding: 8px 12px 0; border-bottom: 1px solid var(--line);
@@ -201,12 +205,12 @@
   .tab {
     display: flex; align-items: center; gap: 6px; max-width: 200px; min-width: 0;
     padding: 6px 8px 7px 10px; font-size: 12px; line-height: 1.3; color: var(--secondary);
-    background: #f6f7fb; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+    background: rgba(255, 255, 255, 0.03); border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
   }
   .tab.on {
     position: relative; z-index: 1; margin-bottom: -1px;
-    background: var(--bg); color: var(--ink); font-weight: 600;
-    border-color: var(--line); border-bottom: 1px solid var(--bg);
+    background: var(--window); color: var(--ink); font-weight: 600;
+    border-color: var(--line); border-bottom: 1px solid var(--window);
   }
   .tab svg { width: 12px; height: 12px; flex-shrink: 0; }
   .tab .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -220,7 +224,7 @@
     margin: 14px 0 2px; padding: 10px 16px; border-radius: 10px;
     background: var(--user); color: var(--user-text);
     border: 1px solid rgba(255,255,255,.08);
-    box-shadow: inset 0 1px 4px rgba(0,0,0,.28);
+    box-shadow: none;
     font-size: 13.5px; line-height: 1.6; white-space: pre-wrap;
   }
   .asst { font-size: 14px; line-height: 1.7; color: var(--ink); padding: 8px 2px 10px; }
@@ -235,17 +239,32 @@
     font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--secondary); white-space: pre-wrap;
   }
   .acts { display: flex; gap: 8px; margin: 10px 0 2px 20px; }
-  .ok, .no {
+  .ok, .no, .reset {
+    font-family: inherit; cursor: pointer;
     display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
   }
-  .ok { background: var(--ink); color: var(--surface); }
-  .no { color: var(--secondary); border: 1px solid var(--line); }
-  .ok svg, .no svg { width: 13px; height: 13px; }
+  .ok, .no {
+    padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  }
+  .ok { background: var(--ink); color: #12141a; border: 1px solid var(--ink); }
+  .ok:hover { background: #fff; }
+  .no { color: var(--secondary); background: transparent; border: 1px solid var(--line-strong); }
+  .no:hover { color: var(--ink); border-color: var(--ink); }
+  .ok svg, .no svg { width: 13px; height: 13px; pointer-events: none; }
+  .decided { display: flex; align-items: center; gap: 12px; margin: 8px 0 2px 20px; font-size: 12px; font-weight: 600; color: var(--ink); }
+  .tool.is-denied .decided { color: var(--muted); }
+  .tool.is-allowed, .tool.is-denied { opacity: 1; }
+  .tool.is-denied { opacity: 0.72; }
+  .reset-row { margin: 10px 2px 0; }
+  .reset {
+    padding: 0; border: none; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px;
+  }
+  .reset:hover { color: var(--ink); }
+  .reset[hidden], .decided[hidden], .acts[hidden] { display: none !important; }
   .dock {
     margin: 8px 16px 16px; padding: 12px 14px 8px 16px;
-    background: var(--surface); border: 1.5px solid var(--line); border-radius: 18px;
-    box-shadow: 0 4px 24px rgba(15, 20, 40, 0.06);
+    background: #141820; border: 1px solid var(--line-strong); border-radius: 18px;
+    box-shadow: none;
   }
   .dock .ph { min-height: 28px; padding-top: 2px; font-size: 14.5px; line-height: 1.5; color: var(--muted); }
   .dock-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -264,7 +283,7 @@
     color: var(--secondary); font-size: 12px; white-space: nowrap;
   }
   .send {
-    width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: #fff;
+    width: 34px; height: 34px; border-radius: 10px; background: #3d4460; color: var(--ink);
     display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
   .send svg { width: 16px; height: 16px; }
@@ -289,9 +308,9 @@
   .dl-list .meta { margin-left: auto; color: var(--secondary); font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
   .dl-list .yours {
     flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--brand-dark);
-    background: #fff; border-radius: 999px; padding: 2px 8px;
+    background: transparent; border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 8px;
   }
-  .dl-list li.is-yours { background: var(--brand-soft); }
+  .dl-list li.is-yours { background: rgba(255, 255, 255, 0.035); box-shadow: inset 2px 0 0 var(--ink); }
   .dl-list li.is-offline .name { font-weight: 500; color: var(--secondary); }
   .more { margin: 12px 0 0; font-size: 13px; }
   .more a { color: var(--secondary); }
@@ -363,7 +382,7 @@
     <figure class="frame" data-shot="heroWindow">
       <img class="shot" alt="" hidden data-i18n-alt="shot_hero" />
       <div class="mock">
-        <div class="win" aria-hidden="true">
+        <div class="win">
           <div class="tb">
             <div class="lights"><i></i><i></i><i></i></div>
             <b><img src="icon.png" alt="" width="16" height="16" />ASTRA</b>
@@ -383,7 +402,7 @@
             </aside>
             <div class="col">
               <div class="tabs">
-                <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><svg class="x"><use href="#i-x"/></svg></div>
+                <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot" data-wait></i><svg class="x"><use href="#i-x"/></svg></div>
                 <div class="tab"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab2">整理今天的会议记录</span></div>
                 <div class="tab-add"><svg><use href="#i-plus"/></svg></div>
               </div>
@@ -394,16 +413,17 @@
                   <div class="tool-h"><svg><use href="#i-check"/></svg><svg><use href="#i-file"/></svg><code>read_file</code><span class="arg">README.md</span></div>
                   <pre data-i18n="ui_read">README.md · 86 行</pre>
                 </div>
-                <div class="tool is-perm">
+                <div class="tool is-perm" data-perm>
                   <div class="tool-h"><svg><use href="#i-alert"/></svg><svg><use href="#i-file"/></svg><code>edit_file</code><span class="arg">README.md</span></div>
                   <pre><span data-i18n="diff_old">- 选择对应平台安装包下载安装。</span>
 <span data-i18n="diff_1">+ - macOS：aarch64.dmg</span>
 <span data-i18n="diff_2">+ - Windows：x64-setup.exe</span>
 <span data-i18n="diff_3">+ - Linux：amd64.deb 或 AppImage</span></pre>
-                  <div class="acts">
-                    <span class="ok"><svg><use href="#i-tick"/></svg><span data-i18n="ui_allow">批准</span></span>
-                    <span class="no"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
+                  <div class="acts" data-acts>
+                    <button type="button" class="ok" data-act="allow"><svg><use href="#i-tick"/></svg><span data-i18n="ui_allow">批准</span></button>
+                    <button type="button" class="no" data-act="deny"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></button>
                   </div>
+                  <p class="decided" data-state hidden><span data-state-label></span><button type="button" class="reset" data-reset data-i18n="ui_reset">重置</button></p>
                 </div>
               </div>
               <div class="dock">
@@ -429,12 +449,12 @@
   </div>
 
   <section class="wrap sec" id="session">
-    <h2 data-i18n="ui_h">写入还停在批准上</h2>
-    <p data-i18n="ui_p">read_file 已经读完 README.md。edit_file 还没写进去。diff 和「批准 / 拒绝」在同一条下面。</p>
+    <h2 id="permTitle" data-i18n="ui_h">写入还停在批准上</h2>
+    <p id="permLead" data-i18n="ui_p">read_file 已经读完 README.md。edit_file 还没写进去。diff 和「批准 / 拒绝」在同一条下面。</p>
     <figure class="frame" data-shot="workingUi">
       <img class="shot" alt="" hidden data-i18n-alt="shot_ui" />
       <div class="mock">
-        <div class="win" aria-hidden="true">
+        <div class="win">
           <div class="tb">
             <div class="lights"><i></i><i></i><i></i></div>
             <b><img src="icon.png" alt="" width="16" height="16" />ASTRA</b>
@@ -442,7 +462,7 @@
           </div>
           <div class="col">
             <div class="tabs">
-              <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><svg class="x"><use href="#i-x"/></svg></div>
+              <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot" data-wait></i><svg class="x"><use href="#i-x"/></svg></div>
               <div class="tab"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab2">整理今天的会议记录</span></div>
               <div class="tab-add"><svg><use href="#i-plus"/></svg></div>
             </div>
@@ -453,16 +473,17 @@
                 <div class="tool-h"><svg><use href="#i-check"/></svg><svg><use href="#i-file"/></svg><code>read_file</code><span class="arg">README.md</span></div>
                 <pre data-i18n="ui_read">README.md · 86 行</pre>
               </div>
-              <div class="tool is-perm">
+              <div class="tool is-perm" data-perm>
                 <div class="tool-h"><svg><use href="#i-alert"/></svg><svg><use href="#i-file"/></svg><code>edit_file</code><span class="arg">README.md</span></div>
                 <pre><span data-i18n="diff_old">- 选择对应平台安装包下载安装。</span>
 <span data-i18n="diff_1">+ - macOS：aarch64.dmg</span>
 <span data-i18n="diff_2">+ - Windows：x64-setup.exe</span>
 <span data-i18n="diff_3">+ - Linux：amd64.deb 或 AppImage</span></pre>
-                <div class="acts">
-                  <span class="ok"><svg><use href="#i-tick"/></svg><span data-i18n="ui_allow">批准</span></span>
-                  <span class="no"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
+                <div class="acts" data-acts>
+                  <button type="button" class="ok" data-act="allow"><svg><use href="#i-tick"/></svg><span data-i18n="ui_allow">批准</span></button>
+                  <button type="button" class="no" data-act="deny"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></button>
                 </div>
+                <p class="decided" data-state hidden><span data-state-label></span><button type="button" class="reset" data-reset data-i18n="ui_reset">重置</button></p>
               </div>
             </div>
             <div class="dock">
@@ -482,7 +503,7 @@
           </div>
         </div>
       </div>
-      <figcaption data-i18n="cap_ui">同一段会话，把确认那一块摊开。</figcaption>
+      <figcaption data-i18n="cap_ui">同一段会话。批准或拒绝可以点，点过之后能重置。</figcaption>
     </figure>
     <dl class="points">
       <div><dt data-i18n="p1_h">改文件</dt><dd data-i18n="p1_p">要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。</dd></div>
@@ -540,7 +561,11 @@
       lede: '它可以改项目里的文件。写入和执行命令会停在会话里，等你点批准或拒绝。记住的内容留在这台机器上。macOS、Windows、Linux 都能装。',
       cap_hero: '打开之后就是这个窗口。左边是侧栏，上面两个标签是两段会话。',
       ui_h: '写入还停在批准上',
+      ui_h_ok: '这次已经批准',
+      ui_h_no: '这次已经拒绝',
       ui_p: 'read_file 已经读完 README.md。edit_file 还没写进去。diff 和「批准 / 拒绝」在同一条下面。',
+      ui_p_ok: '状态变成了「已批准」。点重置可以回到等待。',
+      ui_p_no: '状态变成了「已拒绝」，文件不会被改。点重置可以回到等待。',
       cap_ui: '同一段会话，把确认那一块摊开。',
       p1_h: '改文件', p1_p: '要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。',
       p2_h: '几个会话', p2_p: '标签可以同时开着。红点表示这一段还在等你处理。切走之后，原来那段还在。',
@@ -566,7 +591,7 @@
       diff_1: '+ - macOS：aarch64.dmg',
       diff_2: '+ - Windows：x64-setup.exe',
       diff_3: '+ - Linux：amd64.deb 或 AppImage',
-      ui_allow: '批准', ui_deny: '拒绝',
+      ui_allow: '批准', ui_deny: '拒绝', ui_allowed: '已批准', ui_denied: '已拒绝', ui_reset: '重置',
       ui_ph: '描述任务，@ 引用文件，/ 调用技能',
       ui_model: '本机',
       shot_hero: 'Astra 的会话窗口，侧栏和两个会话标签',
@@ -583,7 +608,11 @@
       lede: 'It can edit files in a project. Writes and commands stop in the session until you approve or refuse them. What it remembers stays on this machine. It runs on macOS, Windows, and Linux.',
       cap_hero: 'This is the window after you open it. The sidebar is on the left. The two tabs are two sessions.',
       ui_h: 'The write is still waiting',
+      ui_h_ok: 'Approved',
+      ui_h_no: 'Refused',
       ui_p: 'read_file has already read README.md. edit_file has not written it. The diff and Approve / Refuse sit on that same row.',
+      ui_p_ok: 'The status is now Approved. Reset returns it to waiting.',
+      ui_p_no: 'The status is now Refused, so the file stays as it is. Reset returns it to waiting.',
       cap_ui: 'The same session, with the confirmation in view.',
       p1_h: 'Edit files', p1_p: 'The path and the before/after text are in the conversation. It writes only after you approve. Refuse stops it.',
       p2_h: 'Several sessions', p2_p: 'Tabs can stay open together. The red dot means this one is still waiting on you. Switching away leaves the other one where it is.',
@@ -609,7 +638,7 @@
       diff_1: '+ - macOS: aarch64.dmg',
       diff_2: '+ - Windows: x64-setup.exe',
       diff_3: '+ - Linux: amd64.deb or AppImage',
-      ui_allow: 'Approve', ui_deny: 'Refuse',
+      ui_allow: 'Approve', ui_deny: 'Refuse', ui_allowed: 'Approved', ui_denied: 'Refused', ui_reset: 'Reset',
       ui_ph: 'Describe a task, @ a file, / a skill',
       ui_model: 'This machine',
       shot_hero: 'Astra session window with the sidebar and two session tabs',
@@ -673,6 +702,7 @@
     toggle.setAttribute('aria-label', lang === 'en' ? '切换到中文' : 'Switch to English');
     writeJsonLd();
     renderDownload();
+    paintPerm();
     try { localStorage.setItem('astra-lang', lang); } catch (e) {}
   }
   function writeJsonLd() {
@@ -860,6 +890,31 @@
       img.src = path; img.hidden = false; if (mock) mock.hidden = true;
     });
   }
+  var perm = 'pending';
+  function paintPerm() {
+    var d = dict();
+    document.querySelectorAll('[data-perm]').forEach(function (card) {
+      card.classList.toggle('is-allowed', perm === 'allowed');
+      card.classList.toggle('is-denied', perm === 'denied');
+      var acts = card.querySelector('[data-acts]');
+      var state = card.querySelector('[data-state]');
+      if (acts) acts.hidden = perm !== 'pending';
+      if (state) state.hidden = perm === 'pending';
+      var label = card.querySelector('[data-state-label]');
+      if (label) label.textContent = perm === 'allowed' ? d.ui_allowed : perm === 'denied' ? d.ui_denied : '';
+    });
+    document.querySelectorAll('[data-wait]').forEach(function (dot) { dot.hidden = perm !== 'pending'; });
+    var title = document.getElementById('permTitle');
+    var lead = document.getElementById('permLead');
+    if (title) title.textContent = perm === 'allowed' ? d.ui_h_ok : perm === 'denied' ? d.ui_h_no : d.ui_h;
+    if (lead) lead.textContent = perm === 'allowed' ? d.ui_p_ok : perm === 'denied' ? d.ui_p_no : d.ui_p;
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act], [data-reset]');
+    if (!t) return;
+    perm = t.hasAttribute('data-reset') ? 'pending' : (t.getAttribute('data-act') === 'allow' ? 'allowed' : 'denied');
+    paintPerm();
+  });
   document.getElementById('langToggle').addEventListener('click', function () { applyLang(lang === 'en' ? 'zh' : 'en'); });
   applyShots();
   var saved = null;

@@ -6,15 +6,15 @@
 <!--
   Replaceable images
   ------------------
-  icon.png       Official A logo. Nav, product mock, favicon.
+  icon.png       Official A logo.
   og-image.png   Social card, 1200×630.
 
-  PRODUCT_IMAGES is the first thing in the script at the bottom of this file.
+  PRODUCT_IMAGES is the first assignment in the script at the bottom.
   Set heroWindow or workingUi to a screenshot path to replace that HTML mock.
-  Leave the string empty to keep the mock.
+  Leave the string empty to keep the mock. A broken path falls back to the mock.
 -->
-<title>Astra — 装在你电脑上的 AI Agent</title>
-<meta name="description" content="Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。支持 MCP 和技能，可以开多个会话，也能回看产出的文件。" />
+<title>Astra — 装在你电脑上的桌面程序</title>
+<meta name="description" content="Astra 装在你自己的电脑上。它可以改文件。写入和执行命令会停在会话里，等你点批准或拒绝。记忆留在这台机器上。支持 MCP 和技能，可以同时开几个会话。" />
 <meta name="keywords" content="Astra, AI Agent, 桌面, macOS, Windows, Linux, MCP" />
 <meta name="author" content="Astra Contributors" />
 <meta name="robots" content="index, follow" />
@@ -25,22 +25,22 @@
 
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Astra" />
-<meta property="og:title" content="Astra — 装在你电脑上的 AI Agent" />
-<meta property="og:description" content="Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。" />
+<meta property="og:title" content="Astra — 装在你电脑上的桌面程序" />
+<meta property="og:description" content="它可以改文件。写入和执行命令会停在会话里，等你点批准或拒绝。记忆留在这台机器上。" />
 <meta property="og:url" content="https://astra-praxis.github.io/astra/" />
 <meta property="og:image" content="https://astra-praxis.github.io/astra/og-image.png" />
 <meta property="og:image:type" content="image/png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="Astra，适用于 macOS、Windows 和 Linux" />
+<meta property="og:image:alt" content="Astra 的会话窗口，适用于 macOS、Windows 和 Linux" />
 <meta property="og:locale" content="zh_CN" />
 <meta property="og:locale:alternate" content="en_US" />
 
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Astra — 装在你电脑上的 AI Agent" />
-<meta name="twitter:description" content="Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。" />
+<meta name="twitter:title" content="Astra — 装在你电脑上的桌面程序" />
+<meta name="twitter:description" content="它可以改文件。写入和执行命令会停在会话里，等你点批准或拒绝。记忆留在这台机器上。" />
 <meta name="twitter:image" content="https://astra-praxis.github.io/astra/og-image.png" />
-<meta name="twitter:image:alt" content="Astra，适用于 macOS、Windows 和 Linux" />
+<meta name="twitter:image:alt" content="Astra 的会话窗口，适用于 macOS、Windows 和 Linux" />
 
 <script type="application/ld+json" id="ldjson">
 {
@@ -52,16 +52,9 @@
   "url": "https://astra-praxis.github.io/astra/",
   "image": "https://astra-praxis.github.io/astra/og-image.png",
   "downloadUrl": "https://github.com/astra-praxis/astra/releases/latest",
-  "description": "Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。支持 MCP 和技能，可以开多个会话，也能回看产出的文件。",
+  "description": "Astra 装在你自己的电脑上。它可以改文件。写入和执行命令会停在会话里，等你点批准或拒绝。记忆留在这台机器上。",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "featureList": [
-    "编辑文件",
-    "写入和命令等待批准",
-    "记忆留在本机",
-    "MCP 与技能",
-    "多个会话",
-    "回看产出的文件"
-  ]
+  "featureList": ["编辑文件", "写入和命令等待批准", "记忆留在本机", "MCP 与技能", "多个会话", "回看产出的文件"]
 }
 </script>
 <style>
@@ -72,18 +65,16 @@
     --secondary: #4f5a75;
     --muted: #8891a8;
     --line: #e2e6f0;
-    --line-strong: #c8cede;
     --divider: #eef0f6;
     --brand: #6366f1;
     --brand-dark: #4338ca;
     --brand-soft: #f4f4fe;
     --brand-line: #d0d1fb;
     --sidebar: #0d1120;
-    --sidebar-text: #8b93ad;
-    --sidebar-text-strong: #dfe3f0;
+    --side-text: #8b93ad;
+    --side-strong: #dfe3f0;
     --user: #0d1120;
     --user-text: #dfe3f0;
-    --shadow: 0 24px 48px rgba(15, 20, 40, 0.12);
     --font: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
@@ -94,472 +85,211 @@
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font);
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 14px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  img { max-width: 100%; }
   a { color: inherit; }
-  button, input { font-family: inherit; }
+  button { font-family: inherit; }
   ::selection { background: #d0d1fb; }
   :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
 
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-
-  .site-nav {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    background: rgba(255, 255, 255, 0.92);
+  .bar {
+    position: sticky; top: 0; z-index: 5;
+    background: rgba(255,255,255,.94);
     border-bottom: 1px solid var(--divider);
-    backdrop-filter: blur(10px);
   }
-  .nav-inner {
-    max-width: 1120px;
-    margin: 0 auto;
-    padding: 12px 24px;
-    display: flex;
-    align-items: center;
-    gap: 22px;
+  .bar-inner {
+    max-width: 1040px; margin: 0 auto; padding: 10px 24px;
+    display: flex; align-items: center; gap: 18px;
   }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 700;
-    font-size: 16px;
-    text-decoration: none;
-    color: var(--ink);
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; text-decoration: none; }
+  .brand img { width: 24px; height: 24px; border-radius: 6px; display: block; }
+  .nav { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+  .nav a { color: var(--secondary); text-decoration: none; font-size: 14px; font-weight: 500; }
+  .nav a:hover { color: var(--ink); }
+  .nav a.go {
+    color: #fff; background: var(--brand); border-radius: 8px; padding: 6px 12px; font-weight: 600;
   }
-  .brand img { width: 28px; height: 28px; border-radius: 7px; display: block; }
-  .nav-links { margin-left: auto; display: flex; align-items: center; gap: 18px; }
-  .nav-links a {
-    color: var(--secondary);
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 500;
+  .nav a.go:hover { background: #4f46e5; color: #fff; }
+  .lang {
+    padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--secondary); font-size: 13px; font-weight: 600; cursor: pointer;
   }
-  .nav-links a:hover { color: var(--ink); }
-  .nav-links a.nav-dl {
-    color: #fff;
-    background: var(--brand);
-    border-radius: 8px;
-    padding: 6px 12px;
-    font-weight: 600;
-  }
-  .nav-links a.nav-dl:hover { background: #4f46e5; color: #fff; }
-  .lang-toggle {
-    padding: 6px 10px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: var(--surface);
-    color: var(--secondary);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .lang-toggle:hover { color: var(--ink); border-color: var(--line-strong); }
 
-  .hero { padding: 56px 0 28px; }
-  .hero-grid {
-    display: grid;
-    grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
-    gap: 40px;
-    align-items: center;
-  }
-  h1 {
-    margin: 0;
-    font-size: clamp(32px, 4vw, 42px);
-    line-height: 1.2;
-    letter-spacing: -0.03em;
-    font-weight: 700;
-  }
-  .lede { margin: 14px 0 0; color: var(--secondary); font-size: 16px; }
-  .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+  .lead { padding: 28px 0 8px; }
+  h1 { margin: 0; font-size: 28px; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; }
+  .lead p { margin: 10px 0 0; max-width: 62ch; color: var(--secondary); font-size: 15px; line-height: 1.6; }
+  .lead-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
   .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 10px 16px;
-    border-radius: 10px;
-    border: 1px solid transparent;
+    display: inline-flex; align-items: center; justify-content: center;
+    text-decoration: none; font-size: 14px; font-weight: 600;
+    padding: 8px 14px; border-radius: 10px; border: 1px solid transparent;
   }
   .btn-primary { background: var(--brand); color: #fff; }
   .btn-primary:hover { background: #4f46e5; }
   .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
-  .btn-ghost:hover { border-color: var(--line-strong); }
-  .facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 16px;
-    margin: 18px 0 0;
-    padding: 0;
-    list-style: none;
-    color: var(--secondary);
-    font-size: 13px;
-  }
 
-  section { padding: 56px 0; }
-  .sec-head { max-width: 640px; margin-bottom: 22px; }
-  .sec-head h2 {
-    margin: 0;
-    font-size: 26px;
-    line-height: 1.25;
-    letter-spacing: -0.02em;
-    font-weight: 700;
-  }
-  .sec-head p { margin: 8px 0 0; color: var(--secondary); }
+  section { padding: 36px 0; }
+  h2 { margin: 0 0 8px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  .sec p { margin: 0; max-width: 68ch; color: var(--secondary); }
 
-  .outcomes {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-  }
-  .outcome {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 18px 18px 16px;
-  }
-  .outcome h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
-  .outcome p { margin: 0; color: var(--secondary); font-size: 14px; }
+  figure.frame { margin: 18px 0 0; }
+  figcaption { margin-top: 8px; color: var(--muted); font-size: 13px; }
+  .frame .shot { width: 100%; height: auto; display: block; border-radius: 12px; border: 1px solid var(--line); }
+  .frame .shot[hidden], .frame .mock[hidden] { display: none !important; }
 
-  .dl-panel {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 22px;
-  }
-  .dl-status { margin: 12px 0 0; color: var(--secondary); font-size: 13px; min-height: 1.4em; }
-  .dl-list { list-style: none; margin: 18px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .dl-list a {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    text-decoration: none;
-    color: var(--ink);
-    background: var(--bg);
-  }
-  .dl-list a:hover { border-color: var(--line-strong); }
-  .dl-list .name { font-weight: 600; font-size: 14px; }
-  .dl-list .meta { margin-left: auto; color: var(--secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
-  .dl-list .yours {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--brand-dark);
-    background: var(--brand-soft);
-    border-radius: 999px;
-    padding: 2px 8px;
-  }
-  .dl-list li.is-yours a { background: var(--brand-soft); border-color: var(--brand-line); }
-  .dl-list li.is-offline .name { font-weight: 500; color: var(--secondary); }
-  .releases-link { margin: 14px 0 0; font-size: 13px; }
-  .releases-link a { color: var(--secondary); }
-
-  footer {
-    border-top: 1px solid var(--line);
-    padding: 28px 0 48px;
-    color: var(--muted);
-    font-size: 13px;
-  }
-  footer p { margin: 0; }
-  footer .quiet { margin-top: 6px; }
-  footer .foot-links { margin-top: 10px; display: flex; gap: 16px; }
-  footer .foot-links a { color: var(--secondary); text-decoration: none; }
-  footer .foot-links a:hover { color: var(--ink); }
-
-  /* Scaled product window. --dw / --dh are the mock's design size in px. */
-  .scaler { width: 100%; container-type: inline-size; }
-  .scaler-sizer {
-    /* Extra pixels leave room for the window shadow, which otherwise gets clipped. */
-    height: calc((var(--dh) + 40) * 1px * min(1, 100cqi / ((var(--dw) + 48) * 1px)));
-    overflow: hidden;
-  }
-  .scaler-inner {
-    width: calc((var(--dw) + 48) * 1px);
-    height: calc((var(--dh) + 40) * 1px);
-    padding: 4px 24px 32px;
-    transform-origin: top left;
-    transform: scale(min(1, 100cqi / ((var(--dw) + 48) * 1px)));
-  }
-  .shot-frame .shot { width: 100%; height: auto; display: block; border-radius: 12px; box-shadow: var(--shadow); }
-  .shot-frame .shot[hidden], .shot-frame .mock[hidden] { display: none !important; }
-  .window-plain { width: 100%; }
-  .appwin.appwin--fluid { width: 100%; height: auto; }
-  .appwin.appwin--fluid .stream { overflow: visible; }
-  @supports not (container-type: inline-size) {
-    .scaler { overflow-x: auto; }
-    .scaler-sizer { height: auto; overflow: visible; }
-    .scaler-inner { transform: none; }
-  }
-
-  .appwin {
-    width: calc(var(--dw) * 1px);
-    height: calc(var(--dh) * 1px);
-    display: flex;
-    flex-direction: column;
+  /* App window — sizes and colors follow the desktop app. */
+  .win {
+    display: flex; flex-direction: column;
     background: var(--bg);
     border: 1px solid var(--line);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: var(--shadow);
-    color: var(--ink);
+    box-shadow: 0 12px 32px rgba(15, 20, 40, 0.08);
     text-align: left;
-    font-size: 13px;
-    line-height: 1.5;
+    color: var(--ink);
   }
   .tb {
-    height: 40px;
-    flex-shrink: 0;
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    padding: 0 12px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--divider);
-    user-select: none;
+    height: 44px; flex-shrink: 0;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--divider);
   }
-  .traffic { display: flex; gap: 6px; }
-  .traffic i { width: 10px; height: 10px; border-radius: 50%; display: block; }
-  .traffic i:nth-child(1) { background: #ff5f57; }
-  .traffic i:nth-child(2) { background: #febc2e; }
-  .traffic i:nth-child(3) { background: #28c840; }
-  .tb-title {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 2px;
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .tb b {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 700; letter-spacing: 2px;
   }
-  .tb-title img { width: 16px; height: 16px; border-radius: 4px; display: block; }
-  .shell { flex: 1; min-height: 0; display: flex; }
+  .tb img { width: 16px; height: 16px; border-radius: 4px; display: block; }
+  .body { display: flex; min-height: 0; }
   .side {
-    width: 176px;
-    flex-shrink: 0;
-    background: var(--sidebar);
-    color: var(--sidebar-text);
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    width: 200px; flex-shrink: 0; background: var(--sidebar); color: var(--side-text);
+    display: flex; flex-direction: column; border-right: 1px solid rgba(255,255,255,.08);
   }
-  .side-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 12px 6px;
-    color: var(--sidebar-text-strong);
-    font-weight: 700;
-    font-size: 15px;
+  .side-h { display: flex; align-items: center; gap: 10px; padding: 14px 12px 8px; color: var(--side-strong); font-weight: 700; font-size: 16px; }
+  .side-h img { width: 24px; height: 24px; border-radius: 6px; }
+  .side nav { display: flex; flex-direction: column; gap: 2px; padding: 8px; }
+  .side nav span.item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 10px; font-size: 14px; font-weight: 500;
   }
-  .side-head img { width: 22px; height: 22px; border-radius: 6px; display: block; }
-  .side nav { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; }
-  .side nav > span {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 8px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-  }
-  .side nav > span.on { background: var(--brand); color: #fff; }
-  .side svg { width: 16px; height: 16px; flex-shrink: 0; }
-  .side-foot {
-    margin-top: auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    color: var(--sidebar-text-strong);
-    font-size: 12px;
+  .side nav span.item.on { background: var(--brand); color: #fff; }
+  .side svg { width: 18px; height: 18px; flex: 0 0 18px; }
+  .side-f {
+    margin-top: auto; display: flex; align-items: center; gap: 8px;
+    padding: 8px; border-top: 1px solid rgba(255,255,255,.08); color: var(--side-strong); font-size: 13px;
   }
   .av {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-    color: #fff;
-    font-size: 11px;
-    font-weight: 600;
-    flex-shrink: 0;
+    width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; font-size: 12px; font-weight: 600; flex-shrink: 0;
   }
-  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .tabs {
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    padding: 6px 8px 0;
-    flex-shrink: 0;
-  }
+  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .tabs { display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; }
   .tab {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 160px;
-    padding: 5px 8px;
-    font-size: 12px;
-    color: var(--secondary);
-    background: #f6f7fb;
-    border-radius: 8px 8px 0 0;
-    border: 1px solid transparent;
+    display: flex; align-items: center; gap: 5px; max-width: 180px; min-width: 0;
+    padding: 5px 6px 5px 9px; font-size: 12px; color: var(--secondary);
+    background: #f6f7fb; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
   }
-  .tab.on {
-    background: var(--surface);
-    color: var(--ink);
-    font-weight: 500;
-    border-color: var(--line);
-    border-bottom-color: var(--surface);
-  }
-  .tab .wait { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
-  .tab-add {
-    width: 22px;
-    height: 22px;
-    margin: 0 0 4px 4px;
-    border-radius: 6px;
-    color: var(--muted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-  }
-  .stream {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    padding: 12px 14px 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+  .tab.on { background: var(--surface); color: var(--ink); font-weight: 500; border-color: var(--line); }
+  .tab svg { width: 11px; height: 11px; flex-shrink: 0; }
+  .tab .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
+  .tab .x { margin-left: 2px; color: var(--muted); font-size: 12px; line-height: 1; }
+  .tab-add { width: 22px; height: 22px; margin: 0 0 3px 4px; color: var(--muted); display: flex; align-items: center; justify-content: center; }
+  .tab-add svg { width: 13px; height: 13px; }
+  .stream { padding: 8px 16px 4px; display: flex; flex-direction: column; }
   .user {
-    background: var(--user);
-    color: var(--user-text);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-size: 13px;
-    line-height: 1.55;
-    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.28);
+    margin: 12px 0; padding: 10px 16px; border-radius: 10px;
+    background: var(--user); color: var(--user-text);
+    border: 1px solid rgba(255,255,255,.08);
+    box-shadow: inset 0 1px 4px rgba(0,0,0,.28);
+    font-size: 13.5px; line-height: 1.6; white-space: pre-wrap;
   }
-  .asst { font-size: 13px; line-height: 1.65; color: var(--ink); padding: 2px 2px 0; }
-  .perm {
-    border-left: 2px solid var(--line);
-    margin: 2px 0 0;
-    padding: 2px 0 2px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  .asst { font-size: 14px; line-height: 1.7; color: var(--ink); padding: 2px 0 8px; }
+  .tool { width: 100%; padding: 2px 0; font-size: 12.5px; color: var(--secondary); }
+  .tool.is-perm { margin-top: 4px; padding: 6px 8px 6px 12px; border-left: 2px solid var(--line); }
+  .tool-h { display: flex; align-items: center; gap: 6px; padding: 1px 4px; }
+  .tool-h svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .tool code { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--ink); }
+  .tool .arg { font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool pre {
+    margin: 2px 0 0; padding: 1px 0 1px 12px;
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--secondary); white-space: pre-wrap;
   }
-  .perm-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--secondary);
-    font-size: 12.5px;
+  .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .ok, .no {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
   }
-  .perm-head svg { width: 14px; height: 14px; }
-  .perm-head code, .perm pre {
-    font-family: var(--mono);
-  }
-  .perm-head code { font-size: 12px; font-weight: 600; color: var(--ink); }
-  .perm pre {
-    margin: 0;
-    padding-left: 2px;
-    font-size: 11.5px;
-    line-height: 1.5;
-    color: var(--secondary);
-    white-space: pre-wrap;
-  }
-  .perm-actions { display: flex; gap: 8px; }
-  .allow, .deny {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    border-radius: 6px;
-  }
-  .allow { background: var(--ink); color: var(--surface); }
-  .deny { color: var(--secondary); border: 1px solid var(--line); }
-  .allow svg, .deny svg { width: 13px; height: 13px; }
+  .ok { background: var(--ink); color: var(--surface); }
+  .no { color: var(--secondary); border: 1px solid var(--line); }
+  .ok svg, .no svg { width: 13px; height: 13px; }
   .dock {
-    flex-shrink: 0;
-    margin: 8px 12px 12px;
-    padding: 10px 12px 8px;
-    background: var(--surface);
-    border: 1.5px solid var(--line);
-    border-radius: 16px;
+    margin: 8px 16px 16px; padding: 12px 14px 8px 16px;
+    background: var(--surface); border: 1.5px solid var(--line); border-radius: 18px;
     box-shadow: 0 4px 24px rgba(15, 20, 40, 0.06);
   }
-  .dock-ph { min-height: 28px; font-size: 13.5px; color: var(--muted); }
+  .dock .ph { min-height: 36px; font-size: 14.5px; line-height: 1.5; color: var(--muted); }
   .dock-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .dock-left, .dock-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .iconbtn, .folder, .model {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--secondary);
-  }
-  .iconbtn svg, .folder svg, .model svg { width: 14px; height: 14px; }
+  .dock-l, .dock-r { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .ib { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+  .ib svg { width: 15px; height: 15px; }
   .folder {
-    max-width: 140px;
-    padding: 4px 8px;
-    border-radius: 8px;
-    background: var(--brand-soft);
-    color: var(--brand-dark);
-    border: 1px solid var(--brand-line);
-    font-size: 12px;
-    font-weight: 600;
+    display: inline-flex; align-items: center; gap: 5px; max-width: 200px;
+    padding: 6px 10px; border-radius: 8px; border: 1px solid var(--brand-line);
+    background: var(--brand-soft); color: var(--brand-dark); font-size: 12px; font-weight: 600;
   }
+  .folder svg, .model svg { width: 14px; height: 14px; flex-shrink: 0; }
   .model {
-    font-size: 12px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 3px 8px;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px;
+    color: var(--secondary); font-size: 12px;
   }
   .send {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    background: var(--brand);
-    color: #fff;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: #fff;
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  .send svg { width: 15px; height: 15px; }
+  .send svg { width: 16px; height: 16px; }
 
-  @media (max-width: 980px) {
-    .outcomes { grid-template-columns: 1fr 1fr; }
+  .points { list-style: none; margin: 14px 0 0; padding: 0; max-width: 68ch; }
+  .points li { padding: 10px 0; border-top: 1px solid var(--divider); color: var(--secondary); }
+  .points strong { color: var(--ink); font-weight: 600; }
+
+  .dl-status { margin: 10px 0 0; color: var(--secondary); font-size: 13px; }
+  .dl-list { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--line); }
+  .dl-list a {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    padding: 12px 2px; border-bottom: 1px solid var(--divider); text-decoration: none;
   }
-  @media (max-width: 800px) {
-    .hero { padding-top: 36px; }
-    .hero-grid { grid-template-columns: 1fr; gap: 28px; }
-    .nav-links a:not(.nav-dl) { display: none; }
-    section { padding: 40px 0; }
-  }
-  @media (max-width: 640px) {
-    .wrap, .nav-inner { padding-left: 16px; padding-right: 16px; }
-    .outcomes { grid-template-columns: 1fr; }
-    .dl-panel { padding: 16px; }
-    .dl-list a { align-items: flex-start; flex-wrap: wrap; }
+  .dl-list .name { font-weight: 600; }
+  .dl-list .meta { margin-left: auto; color: var(--secondary); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .dl-list .yours { font-size: 12px; font-weight: 600; color: var(--brand-dark); }
+  .dl-list li.is-yours .name { color: var(--brand-dark); }
+  .dl-list li.is-offline .name { font-weight: 500; color: var(--secondary); }
+  .more { margin: 12px 0 0; font-size: 13px; }
+  .more a { color: var(--secondary); }
+
+  footer { border-top: 1px solid var(--line); padding: 22px 0 40px; color: var(--muted); font-size: 13px; }
+  footer p { margin: 0; }
+  footer .quiet { margin-top: 6px; }
+  footer .links { margin-top: 10px; display: flex; gap: 16px; }
+  footer .links a { color: var(--secondary); text-decoration: none; }
+
+  @media (max-width: 720px) {
+    .wrap, .bar-inner { padding-left: 16px; padding-right: 16px; }
+    .nav a:not(.go) { display: none; }
+    h1 { font-size: 24px; }
+    .side { width: 60px; }
+    .side-h span, .side .lbl, .side-f .lbl { display: none; }
+    .side-h, .side nav span.item, .side-f { justify-content: center; padding-left: 0; padding-right: 0; }
+    .side nav span.item { gap: 0; }
+    .dock-bar { flex-wrap: wrap; }
     .dl-list .meta { margin-left: 0; }
-    .appwin--fluid .dock-bar { flex-wrap: wrap; row-gap: 8px; }
-    .hero-actions .btn { flex: 1 1 auto; }
   }
 </style>
 </head>
@@ -568,235 +298,191 @@
   <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
   <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></symbol>
-  <symbol id="i-blocks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+  <symbol id="i-blocks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
   <symbol id="i-skill" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
-  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
-  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/></symbol>
-  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
-  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
-  <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/></symbol>
+  <symbol id="i-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-at" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></symbol>
   <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
-  <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></symbol>
 </svg>
 
-<header class="site-nav">
-  <div class="nav-inner">
-    <a class="brand" href="./">
-      <img src="icon.png" alt="" width="28" height="28" />
-      Astra
-    </a>
-    <nav class="nav-links">
-      <a href="#capabilities" data-i18n="nav_cap">能做什么</a>
-      <a href="#ui" data-i18n="nav_ui">界面</a>
-      <a class="nav-dl" href="#download" data-i18n="nav_dl">下载</a>
-      <button class="lang-toggle" id="langToggle" type="button" aria-label="Switch language">EN</button>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="brand" href="./"><img src="icon.png" alt="" width="24" height="24" />Astra</a>
+    <nav class="nav">
+      <a href="#session" data-i18n="nav_session">会话</a>
+      <a class="go" href="#download" data-i18n="nav_dl">下载</a>
+      <button class="lang" id="langToggle" type="button">EN</button>
     </nav>
   </div>
 </header>
 
 <main>
-  <div class="wrap hero">
-    <div class="hero-grid">
-      <div>
-        <h1 data-i18n="h1">装在你电脑上的 AI Agent</h1>
-        <p class="lede" data-i18n="lede">打开就能用。它可以读、改项目里的文件。写入和执行命令之前会先停下来，等你批准。记住的内容留在这台机器上。</p>
-        <div class="hero-actions">
-          <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest">
-            <span class="js-dl-label" data-i18n="dl_primary">下载</span>
-          </a>
-          <a class="btn btn-ghost" href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener">GitHub</a>
-        </div>
-        <ul class="facts">
-          <li data-i18n="fact_os">macOS、Windows、Linux</li>
-          <li data-i18n="fact_mem">记忆留在本机</li>
-          <li data-i18n="fact_perm">写入和命令会等你批准</li>
-        </ul>
-      </div>
-
-      <!-- heroWindow: see PRODUCT_IMAGES -->
-      <div class="scaler shot-frame" style="--dw:720;--dh:508" data-shot="heroWindow">
-        <img class="shot" alt="" hidden data-i18n-alt="shot_hero" />
-        <div class="scaler-sizer mock">
-          <div class="scaler-inner">
-            <div class="appwin" aria-hidden="true">
-              <div class="tb">
-                <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
-                <div class="tb-title"><img src="icon.png" alt="" width="16" height="16" />ASTRA</div>
-                <div></div>
-              </div>
-              <div class="shell">
-                <aside class="side">
-                  <div class="side-head"><img src="icon.png" alt="" width="22" height="22" /><span>Astra</span></div>
-                  <nav>
-                    <span class="on"><svg><use href="#i-bot"/></svg><span data-i18n="ui_agent">Agent</span></span>
-                    <span><svg><use href="#i-server"/></svg><span data-i18n="ui_serve">Agent 服务</span></span>
-                    <span><svg><use href="#i-folder"/></svg><span data-i18n="ui_ws">工作空间</span></span>
-                    <span><svg><use href="#i-blocks"/></svg><span data-i18n="ui_ext">扩展管理</span></span>
-                    <span><svg><use href="#i-skill"/></svg><span data-i18n="ui_skill">技能管理</span></span>
-                  </nav>
-                  <div class="side-foot">
-                    <span class="av" data-i18n="ui_av">本</span>
-                    <span data-i18n="ui_account">本地账户</span>
-                  </div>
-                </aside>
-                <div class="col">
-                  <div class="tabs">
-                    <div class="tab on"><span data-i18n="ui_tab1">首页样式</span></div>
-                    <div class="tab"><span data-i18n="ui_tab2">笔记</span><i class="wait"></i></div>
-                    <div class="tab-add">+</div>
-                  </div>
-                  <div class="stream">
-                    <div class="user" data-i18n="ui_user">把首页标题的字重改成 600，跟设置页的区块标题对齐。</div>
-                    <div class="asst" data-i18n="ui_asst">看过设置页了。那边的区块标题是 600，首页现在是 700。我改 Home.scss 里这一处。</div>
-                    <div class="perm">
-                      <div class="perm-head">
-                        <svg><use href="#i-alert"/></svg>
-                        <svg><use href="#i-file"/></svg>
-                        <code>edit_file</code>
-                      </div>
-                      <pre>src/pages/home/Home.scss
-- font-weight: 700;
-+ font-weight: 600;</pre>
-                      <div class="perm-actions">
-                        <span class="allow"><svg><use href="#i-check"/></svg><span data-i18n="ui_allow">批准</span></span>
-                        <span class="deny"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="dock">
-                    <div class="dock-ph" data-i18n="ui_ph">接着说，或用 @ 引用文件</div>
-                    <div class="dock-bar">
-                      <div class="dock-left">
-                        <span class="iconbtn"><svg><use href="#i-panel"/></svg></span>
-                        <span class="folder"><svg><use href="#i-folder"/></svg>astra</span>
-                      </div>
-                      <div class="dock-right">
-                        <span class="model"><span data-i18n="ui_model">本地模型</span><svg><use href="#i-chev"/></svg></span>
-                        <span class="send"><svg><use href="#i-up"/></svg></span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+  <div class="wrap lead">
+    <h1>Astra</h1>
+    <p data-i18n="lede">装在你电脑上的桌面程序。它可以改项目里的文件。写入和执行命令会停在会话里，等你点批准或拒绝。记住的内容留在这台机器上。macOS、Windows、Linux 都能装。</p>
+    <div class="lead-actions">
+      <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest"><span class="js-dl-label" data-i18n="dl_primary">下载</span></a>
+      <a class="btn btn-ghost" href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener">GitHub</a>
     </div>
   </div>
 
-  <section class="wrap" id="capabilities">
-    <div class="sec-head">
-      <h2 data-i18n="cap_h">用的时候会碰到这些</h2>
-      <p data-i18n="cap_p">这些是用的时候会直接看到的事。</p>
-    </div>
-    <div class="outcomes">
-      <article class="outcome">
-        <h3 data-i18n="c1_h">改文件</h3>
-        <p data-i18n="c1_p">它可以读项目里的文件，也可以改。</p>
-      </article>
-      <article class="outcome">
-        <h3 data-i18n="c2_h">写入和命令会等你</h3>
-        <p data-i18n="c2_p">写文件或跑命令之前，对话里会先出现确认。你看到内容，再决定批不批准。</p>
-      </article>
-      <article class="outcome">
-        <h3 data-i18n="c3_h">记忆留在这台机器上</h3>
-        <p data-i18n="c3_p">它记住的东西存在本机。</p>
-      </article>
-      <article class="outcome">
-        <h3 data-i18n="c4_h">可以接 MCP，也可以用技能</h3>
-        <p data-i18n="c4_p">外部工具用 MCP 接进来。常做的事可以做成技能。</p>
-      </article>
-      <article class="outcome">
-        <h3 data-i18n="c5_h">可以同时开好几个会话</h3>
-        <p data-i18n="c5_p">标签上能留着多段对话。切走以后，原来那段还在。</p>
-      </article>
-      <article class="outcome">
-        <h3 data-i18n="c6_h">产出的文件可以再打开</h3>
-        <p data-i18n="c6_p">它写出的文档和结果会留在列表里，之后还能查看。</p>
-      </article>
-    </div>
-  </section>
-
-  <section class="wrap" id="ui">
-    <div class="sec-head">
-      <h2 data-i18n="ui_h">确认就在这段对话里</h2>
-      <p data-i18n="ui_p">要写文件或执行命令时，确认出现在回复下面。你能看到路径和改动，再点批准或拒绝。</p>
-    </div>
-    <!-- workingUi: see PRODUCT_IMAGES -->
-    <div class="window-plain shot-frame" data-shot="workingUi">
-      <img class="shot" alt="" hidden data-i18n-alt="shot_ui" />
+  <div class="wrap">
+    <figure class="frame" data-shot="heroWindow">
+      <img class="shot" alt="" hidden data-i18n-alt="shot_hero" />
       <div class="mock">
-          <div class="appwin appwin--fluid" aria-hidden="true">
-            <div class="tb">
-              <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
-              <div class="tb-title"><img src="icon.png" alt="" width="16" height="16" />ASTRA</div>
-              <div></div>
-            </div>
-            <div class="shell">
-              <div class="col">
-                <div class="tabs">
-                  <div class="tab on"><span data-i18n="ui_tab1">首页样式</span></div>
-                  <div class="tab"><span data-i18n="ui_tab2">笔记</span><i class="wait"></i></div>
-                  <div class="tab-add">+</div>
+        <div class="win" aria-hidden="true">
+          <div class="tb">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <b><img src="icon.png" alt="" width="16" height="16" />ASTRA</b>
+            <div></div>
+          </div>
+          <div class="body">
+            <aside class="side">
+              <div class="side-h"><img src="icon.png" alt="" width="24" height="24" /><span>Astra</span></div>
+              <nav>
+                <span class="item on"><svg><use href="#i-bot"/></svg><span class="lbl" data-i18n="ui_agent">Agent</span></span>
+                <span class="item"><svg><use href="#i-server"/></svg><span class="lbl" data-i18n="ui_serve">Agent 服务</span></span>
+                <span class="item"><svg><use href="#i-folder"/></svg><span class="lbl" data-i18n="ui_ws">工作空间</span></span>
+                <span class="item"><svg><use href="#i-blocks"/></svg><span class="lbl" data-i18n="ui_ext">扩展管理</span></span>
+                <span class="item"><svg><use href="#i-skill"/></svg><span class="lbl" data-i18n="ui_skill">技能管理</span></span>
+              </nav>
+              <div class="side-f"><span class="av" data-i18n="ui_av">本</span><span class="lbl" data-i18n="ui_account">本地账户</span></div>
+            </aside>
+            <div class="col">
+              <div class="tabs">
+                <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><span class="x">×</span></div>
+                <div class="tab"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab2">整理今天的会议记录</span></div>
+                <div class="tab-add"><svg><use href="#i-plus"/></svg></div>
+              </div>
+              <div class="stream">
+                <div class="user" data-i18n="ui_user">把 README 里「快速体验」那一段拆成 macOS、Windows、Linux，别的段落不要动。</div>
+                <div class="asst" data-i18n="ui_asst">这一段现在是一句话。我只改这一段，上面的标题和下面的列表不动。</div>
+                <div class="tool">
+                  <div class="tool-h"><svg><use href="#i-check"/></svg><svg><use href="#i-file"/></svg><code>read_file</code><span class="arg">README.md</span></div>
+                  <pre data-i18n="ui_read">README.md · 86 行</pre>
                 </div>
-                <div class="stream">
-                  <div class="user" data-i18n="ui_user">把首页标题的字重改成 600，跟设置页的区块标题对齐。</div>
-                  <div class="asst" data-i18n="ui_asst">看过设置页了。那边的区块标题是 600，首页现在是 700。我改 Home.scss 里这一处。</div>
-                  <div class="perm">
-                    <div class="perm-head">
-                      <svg><use href="#i-alert"/></svg>
-                      <svg><use href="#i-file"/></svg>
-                      <code>edit_file</code>
-                    </div>
-                    <pre>src/pages/home/Home.scss
-- font-weight: 700;
-+ font-weight: 600;</pre>
-                    <div class="perm-actions">
-                      <span class="allow"><svg><use href="#i-check"/></svg><span data-i18n="ui_allow">批准</span></span>
-                      <span class="deny"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
-                    </div>
+                <div class="tool is-perm">
+                  <div class="tool-h"><svg><use href="#i-alert"/></svg><svg><use href="#i-file"/></svg><code>edit_file</code><span class="arg">README.md</span></div>
+                  <pre><span data-i18n="diff_old">- 选择对应平台安装包下载安装。</span>
+<span data-i18n="diff_1">+ - macOS：aarch64.dmg</span>
+<span data-i18n="diff_2">+ - Windows：x64-setup.exe</span>
+<span data-i18n="diff_3">+ - Linux：amd64.deb 或 AppImage</span></pre>
+                  <div class="acts">
+                    <span class="ok"><svg><use href="#i-tick"/></svg><span data-i18n="ui_allow">批准</span></span>
+                    <span class="no"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
                   </div>
                 </div>
-                <div class="dock">
-                  <div class="dock-ph" data-i18n="ui_ph">接着说，或用 @ 引用文件</div>
-                  <div class="dock-bar">
-                    <div class="dock-left">
-                      <span class="iconbtn"><svg><use href="#i-panel"/></svg></span>
-                      <span class="folder"><svg><use href="#i-folder"/></svg>astra</span>
-                    </div>
-                    <div class="dock-right">
-                      <span class="model"><span data-i18n="ui_model">本地模型</span><svg><use href="#i-chev"/></svg></span>
-                      <span class="send"><svg><use href="#i-up"/></svg></span>
-                    </div>
+              </div>
+              <div class="dock">
+                <div class="ph" data-i18n="ui_ph">描述任务，@ 引用文件，/ 调用技能</div>
+                <div class="dock-bar">
+                  <div class="dock-l">
+                    <span class="ib"><svg><use href="#i-panel"/></svg></span>
+                    <span class="folder"><svg><use href="#i-folder"/></svg>astra</span>
+                    <span class="ib"><svg><use href="#i-at"/></svg></span>
+                  </div>
+                  <div class="dock-r">
+                    <span class="model"><span data-i18n="ui_model">本机</span><svg><use href="#i-chev"/></svg></span>
+                    <span class="send"><svg><use href="#i-up"/></svg></span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+        </div>
       </div>
-    </div>
+      <figcaption data-i18n="cap_hero">打开之后就是这个窗口。左边是侧栏，上面两个标签是两段会话。</figcaption>
+    </figure>
+  </div>
+
+  <section class="wrap sec" id="session">
+    <h2 data-i18n="ui_h">写入还停在批准上</h2>
+    <p data-i18n="ui_p">read_file 已经读完 README.md。edit_file 还没写进去。diff 和「批准 / 拒绝」在同一条下面。</p>
+    <figure class="frame" data-shot="workingUi">
+      <img class="shot" alt="" hidden data-i18n-alt="shot_ui" />
+      <div class="mock">
+        <div class="win" aria-hidden="true">
+          <div class="tb">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <b><img src="icon.png" alt="" width="16" height="16" />ASTRA</b>
+            <div></div>
+          </div>
+          <div class="col">
+            <div class="tabs">
+              <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><span class="x">×</span></div>
+              <div class="tab"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab2">整理今天的会议记录</span></div>
+              <div class="tab-add"><svg><use href="#i-plus"/></svg></div>
+            </div>
+            <div class="stream">
+              <div class="user" data-i18n="ui_user">把 README 里「快速体验」那一段拆成 macOS、Windows、Linux，别的段落不要动。</div>
+              <div class="asst" data-i18n="ui_asst">这一段现在是一句话。我只改这一段，上面的标题和下面的列表不动。</div>
+              <div class="tool">
+                <div class="tool-h"><svg><use href="#i-check"/></svg><svg><use href="#i-file"/></svg><code>read_file</code><span class="arg">README.md</span></div>
+                <pre data-i18n="ui_read">README.md · 86 行</pre>
+              </div>
+              <div class="tool is-perm">
+                <div class="tool-h"><svg><use href="#i-alert"/></svg><svg><use href="#i-file"/></svg><code>edit_file</code><span class="arg">README.md</span></div>
+                <pre><span data-i18n="diff_old">- 选择对应平台安装包下载安装。</span>
+<span data-i18n="diff_1">+ - macOS：aarch64.dmg</span>
+<span data-i18n="diff_2">+ - Windows：x64-setup.exe</span>
+<span data-i18n="diff_3">+ - Linux：amd64.deb 或 AppImage</span></pre>
+                <div class="acts">
+                  <span class="ok"><svg><use href="#i-tick"/></svg><span data-i18n="ui_allow">批准</span></span>
+                  <span class="no"><svg><use href="#i-x"/></svg><span data-i18n="ui_deny">拒绝</span></span>
+                </div>
+              </div>
+            </div>
+            <div class="dock">
+              <div class="ph" data-i18n="ui_ph">描述任务，@ 引用文件，/ 调用技能</div>
+              <div class="dock-bar">
+                <div class="dock-l">
+                  <span class="ib"><svg><use href="#i-panel"/></svg></span>
+                  <span class="folder"><svg><use href="#i-folder"/></svg>astra</span>
+                  <span class="ib"><svg><use href="#i-at"/></svg></span>
+                </div>
+                <div class="dock-r">
+                  <span class="model"><span data-i18n="ui_model">本机</span><svg><use href="#i-chev"/></svg></span>
+                  <span class="send"><svg><use href="#i-up"/></svg></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption data-i18n="cap_ui">同一段会话，把确认那一块摊开。</figcaption>
+    </figure>
+    <ul class="points">
+      <li><strong data-i18n="p1_h">改文件。</strong> <span data-i18n="p1_p">要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。</span></li>
+      <li><strong data-i18n="p2_h">几个会话。</strong> <span data-i18n="p2_p">标签可以同时开着。红点表示这一段还在等你处理。切走之后，原来那段还在。</span></li>
+      <li><strong data-i18n="p3_h">记忆。</strong> <span data-i18n="p3_p">记住的内容存在这台电脑上。</span></li>
+      <li><strong data-i18n="p4_h">MCP 和技能。</strong> <span data-i18n="p4_p">侧栏里有扩展和技能。对话里用 / 调用技能。</span></li>
+      <li><strong data-i18n="p5_h">产物。</strong> <span data-i18n="p5_p">写出来的文件会留在列表里，之后还能打开。</span></li>
+    </ul>
   </section>
 
-  <section class="wrap" id="download">
-    <div class="sec-head">
-      <h2 data-i18n="dl_h">下载</h2>
-      <p data-i18n="dl_p">按钮按你的系统选安装包。版本和大小来自 GitHub 上最新的正式版。Windows 默认是较小的在线安装包，离线包单独列在下面。</p>
-    </div>
-    <div class="dl-panel">
-      <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest">
-        <span class="js-dl-label" data-i18n="dl_primary">下载</span>
-      </a>
-      <p class="dl-status" id="dlStatus" data-i18n="dl_loading">正在读取最新版本…</p>
-      <ul class="dl-list" id="dlList">
-        <li data-kind="mac"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">macOS</span></a></li>
-        <li data-kind="win"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Windows</span></a></li>
-        <li data-kind="win-offline" class="is-offline"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name" data-i18n="dl_win_offline">Windows 离线安装包</span></a></li>
-        <li data-kind="linux-deb"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Linux (.deb)</span></a></li>
-        <li data-kind="linux-appimage"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Linux (AppImage)</span></a></li>
-      </ul>
-      <p class="releases-link"><a href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener" data-i18n="dl_all">全部版本</a></p>
-    </div>
+  <section class="wrap sec" id="download">
+    <h2 data-i18n="dl_h">下载</h2>
+    <p data-i18n="dl_p">按钮按你的系统选安装包。版本和大小来自 GitHub 上最新的正式版。Windows 默认是较小的在线安装包，离线包单独列在下面。</p>
+    <p style="margin-top:14px">
+      <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest"><span class="js-dl-label" data-i18n="dl_primary">下载</span></a>
+    </p>
+    <p class="dl-status" id="dlStatus" data-i18n="dl_loading">正在读取最新版本…</p>
+    <ul class="dl-list" id="dlList">
+      <li data-kind="mac"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">macOS</span></a></li>
+      <li data-kind="win"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Windows</span></a></li>
+      <li data-kind="win-offline" class="is-offline"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name" data-i18n="dl_win_offline">Windows 离线安装包</span></a></li>
+      <li data-kind="linux-deb"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Linux (.deb)</span></a></li>
+      <li data-kind="linux-appimage"><a href="https://github.com/astra-praxis/astra/releases/latest"><span class="name">Linux (AppImage)</span></a></li>
+    </ul>
+    <p class="more"><a href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener" data-i18n="dl_all">全部版本</a></p>
   </section>
 </main>
 
@@ -804,7 +490,7 @@
   <div class="wrap">
     <p data-i18n="foot">Astra · MIT License</p>
     <p class="quiet">Rust · Tauri · MCP</p>
-    <div class="foot-links">
+    <div class="links">
       <a href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener">Releases</a>
     </div>
@@ -814,145 +500,106 @@
 <script>
 (function () {
   'use strict';
-
-  /*
-   * PRODUCT_IMAGES
-   * Replace either path with a real screenshot, relative to this page.
-   * Example: heroWindow: 'shots/agent-window.png'
-   * An empty string keeps the HTML mock. A broken path falls back to the mock.
-   */
-  var PRODUCT_IMAGES = {
-    heroWindow: '',
-    workingUi: ''
-  };
-
+  var PRODUCT_IMAGES = { heroWindow: '', workingUi: '' };
   var RELEASES = 'https://github.com/astra-praxis/astra/releases/latest';
   var RELEASES_API = 'https://api.github.com/repos/astra-praxis/astra/releases/latest';
   var KIND_ORDER = ['mac', 'win', 'win-other', 'win-offline', 'linux-deb', 'linux-appimage', 'linux-other'];
-
   var I18N = {
     zh: {
-      doc_title: 'Astra — 装在你电脑上的 AI Agent',
-      doc_desc: 'Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。支持 MCP 和技能，可以开多个会话，也能回看产出的文件。',
-      og_desc: 'Astra 跑在你自己的电脑上。它可以改文件，写入和命令会等你批准，记忆留在这台机器上。',
-      og_alt: 'Astra，适用于 macOS、Windows 和 Linux',
-      nav_cap: '能做什么', nav_ui: '界面', nav_dl: '下载',
-      h1: '装在你电脑上的 AI Agent',
-      lede: '打开就能用。它可以读、改项目里的文件。写入和执行命令之前会先停下来，等你批准。记住的内容留在这台机器上。',
-      fact_os: 'macOS、Windows、Linux',
-      fact_mem: '记忆留在本机',
-      fact_perm: '写入和命令会等你批准',
-      cap_h: '用的时候会碰到这些',
-      cap_p: '这些是用的时候会直接看到的事。',
-      c1_h: '改文件', c1_p: '它可以读项目里的文件，也可以改。',
-      c2_h: '写入和命令会等你', c2_p: '写文件或跑命令之前，对话里会先出现确认。你看到内容，再决定批不批准。',
-      c3_h: '记忆留在这台机器上', c3_p: '它记住的东西存在本机。',
-      c4_h: '可以接 MCP，也可以用技能', c4_p: '外部工具用 MCP 接进来。常做的事可以做成技能。',
-      c5_h: '可以同时开好几个会话', c5_p: '标签上能留着多段对话。切走以后，原来那段还在。',
-      c6_h: '产出的文件可以再打开', c6_p: '它写出的文档和结果会留在列表里，之后还能查看。',
-      ui_h: '确认就在这段对话里',
-      ui_p: '要写文件或执行命令时，确认出现在回复下面。你能看到路径和改动，再点批准或拒绝。',
+      doc_title: 'Astra — 装在你电脑上的桌面程序',
+      doc_desc: 'Astra 装在你自己的电脑上。它可以改文件。写入和执行命令会停在会话里，等你点批准或拒绝。记忆留在这台机器上。支持 MCP 和技能，可以同时开几个会话。',
+      og_desc: '它可以改文件。写入和执行命令会停在会话里，等你点批准或拒绝。记忆留在这台机器上。',
+      og_alt: 'Astra 的会话窗口，适用于 macOS、Windows 和 Linux',
+      nav_session: '会话', nav_dl: '下载',
+      lede: '装在你电脑上的桌面程序。它可以改项目里的文件。写入和执行命令会停在会话里，等你点批准或拒绝。记住的内容留在这台机器上。macOS、Windows、Linux 都能装。',
+      cap_hero: '打开之后就是这个窗口。左边是侧栏，上面两个标签是两段会话。',
+      ui_h: '写入还停在批准上',
+      ui_p: 'read_file 已经读完 README.md。edit_file 还没写进去。diff 和「批准 / 拒绝」在同一条下面。',
+      cap_ui: '同一段会话，把确认那一块摊开。',
+      p1_h: '改文件。', p1_p: '要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。',
+      p2_h: '几个会话。', p2_p: '标签可以同时开着。红点表示这一段还在等你处理。切走之后，原来那段还在。',
+      p3_h: '记忆。', p3_p: '记住的内容存在这台电脑上。',
+      p4_h: 'MCP 和技能。', p4_p: '侧栏里有扩展和技能。对话里用 / 调用技能。',
+      p5_h: '产物。', p5_p: '写出来的文件会留在列表里，之后还能打开。',
       dl_h: '下载',
       dl_p: '按钮按你的系统选安装包。版本和大小来自 GitHub 上最新的正式版。Windows 默认是较小的在线安装包，离线包单独列在下面。',
-      dl_primary: '下载',
-      dl_loading: '正在读取最新版本…',
+      dl_primary: '下载', dl_loading: '正在读取最新版本…',
       dl_fail: '暂时读不到最新版本，按钮会打开 Releases 页面。',
       dl_current: '当前版本 {version}',
-      dl_win_offline: 'Windows 离线安装包',
-      dl_all: '全部版本',
-      dl_yours: '你的系统',
-      dl_btn_mac: '下载 macOS 版',
-      dl_btn_win: '下载 Windows 版',
-      dl_btn_linux: '下载 Linux 版',
-      dl_btn_unknown: '查看最新版本',
-      arch_arm_mac: 'Apple 芯片',
-      arch_arm: 'arm64',
-      arch_x64: 'x64',
-      foot: 'Astra · MIT License',
-      toggle_label: 'EN',
-      og_locale: 'zh_CN',
+      dl_win_offline: 'Windows 离线安装包', dl_all: '全部版本', dl_yours: '你的系统',
+      dl_btn_mac: '下载 macOS 版', dl_btn_win: '下载 Windows 版', dl_btn_linux: '下载 Linux 版', dl_btn_unknown: '查看最新版本',
+      arch_arm_mac: 'Apple 芯片', arch_arm: 'arm64', arch_x64: 'x64',
+      foot: 'Astra · MIT License', toggle_label: 'EN', og_locale: 'zh_CN',
       ui_agent: 'Agent', ui_serve: 'Agent 服务', ui_ws: '工作空间', ui_ext: '扩展管理', ui_skill: '技能管理',
       ui_account: '本地账户', ui_av: '本',
-      ui_tab1: '首页样式', ui_tab2: '笔记',
-      ui_user: '把首页标题的字重改成 600，跟设置页的区块标题对齐。',
-      ui_asst: '看过设置页了。那边的区块标题是 600，首页现在是 700。我改 Home.scss 里这一处。',
+      ui_tab1: '把 README 里「快速体验」那一段拆成', ui_tab2: '整理今天的会议记录',
+      ui_user: '把 README 里「快速体验」那一段拆成 macOS、Windows、Linux，别的段落不要动。',
+      ui_asst: '这一段现在是一句话。我只改这一段，上面的标题和下面的列表不动。',
+      ui_read: 'README.md · 86 行',
+      diff_old: '- 选择对应平台安装包下载安装。',
+      diff_1: '+ - macOS：aarch64.dmg',
+      diff_2: '+ - Windows：x64-setup.exe',
+      diff_3: '+ - Linux：amd64.deb 或 AppImage',
       ui_allow: '批准', ui_deny: '拒绝',
-      ui_ph: '接着说，或用 @ 引用文件',
-      ui_model: '本地模型',
-      shot_hero: 'Astra 的会话窗口',
-      shot_ui: 'Astra 会话里的确认',
+      ui_ph: '描述任务，@ 引用文件，/ 调用技能',
+      ui_model: '本机',
+      shot_hero: 'Astra 的会话窗口，侧栏和两个会话标签',
+      shot_ui: 'Astra 会话里等待批准的文件修改',
       features: ['编辑文件', '写入和命令等待批准', '记忆留在本机', 'MCP 与技能', '多个会话', '回看产出的文件']
     },
     en: {
-      doc_title: 'Astra — an AI agent on your computer',
-      doc_desc: 'Astra runs on your computer. It can edit files. Writes and commands wait for your approval. Memory stays on the machine. MCP and skills are supported. You can keep several sessions open and review the files it produces.',
-      og_desc: 'Astra runs on your computer. It can edit files. Writes and commands wait for your approval. Memory stays on the machine.',
-      og_alt: 'Astra, for macOS, Windows, and Linux',
-      nav_cap: 'What it does', nav_ui: 'Interface', nav_dl: 'Download',
-      h1: 'An AI agent on your computer',
-      lede: 'Open it and use it. It can read and edit files in a project. It stops before writing or running a command, and waits for you to approve. What it remembers stays on this machine.',
-      fact_os: 'macOS, Windows, and Linux',
-      fact_mem: 'Memory stays on this machine',
-      fact_perm: 'Writes and commands wait for approval',
-      cap_h: 'What you run into',
-      cap_p: 'These are the things you actually see while using it.',
-      c1_h: 'Edit files', c1_p: 'It can read files in a project and change them.',
-      c2_h: 'Writes and commands wait', c2_p: 'Before it writes a file or runs a command, a confirmation shows up in the conversation. You see the change, then approve or refuse.',
-      c3_h: 'Memory stays on the machine', c3_p: 'What it keeps is stored on this computer.',
-      c4_h: 'MCP and skills', c4_p: 'External tools connect through MCP. Things you do often can be saved as skills.',
-      c5_h: 'Several sessions at once', c5_p: 'More than one conversation can stay open in tabs. Switching away leaves the others where they are.',
-      c6_h: 'Open the files it produced', c6_p: 'Documents and other results stay in a list you can open later.',
-      ui_h: 'The confirmation sits in the conversation',
-      ui_p: 'When it needs to write a file or run a command, the confirmation shows up under the reply. You see the path and the change, then approve or refuse.',
+      doc_title: 'Astra — a desktop app on your computer',
+      doc_desc: 'Astra runs on your computer. It can edit files. Writes and commands stop in the session until you approve or refuse them. Memory stays on the machine. MCP and skills are supported, and several sessions can stay open.',
+      og_desc: 'It can edit files. Writes and commands stop in the session until you approve or refuse them. Memory stays on the machine.',
+      og_alt: 'An Astra session window, for macOS, Windows, and Linux',
+      nav_session: 'Session', nav_dl: 'Download',
+      lede: 'A desktop app on your computer. It can edit files in a project. Writes and commands stop in the session until you approve or refuse them. What it remembers stays on this machine. It runs on macOS, Windows, and Linux.',
+      cap_hero: 'This is the window after you open it. The sidebar is on the left. The two tabs are two sessions.',
+      ui_h: 'The write is still waiting',
+      ui_p: 'read_file has already read README.md. edit_file has not written it. The diff and Approve / Refuse sit on that same row.',
+      cap_ui: 'The same session, with the confirmation in view.',
+      p1_h: 'Edit files.', p1_p: 'The path and the before/after text are in the conversation. It writes only after you approve. Refuse stops it.',
+      p2_h: 'Several sessions.', p2_p: 'Tabs can stay open together. The red dot means this one is still waiting on you. Switching away leaves the other one where it is.',
+      p3_h: 'Memory.', p3_p: 'What it keeps is stored on this computer.',
+      p4_h: 'MCP and skills.', p4_p: 'Extensions and skills are in the sidebar. In the session, / calls a skill.',
+      p5_h: 'Files it produced.', p5_p: 'Files it writes stay in a list you can open later.',
       dl_h: 'Download',
       dl_p: 'The button picks an installer for your system. Version and size come from the latest stable GitHub release. On Windows the default is the smaller online installer. The offline installer is listed separately.',
-      dl_primary: 'Download',
-      dl_loading: 'Reading the latest release…',
+      dl_primary: 'Download', dl_loading: 'Reading the latest release…',
       dl_fail: 'The latest release could not be read. The button opens the Releases page.',
       dl_current: 'Current release {version}',
-      dl_win_offline: 'Windows offline installer',
-      dl_all: 'All releases',
-      dl_yours: 'Your system',
-      dl_btn_mac: 'Download for macOS',
-      dl_btn_win: 'Download for Windows',
-      dl_btn_linux: 'Download for Linux',
-      dl_btn_unknown: 'See the latest release',
-      arch_arm_mac: 'Apple Silicon',
-      arch_arm: 'arm64',
-      arch_x64: 'x64',
-      foot: 'Astra · MIT License',
-      toggle_label: '中文',
-      og_locale: 'en_US',
+      dl_win_offline: 'Windows offline installer', dl_all: 'All releases', dl_yours: 'Your system',
+      dl_btn_mac: 'Download for macOS', dl_btn_win: 'Download for Windows', dl_btn_linux: 'Download for Linux', dl_btn_unknown: 'See the latest release',
+      arch_arm_mac: 'Apple Silicon', arch_arm: 'arm64', arch_x64: 'x64',
+      foot: 'Astra · MIT License', toggle_label: '中文', og_locale: 'en_US',
       ui_agent: 'Agent', ui_serve: 'Agent service', ui_ws: 'Workspace', ui_ext: 'Extensions', ui_skill: 'Skills',
       ui_account: 'Local account', ui_av: 'L',
-      ui_tab1: 'Home styles', ui_tab2: 'Notes',
-      ui_user: 'Set the home page title to weight 600, same as the section titles on the settings page.',
-      ui_asst: 'I checked the settings page. Those section titles are 600, and the home title is 700. I will change that one rule in Home.scss.',
+      ui_tab1: 'Split the Quick start paragraph', ui_tab2: "Clean up today's notes",
+      ui_user: 'Split the Quick start paragraph in README into macOS, Windows, and Linux. Leave the other paragraphs alone.',
+      ui_asst: 'That paragraph is one sentence. I will only change that paragraph. The heading above it and the list below stay as they are.',
+      ui_read: 'README.md · 86 lines',
+      diff_old: '- Download the installer for your platform.',
+      diff_1: '+ - macOS: aarch64.dmg',
+      diff_2: '+ - Windows: x64-setup.exe',
+      diff_3: '+ - Linux: amd64.deb or AppImage',
       ui_allow: 'Approve', ui_deny: 'Refuse',
-      ui_ph: 'Continue, or use @ to mention a file',
-      ui_model: 'Local model',
-      shot_hero: 'Astra session window',
-      shot_ui: 'Confirmation in an Astra session',
+      ui_ph: 'Describe a task, @ a file, / a skill',
+      ui_model: 'This machine',
+      shot_hero: 'Astra session window with the sidebar and two session tabs',
+      shot_ui: 'A file edit waiting for approval in an Astra session',
       features: ['Edit files', 'Writes and commands wait for approval', 'Memory stays on the machine', 'MCP and skills', 'Several sessions', 'Review produced files']
     }
   };
 
-  var lang = 'zh';
-  var release = null;
-  var releaseFailed = false;
-  var platform = detectPlatform();
-  var arch = 'unknown';
-
+  var lang = 'zh', release = null, releaseFailed = false, platform = detectPlatform(), arch = 'unknown';
   function detectPlatform() {
-    var ua = navigator.userAgent || '';
-    var plat = navigator.platform || '';
+    var ua = navigator.userAgent || '', plat = navigator.platform || '';
     if (/Android/i.test(ua)) return 'unknown';
     if (/Win/i.test(plat) || /Windows/i.test(ua)) return 'win';
     if (/Mac/i.test(plat) || /Macintosh|Mac OS/i.test(ua)) return 'mac';
     if (/Linux/i.test(plat) || /Linux/i.test(ua)) return 'linux';
     return 'unknown';
   }
-
   function detectArch() {
     var ua = navigator.userAgent || '';
     if (/aarch64|arm64/i.test(ua)) return Promise.resolve('arm');
@@ -968,14 +615,11 @@
     } catch (e) {}
     return Promise.resolve('unknown');
   }
-
   function dict() { return I18N[lang] || I18N.zh; }
-
-  function setMeta(selector, attr, value) {
-    var el = document.querySelector(selector);
+  function setMeta(sel, attr, value) {
+    var el = document.querySelector(sel);
     if (el && value != null) el.setAttribute(attr, value);
   }
-
   function applyLang(next) {
     lang = next === 'en' ? 'en' : 'zh';
     var d = dict();
@@ -998,15 +642,12 @@
       if (d[key] != null) el.alt = d[key];
     });
     var toggle = document.getElementById('langToggle');
-    if (toggle) {
-      toggle.textContent = d.toggle_label;
-      toggle.setAttribute('aria-label', lang === 'en' ? '切换到中文' : 'Switch to English');
-    }
+    toggle.textContent = d.toggle_label;
+    toggle.setAttribute('aria-label', lang === 'en' ? '切换到中文' : 'Switch to English');
     writeJsonLd();
     renderDownload();
     try { localStorage.setItem('astra-lang', lang); } catch (e) {}
   }
-
   function writeJsonLd() {
     var el = document.getElementById('ldjson');
     if (!el) return;
@@ -1028,10 +669,8 @@
     else delete data.softwareVersion;
     el.textContent = JSON.stringify(data);
   }
-
   function kindOf(name) {
-    var n = String(name || '');
-    var lower = n.toLowerCase();
+    var lower = String(name || '').toLowerCase();
     if (lower.endsWith('.dmg')) return 'mac';
     if (lower.endsWith('.exe') || lower.endsWith('.msi')) {
       if (lower.indexOf('offline') !== -1) return 'win-offline';
@@ -1043,41 +682,27 @@
     if (lower.endsWith('.rpm')) return 'linux-other';
     return null;
   }
-
   function formatMB(bytes) {
     if (typeof bytes !== 'number' || !isFinite(bytes) || bytes <= 0) return '';
     return (bytes / 1048576).toFixed(1) + ' MB';
   }
-
   function archOf(name) {
     if (/aarch64|arm64/i.test(name)) return 'arm';
     if (/x64|amd64|x86_64/i.test(name)) return 'x64';
     return '';
   }
-
   function archText(name, kind) {
-    var a = archOf(name);
-    var d = dict();
+    var a = archOf(name), d = dict();
     if (a === 'arm') return kind === 'mac' ? d.arch_arm_mac : d.arch_arm;
     if (a === 'x64') return d.arch_x64;
     return '';
   }
-
   function assetLabel(asset) {
     var d = dict();
-    var base = {
-      mac: 'macOS',
-      win: 'Windows',
-      'win-other': 'Windows',
-      'win-offline': d.dl_win_offline,
-      'linux-deb': 'Linux (.deb)',
-      'linux-appimage': 'Linux (AppImage)',
-      'linux-other': 'Linux'
-    }[asset.kind] || asset.name;
-    var archLabel = archText(asset.name, asset.kind);
-    return archLabel ? base + ' · ' + archLabel : base;
+    var base = { mac: 'macOS', win: 'Windows', 'win-other': 'Windows', 'win-offline': d.dl_win_offline, 'linux-deb': 'Linux (.deb)', 'linux-appimage': 'Linux (AppImage)', 'linux-other': 'Linux' }[asset.kind] || asset.name;
+    var extra = archText(asset.name, asset.kind);
+    return extra ? base + ' · ' + extra : base;
   }
-
   function prefer(list, wantArch) {
     if (!list.length) return null;
     if (wantArch === 'arm' || wantArch === 'x64') {
@@ -1086,11 +711,8 @@
     }
     return list[0];
   }
-
   function chosenAsset(assets) {
-    function ofKind(kind) {
-      return assets.filter(function (a) { return a.kind === kind; });
-    }
+    function ofKind(kind) { return assets.filter(function (a) { return a.kind === kind; }); }
     if (platform === 'mac') return prefer(ofKind('mac'), arch);
     if (platform === 'win') {
       var online = ofKind('win');
@@ -1109,10 +731,8 @@
     }
     return null;
   }
-
   function buttonLabel(asset) {
-    var d = dict();
-    var text = d.dl_btn_unknown;
+    var d = dict(), text = d.dl_btn_unknown;
     if (asset) {
       if (asset.kind === 'mac') text = d.dl_btn_mac;
       else if (asset.kind === 'win' || asset.kind === 'win-other') text = d.dl_btn_win;
@@ -1122,14 +742,12 @@
     }
     return text;
   }
-
   function versionText(rel) {
     if (!rel) return '';
     if (rel.tag_name) return String(rel.tag_name).replace(/^v/, '');
     if (rel.name) return String(rel.name).replace(/^Astra\s+/i, '');
     return '';
   }
-
   function renderDownload() {
     var d = dict();
     var status = document.getElementById('dlStatus');
@@ -1142,8 +760,7 @@
         assets.push({ name: raw.name, kind: kind, size: raw.size, url: raw.browser_download_url });
       });
       assets.sort(function (a, b) {
-        var ao = KIND_ORDER.indexOf(a.kind);
-        var bo = KIND_ORDER.indexOf(b.kind);
+        var ao = KIND_ORDER.indexOf(a.kind), bo = KIND_ORDER.indexOf(b.kind);
         if (ao !== bo) return ao - bo;
         return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
       });
@@ -1159,10 +776,7 @@
       else if (releaseFailed) status.textContent = d.dl_fail;
       else status.textContent = d.dl_loading;
     }
-    if (!list || !assets.length) {
-      markFallback(list, picked);
-      return;
-    }
+    if (!list || !assets.length) { markFallback(list); return; }
     list.textContent = '';
     assets.forEach(function (asset) {
       var li = document.createElement('li');
@@ -1171,30 +785,21 @@
       var yours = picked && asset.url === picked.url;
       if (yours) li.classList.add('is-yours');
       var a = document.createElement('a');
-      a.href = asset.url;
-      a.rel = 'noopener';
+      a.href = asset.url; a.rel = 'noopener';
       var name = document.createElement('span');
-      name.className = 'name';
-      name.textContent = assetLabel(asset);
-      a.appendChild(name);
+      name.className = 'name'; name.textContent = assetLabel(asset); a.appendChild(name);
       if (yours) {
         var tag = document.createElement('span');
-        tag.className = 'yours';
-        tag.textContent = d.dl_yours;
-        a.appendChild(tag);
+        tag.className = 'yours'; tag.textContent = d.dl_yours; a.appendChild(tag);
       }
       var size = formatMB(asset.size);
       if (size) {
         var meta = document.createElement('span');
-        meta.className = 'meta';
-        meta.textContent = size;
-        a.appendChild(meta);
+        meta.className = 'meta'; meta.textContent = size; a.appendChild(meta);
       }
-      li.appendChild(a);
-      list.appendChild(li);
+      li.appendChild(a); list.appendChild(li);
     });
   }
-
   function markFallback(list) {
     if (!list || (release && release.assets && release.assets.length)) return;
     var want = platform === 'mac' ? 'mac' : platform === 'win' ? 'win' : platform === 'linux' ? 'linux-deb' : '';
@@ -1208,15 +813,13 @@
       if (old) old.remove();
       if (on) {
         var tag = document.createElement('span');
-        tag.className = 'yours';
-        tag.textContent = d.dl_yours;
+        tag.className = 'yours'; tag.textContent = d.dl_yours;
         var name = link.querySelector('.name');
         if (name && name.nextSibling) link.insertBefore(tag, name.nextSibling);
         else link.appendChild(tag);
       }
     });
   }
-
   function applyShots() {
     Object.keys(PRODUCT_IMAGES).forEach(function (key) {
       var path = PRODUCT_IMAGES[key];
@@ -1226,47 +829,29 @@
       var img = slot.querySelector('img.shot');
       var mock = slot.querySelector('.mock');
       if (!img) return;
-      img.addEventListener('error', function () {
-        img.hidden = true;
-        if (mock) mock.hidden = false;
-      });
-      img.src = path;
-      img.hidden = false;
-      if (mock) mock.hidden = true;
+      img.addEventListener('error', function () { img.hidden = true; if (mock) mock.hidden = false; });
+      img.src = path; img.hidden = false; if (mock) mock.hidden = true;
     });
   }
-
-  document.getElementById('langToggle').addEventListener('click', function () {
-    applyLang(lang === 'en' ? 'zh' : 'en');
-  });
-
+  document.getElementById('langToggle').addEventListener('click', function () { applyLang(lang === 'en' ? 'zh' : 'en'); });
   applyShots();
-
   var saved = null;
   try { saved = localStorage.getItem('astra-lang'); } catch (e) {}
   if (saved === 'en' || saved === 'zh') applyLang(saved);
   else if (navigator.language && navigator.language.toLowerCase().indexOf('zh') !== 0) applyLang('en');
   else applyLang('zh');
-
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
   Promise.all([
-    fetch(RELEASES_API, {
-      headers: { Accept: 'application/vnd.github+json' },
-      signal: ctrl ? ctrl.signal : undefined
-    }).then(function (res) {
-      if (!res.ok) throw new Error(String(res.status));
-      return res.json();
-    }).then(function (data) {
-      if (!data || data.draft || data.prerelease) throw new Error('skip');
-      return data;
-    }).catch(function () { return null; }),
+    fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' }, signal: ctrl ? ctrl.signal : undefined })
+      .then(function (res) { if (!res.ok) throw new Error(String(res.status)); return res.json(); })
+      .then(function (data) { if (!data || data.draft || data.prerelease) throw new Error('skip'); return data; })
+      .catch(function () { return null; }),
     detectArch()
   ]).then(function (pair) {
     clearTimeout(timer);
     arch = pair[1] || 'unknown';
-    if (pair[0]) release = pair[0];
-    else releaseFailed = true;
+    if (pair[0]) release = pair[0]; else releaseFailed = true;
     writeJsonLd();
     renderDownload();
   });

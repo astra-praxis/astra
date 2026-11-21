@@ -109,34 +109,37 @@
   .nav { margin-left: auto; display: flex; align-items: center; gap: 16px; }
   .nav a { color: var(--secondary); text-decoration: none; font-size: 14px; font-weight: 500; }
   .nav a:hover { color: var(--ink); }
-  .nav a.go {
-    color: #fff; background: var(--brand); border-radius: 8px; padding: 6px 12px; font-weight: 600;
+  .nav a.go, .lang {
+    height: 32px; padding: 0 12px; border-radius: 8px;
+    display: inline-flex; align-items: center; box-sizing: border-box;
   }
+  .nav a.go { color: #fff; background: var(--brand); font-weight: 600; }
   .nav a.go:hover { background: #4f46e5; color: #fff; }
   .lang {
-    padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
-    background: var(--surface); color: var(--secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface); color: var(--secondary);
+    font-size: 13px; font-weight: 600; cursor: pointer;
   }
 
-  .lead { padding: 28px 0 8px; }
-  h1 { margin: 0; font-size: 28px; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; }
-  .lead p { margin: 10px 0 0; max-width: 62ch; color: var(--secondary); font-size: 15px; line-height: 1.6; }
-  .lead-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .lead { padding: 36px 0 0; }
+  h1 { margin: 0; max-width: 22em; font-size: 26px; line-height: 1.3; font-weight: 600; letter-spacing: -0.02em; }
+  .lead p { margin: 10px 0 0; max-width: 66ch; color: var(--secondary); font-size: 15px; line-height: 1.65; }
+  .lead-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
   .btn {
     display: inline-flex; align-items: center; justify-content: center;
+    height: 36px; padding: 0 14px;
     text-decoration: none; font-size: 14px; font-weight: 600;
-    padding: 8px 14px; border-radius: 10px; border: 1px solid transparent;
+    border-radius: 10px; border: 1px solid transparent;
   }
   .btn-primary { background: var(--brand); color: #fff; }
   .btn-primary:hover { background: #4f46e5; }
   .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
 
-  section { padding: 36px 0; }
-  h2 { margin: 0 0 8px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
-  .sec p { margin: 0; max-width: 68ch; color: var(--secondary); }
+  section { padding: 48px 0 0; }
+  h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.35; font-weight: 600; letter-spacing: -0.015em; }
+  .sec p { margin: 0; max-width: 66ch; color: var(--secondary); font-size: 15px; line-height: 1.65; }
 
-  figure.frame { margin: 18px 0 0; }
-  figcaption { margin-top: 8px; color: var(--muted); font-size: 13px; }
+  figure.frame { margin: 22px 0 0; }
+  figcaption { margin: 12px 2px 0; max-width: 66ch; color: var(--muted); font-size: 13px; line-height: 1.5; }
   .frame .shot { width: 100%; height: auto; display: block; border-radius: 12px; border: 1px solid var(--line); }
   .frame .shot[hidden], .frame .mock[hidden] { display: none !important; }
 
@@ -144,20 +147,21 @@
   .win {
     display: flex; flex-direction: column;
     background: var(--bg);
-    border: 1px solid var(--line);
+    border: 1px solid rgba(28, 34, 51, 0.08);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 12px 32px rgba(15, 20, 40, 0.08);
+    box-shadow: 0 1px 2px rgba(15, 20, 40, 0.04), 0 18px 44px rgba(15, 20, 40, 0.10);
     text-align: left;
     color: var(--ink);
   }
+  .win svg { display: block; }
   .tb {
     height: 44px; flex-shrink: 0;
     display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
-    padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--divider);
+    padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--divider);
   }
-  .lights { display: flex; gap: 6px; }
-  .lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .lights { display: flex; gap: 8px; align-items: center; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
   .lights i:nth-child(1) { background: #ff5f57; }
   .lights i:nth-child(2) { background: #febc2e; }
   .lights i:nth-child(3) { background: #28c840; }
@@ -181,47 +185,56 @@
   .side nav span.item.on { background: var(--brand); color: #fff; }
   .side svg { width: 18px; height: 18px; flex: 0 0 18px; }
   .side-f {
-    margin-top: auto; display: flex; align-items: center; gap: 8px;
-    padding: 8px; border-top: 1px solid rgba(255,255,255,.08); color: var(--side-strong); font-size: 13px;
+    margin-top: auto; display: flex; align-items: center; gap: 9px;
+    padding: 10px 12px 12px; border-top: 1px solid rgba(255,255,255,.08);
+    color: var(--side-strong); font-size: 13px; font-weight: 500;
   }
   .av {
     width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
     background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; font-size: 12px; font-weight: 600; flex-shrink: 0;
   }
   .col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
-  .tabs { display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; }
+  .tabs {
+    display: flex; align-items: flex-end; gap: 2px;
+    padding: 8px 12px 0; border-bottom: 1px solid var(--line);
+  }
   .tab {
-    display: flex; align-items: center; gap: 5px; max-width: 180px; min-width: 0;
-    padding: 5px 6px 5px 9px; font-size: 12px; color: var(--secondary);
+    display: flex; align-items: center; gap: 6px; max-width: 200px; min-width: 0;
+    padding: 6px 8px 7px 10px; font-size: 12px; line-height: 1.3; color: var(--secondary);
     background: #f6f7fb; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
   }
-  .tab.on { background: var(--surface); color: var(--ink); font-weight: 500; border-color: var(--line); }
-  .tab svg { width: 11px; height: 11px; flex-shrink: 0; }
+  .tab.on {
+    position: relative; z-index: 1; margin-bottom: -1px;
+    background: var(--bg); color: var(--ink); font-weight: 600;
+    border-color: var(--line); border-bottom: 1px solid var(--bg);
+  }
+  .tab svg { width: 12px; height: 12px; flex-shrink: 0; }
   .tab .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; flex-shrink: 0; }
-  .tab .x { margin-left: 2px; color: var(--muted); font-size: 12px; line-height: 1; }
+  .tab .x { width: 12px; height: 12px; color: var(--muted); opacity: 0; }
+  .tab.on .x { opacity: 0.7; }
   .tab-add { width: 22px; height: 22px; margin: 0 0 3px 4px; color: var(--muted); display: flex; align-items: center; justify-content: center; }
   .tab-add svg { width: 13px; height: 13px; }
-  .stream { padding: 8px 16px 4px; display: flex; flex-direction: column; }
+  .stream { padding: 4px 16px 0; display: flex; flex-direction: column; }
   .user {
-    margin: 12px 0; padding: 10px 16px; border-radius: 10px;
+    margin: 14px 0 2px; padding: 10px 16px; border-radius: 10px;
     background: var(--user); color: var(--user-text);
     border: 1px solid rgba(255,255,255,.08);
     box-shadow: inset 0 1px 4px rgba(0,0,0,.28);
     font-size: 13.5px; line-height: 1.6; white-space: pre-wrap;
   }
-  .asst { font-size: 14px; line-height: 1.7; color: var(--ink); padding: 2px 0 8px; }
-  .tool { width: 100%; padding: 2px 0; font-size: 12.5px; color: var(--secondary); }
-  .tool.is-perm { margin-top: 4px; padding: 6px 8px 6px 12px; border-left: 2px solid var(--line); }
-  .tool-h { display: flex; align-items: center; gap: 6px; padding: 1px 4px; }
-  .tool-h svg { width: 13px; height: 13px; flex-shrink: 0; }
-  .tool code { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--ink); }
-  .tool .arg { font-family: var(--mono); font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .asst { font-size: 14px; line-height: 1.7; color: var(--ink); padding: 8px 2px 10px; }
+  .tool { width: 100%; padding: 3px 0; font-size: 12.5px; color: var(--secondary); }
+  .tool.is-perm { margin: 6px 0 2px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line-strong, #c8cede); }
+  .tool-h { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 0; }
+  .tool-h svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--secondary); }
+  .tool code { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink); }
+  .tool .arg { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tool pre {
-    margin: 2px 0 0; padding: 1px 0 1px 12px;
-    font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--secondary); white-space: pre-wrap;
+    margin: 2px 0 0; padding: 0 0 0 20px;
+    font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--secondary); white-space: pre-wrap;
   }
-  .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .acts { display: flex; gap: 8px; margin: 10px 0 2px 20px; }
   .ok, .no {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 3px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
@@ -234,7 +247,7 @@
     background: var(--surface); border: 1.5px solid var(--line); border-radius: 18px;
     box-shadow: 0 4px 24px rgba(15, 20, 40, 0.06);
   }
-  .dock .ph { min-height: 36px; font-size: 14.5px; line-height: 1.5; color: var(--muted); }
+  .dock .ph { min-height: 28px; padding-top: 2px; font-size: 14.5px; line-height: 1.5; color: var(--muted); }
   .dock-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .dock-l, .dock-r { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .ib { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
@@ -246,9 +259,9 @@
   }
   .folder svg, .model svg { width: 14px; height: 14px; flex-shrink: 0; }
   .model {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px;
-    color: var(--secondary); font-size: 12px;
+    display: inline-flex; align-items: center; gap: 4px;
+    max-width: 140px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px;
+    color: var(--secondary); font-size: 12px; white-space: nowrap;
   }
   .send {
     width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: #fff;
@@ -256,25 +269,34 @@
   }
   .send svg { width: 16px; height: 16px; }
 
-  .points { list-style: none; margin: 14px 0 0; padding: 0; max-width: 68ch; }
-  .points li { padding: 10px 0; border-top: 1px solid var(--divider); color: var(--secondary); }
-  .points strong { color: var(--ink); font-weight: 600; }
+  .points { margin: 28px 0 0; padding: 0; max-width: 66ch; }
+  .points div { padding: 14px 0; border-top: 1px solid var(--divider); }
+  .points dt { margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+  .points dd { margin: 4px 0 0; color: var(--secondary); font-size: 14px; line-height: 1.6; }
 
+  .dl-actions { margin: 18px 0 0; }
   .dl-status { margin: 10px 0 0; color: var(--secondary); font-size: 13px; }
-  .dl-list { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--line); }
-  .dl-list a {
-    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-    padding: 12px 2px; border-bottom: 1px solid var(--divider); text-decoration: none;
+  .dl-list {
+    list-style: none; margin: 16px 0 0; padding: 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
   }
-  .dl-list .name { font-weight: 600; }
-  .dl-list .meta { margin-left: auto; color: var(--secondary); font-variant-numeric: tabular-nums; font-size: 13px; }
-  .dl-list .yours { font-size: 12px; font-weight: 600; color: var(--brand-dark); }
-  .dl-list li.is-yours .name { color: var(--brand-dark); }
+  .dl-list a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 13px 16px; border-bottom: 1px solid var(--divider); text-decoration: none;
+  }
+  .dl-list li:last-child a { border-bottom: none; }
+  .dl-list .name { font-weight: 600; min-width: 0; }
+  .dl-list .meta { margin-left: auto; color: var(--secondary); font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+  .dl-list .yours {
+    flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--brand-dark);
+    background: #fff; border-radius: 999px; padding: 2px 8px;
+  }
+  .dl-list li.is-yours { background: var(--brand-soft); }
   .dl-list li.is-offline .name { font-weight: 500; color: var(--secondary); }
   .more { margin: 12px 0 0; font-size: 13px; }
   .more a { color: var(--secondary); }
 
-  footer { border-top: 1px solid var(--line); padding: 22px 0 40px; color: var(--muted); font-size: 13px; }
+  footer { border-top: 1px solid var(--line); margin-top: 48px; padding: 22px 0 40px; color: var(--muted); font-size: 13px; }
   footer p { margin: 0; }
   footer .quiet { margin-top: 6px; }
   footer .links { margin-top: 10px; display: flex; gap: 16px; }
@@ -283,13 +305,16 @@
   @media (max-width: 720px) {
     .wrap, .bar-inner { padding-left: 16px; padding-right: 16px; }
     .nav a:not(.go) { display: none; }
-    h1 { font-size: 24px; }
-    .side { width: 60px; }
+    h1 { font-size: 22px; }
+    .side { width: 64px; }
     .side-h span, .side .lbl, .side-f .lbl { display: none; }
-    .side-h, .side nav span.item, .side-f { justify-content: center; padding-left: 0; padding-right: 0; }
-    .side nav span.item { gap: 0; }
-    .dock-bar { flex-wrap: wrap; }
-    .dl-list .meta { margin-left: 0; }
+    .side nav { align-items: center; }
+    .side-h, .side-f { justify-content: center; margin-left: 0; margin-right: 0; }
+    .side nav span.item { width: 40px; height: 40px; padding: 0; justify-content: center; }
+    .dock { margin-left: 10px; margin-right: 10px; padding-left: 12px; }
+    .model { max-width: 72px; padding-left: 6px; padding-right: 6px; }
+    .dock-bar { flex-wrap: nowrap; }
+    .dl-list .name { white-space: normal; }
   }
 </style>
 </head>
@@ -326,8 +351,8 @@
 
 <main>
   <div class="wrap lead">
-    <h1>Astra</h1>
-    <p data-i18n="lede">装在你电脑上的桌面程序。它可以改项目里的文件。写入和执行命令会停在会话里，等你点批准或拒绝。记住的内容留在这台机器上。macOS、Windows、Linux 都能装。</p>
+    <h1 data-i18n="h1">装在你电脑上的桌面程序</h1>
+    <p data-i18n="lede">它可以改项目里的文件。写入和执行命令会停在会话里，等你点批准或拒绝。记住的内容留在这台机器上。macOS、Windows、Linux 都能装。</p>
     <div class="lead-actions">
       <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest"><span class="js-dl-label" data-i18n="dl_primary">下载</span></a>
       <a class="btn btn-ghost" href="https://github.com/astra-praxis/astra" target="_blank" rel="noopener">GitHub</a>
@@ -358,7 +383,7 @@
             </aside>
             <div class="col">
               <div class="tabs">
-                <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><span class="x">×</span></div>
+                <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><svg class="x"><use href="#i-x"/></svg></div>
                 <div class="tab"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab2">整理今天的会议记录</span></div>
                 <div class="tab-add"><svg><use href="#i-plus"/></svg></div>
               </div>
@@ -417,7 +442,7 @@
           </div>
           <div class="col">
             <div class="tabs">
-              <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><span class="x">×</span></div>
+              <div class="tab on"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab1">把 README 里「快速体验」那一段拆成</span><i class="dot"></i><svg class="x"><use href="#i-x"/></svg></div>
               <div class="tab"><svg><use href="#i-msg"/></svg><span class="t" data-i18n="ui_tab2">整理今天的会议记录</span></div>
               <div class="tab-add"><svg><use href="#i-plus"/></svg></div>
             </div>
@@ -459,19 +484,19 @@
       </div>
       <figcaption data-i18n="cap_ui">同一段会话，把确认那一块摊开。</figcaption>
     </figure>
-    <ul class="points">
-      <li><strong data-i18n="p1_h">改文件。</strong> <span data-i18n="p1_p">要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。</span></li>
-      <li><strong data-i18n="p2_h">几个会话。</strong> <span data-i18n="p2_p">标签可以同时开着。红点表示这一段还在等你处理。切走之后，原来那段还在。</span></li>
-      <li><strong data-i18n="p3_h">记忆。</strong> <span data-i18n="p3_p">记住的内容存在这台电脑上。</span></li>
-      <li><strong data-i18n="p4_h">MCP 和技能。</strong> <span data-i18n="p4_p">侧栏里有扩展和技能。对话里用 / 调用技能。</span></li>
-      <li><strong data-i18n="p5_h">产物。</strong> <span data-i18n="p5_p">写出来的文件会留在列表里，之后还能打开。</span></li>
-    </ul>
+    <dl class="points">
+      <div><dt data-i18n="p1_h">改文件</dt><dd data-i18n="p1_p">要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。</dd></div>
+      <div><dt data-i18n="p2_h">几个会话</dt><dd data-i18n="p2_p">标签可以同时开着。红点表示这一段还在等你处理。切走之后，原来那段还在。</dd></div>
+      <div><dt data-i18n="p3_h">记忆</dt><dd data-i18n="p3_p">记住的内容存在这台电脑上。</dd></div>
+      <div><dt data-i18n="p4_h">MCP 和技能</dt><dd data-i18n="p4_p">侧栏里有扩展和技能。对话里用 / 调用技能。</dd></div>
+      <div><dt data-i18n="p5_h">产物</dt><dd data-i18n="p5_p">写出来的文件会留在列表里，之后还能打开。</dd></div>
+    </dl>
   </section>
 
   <section class="wrap sec" id="download">
     <h2 data-i18n="dl_h">下载</h2>
     <p data-i18n="dl_p">按钮按你的系统选安装包。版本和大小来自 GitHub 上最新的正式版。Windows 默认是较小的在线安装包，离线包单独列在下面。</p>
-    <p style="margin-top:14px">
+    <p class="dl-actions">
       <a class="btn btn-primary js-dl" href="https://github.com/astra-praxis/astra/releases/latest"><span class="js-dl-label" data-i18n="dl_primary">下载</span></a>
     </p>
     <p class="dl-status" id="dlStatus" data-i18n="dl_loading">正在读取最新版本…</p>
@@ -511,16 +536,17 @@
       og_desc: '它可以改文件。写入和执行命令会停在会话里，等你点批准或拒绝。记忆留在这台机器上。',
       og_alt: 'Astra 的会话窗口，适用于 macOS、Windows 和 Linux',
       nav_session: '会话', nav_dl: '下载',
-      lede: '装在你电脑上的桌面程序。它可以改项目里的文件。写入和执行命令会停在会话里，等你点批准或拒绝。记住的内容留在这台机器上。macOS、Windows、Linux 都能装。',
+      h1: '装在你电脑上的桌面程序',
+      lede: '它可以改项目里的文件。写入和执行命令会停在会话里，等你点批准或拒绝。记住的内容留在这台机器上。macOS、Windows、Linux 都能装。',
       cap_hero: '打开之后就是这个窗口。左边是侧栏，上面两个标签是两段会话。',
       ui_h: '写入还停在批准上',
       ui_p: 'read_file 已经读完 README.md。edit_file 还没写进去。diff 和「批准 / 拒绝」在同一条下面。',
       cap_ui: '同一段会话，把确认那一块摊开。',
-      p1_h: '改文件。', p1_p: '要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。',
-      p2_h: '几个会话。', p2_p: '标签可以同时开着。红点表示这一段还在等你处理。切走之后，原来那段还在。',
-      p3_h: '记忆。', p3_p: '记住的内容存在这台电脑上。',
-      p4_h: 'MCP 和技能。', p4_p: '侧栏里有扩展和技能。对话里用 / 调用技能。',
-      p5_h: '产物。', p5_p: '写出来的文件会留在列表里，之后还能打开。',
+      p1_h: '改文件', p1_p: '要改的路径和前后文本在对话里。点批准才会写入，点拒绝就停。',
+      p2_h: '几个会话', p2_p: '标签可以同时开着。红点表示这一段还在等你处理。切走之后，原来那段还在。',
+      p3_h: '记忆', p3_p: '记住的内容存在这台电脑上。',
+      p4_h: 'MCP 和技能', p4_p: '侧栏里有扩展和技能。对话里用 / 调用技能。',
+      p5_h: '产物', p5_p: '写出来的文件会留在列表里，之后还能打开。',
       dl_h: '下载',
       dl_p: '按钮按你的系统选安装包。版本和大小来自 GitHub 上最新的正式版。Windows 默认是较小的在线安装包，离线包单独列在下面。',
       dl_primary: '下载', dl_loading: '正在读取最新版本…',
@@ -553,16 +579,17 @@
       og_desc: 'It can edit files. Writes and commands stop in the session until you approve or refuse them. Memory stays on the machine.',
       og_alt: 'An Astra session window, for macOS, Windows, and Linux',
       nav_session: 'Session', nav_dl: 'Download',
-      lede: 'A desktop app on your computer. It can edit files in a project. Writes and commands stop in the session until you approve or refuse them. What it remembers stays on this machine. It runs on macOS, Windows, and Linux.',
+      h1: 'A desktop app on your computer',
+      lede: 'It can edit files in a project. Writes and commands stop in the session until you approve or refuse them. What it remembers stays on this machine. It runs on macOS, Windows, and Linux.',
       cap_hero: 'This is the window after you open it. The sidebar is on the left. The two tabs are two sessions.',
       ui_h: 'The write is still waiting',
       ui_p: 'read_file has already read README.md. edit_file has not written it. The diff and Approve / Refuse sit on that same row.',
       cap_ui: 'The same session, with the confirmation in view.',
-      p1_h: 'Edit files.', p1_p: 'The path and the before/after text are in the conversation. It writes only after you approve. Refuse stops it.',
-      p2_h: 'Several sessions.', p2_p: 'Tabs can stay open together. The red dot means this one is still waiting on you. Switching away leaves the other one where it is.',
-      p3_h: 'Memory.', p3_p: 'What it keeps is stored on this computer.',
-      p4_h: 'MCP and skills.', p4_p: 'Extensions and skills are in the sidebar. In the session, / calls a skill.',
-      p5_h: 'Files it produced.', p5_p: 'Files it writes stay in a list you can open later.',
+      p1_h: 'Edit files', p1_p: 'The path and the before/after text are in the conversation. It writes only after you approve. Refuse stops it.',
+      p2_h: 'Several sessions', p2_p: 'Tabs can stay open together. The red dot means this one is still waiting on you. Switching away leaves the other one where it is.',
+      p3_h: 'Memory', p3_p: 'What it keeps is stored on this computer.',
+      p4_h: 'MCP and skills', p4_p: 'Extensions and skills are in the sidebar. In the session, / calls a skill.',
+      p5_h: 'Files it produced', p5_p: 'Files it writes stay in a list you can open later.',
       dl_h: 'Download',
       dl_p: 'The button picks an installer for your system. Version and size come from the latest stable GitHub release. On Windows the default is the smaller online installer. The offline installer is listed separately.',
       dl_primary: 'Download', dl_loading: 'Reading the latest release…',

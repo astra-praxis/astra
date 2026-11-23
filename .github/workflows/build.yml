@@ -19,6 +19,12 @@ jobs:
             target: aarch64-apple-darwin
             platform: macos
 
+          # macOS Intel（x86_64）：GitHub 已不再提供 Intel runner，统一在 Apple Silicon
+          # runner 上交叉编译（--target 显式指定，产物落在 target/<triple>/release/bundle/）
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: macos-x86
+
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             platform: windows
@@ -140,6 +146,9 @@ jobs:
         with:
           workspaces: astra/src-tauri
           cache-all-crates: true
+          # 按 target triple 分开缓存：两个 macOS 任务同 OS 不同 target，
+          # 共用 key 会让 target/ 与 target/<triple>/ 互相覆盖，x86 每次冷编译
+          key: ${{ matrix.target }}
           save-if: ${{ github.event_name == 'push' }}
 
       # ================= INSTALL DEPENDENCIES =================
@@ -195,6 +204,8 @@ jobs:
       # ================= BUILD =================
       # Linux 上显式指定 bundle 类型，避免读到 conf 里的 nsis/app/dmg；
       # Windows 构建两遍：默认 downloadBootstrapper（在线小包）+ offlineInstaller（WebView2 内置版）
+      # macOS arm64 走原生构建（产物在 target/release/）；macOS x86 在 Apple Silicon runner
+      # 上以 --target 交叉编译（产物在 target/x86_64-apple-darwin/release/）
       # Linux 额外重试：bundler 的 AppImage 工具下载无重试，网络抖动时直接失败；
       # 重跑时 vite/cargo 均命中缓存，代价可接受。
       - name: Build Tauri App
@@ -212,6 +223,8 @@ jobs:
               done
               mv bundle-keep/*.exe src-tauri/target/release/bundle/nsis/
               rmdir bundle-keep
+            elif [ "${{ matrix.platform }}" = "macos-x86" ]; then
+              pnpm tauri build --target x86_64-apple-darwin
             else
               pnpm tauri build
             fi
@@ -246,6 +259,17 @@ jobs:
           path: |
             astra/src-tauri/target/release/bundle/dmg/*.dmg
             astra/src-tauri/target/release/bundle/macos/*.app.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload macOS x86 artifacts
+        if: matrix.platform == 'macos-x86'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-x86-artifacts
+          path: |
+            astra/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            astra/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
           if-no-files-found: warn
           retention-days: 7
 
@@ -297,6 +321,12 @@ jobs:
           name: macos-artifacts
           path: ./release-assets/macos
 
+      - name: Download macOS x86 artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-x86-artifacts
+          path: ./release-assets/macos-x86
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v8
         with:
@@ -314,6 +344,8 @@ jobs:
         run: |
           echo "=== macOS files ==="
           find ./release-assets/macos -type f || echo "No macOS files"
+          echo "=== macOS x86 files ==="
+          find ./release-assets/macos-x86 -type f || echo "No macOS x86 files"
           echo "=== Windows files ==="
           find ./release-assets/windows -type f || echo "No Windows files"
         shell: bash
@@ -329,6 +361,7 @@ jobs:
           generate_release_notes: true
           files: |
             release-assets/macos/**/*.dmg
+            release-assets/macos-x86/**/*.dmg
             release-assets/windows/**/*.exe
             release-assets/linux/**/*.AppImage
             release-assets/linux/**/*.deb

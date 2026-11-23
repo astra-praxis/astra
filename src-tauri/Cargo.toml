@@ -58,6 +58,12 @@ argon2 = "0.5"
 # 粘贴文件导入（agent_import_pasted_files）：读系统剪贴板里的文件 URL
 # （macOS NSPasteboard / Windows CF_HDROP / Linux text/uri-list）
 clipboard-files = "0.1"
+# 手机遥控桥（mobile_bridge.rs）：LAN 内 HTTP + WebSocket 服务，与 astra-serve 同源同版本
+axum = { version = "0.7", default-features = false, features = ["json", "tokio", "http1", "query", "ws"] }
+# 配对二维码（SVG 渲染即可，不引入 png 编码器）
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+# 局域网 IP 枚举（macOS getifaddrs / Windows GetAdaptersAddresses；UDP connect 路由探测的兜底）
+if-addrs = "0.13"
 
 [dev-dependencies]
 tokio-util = "0.7"

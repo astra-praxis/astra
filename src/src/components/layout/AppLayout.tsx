@@ -14,17 +14,20 @@ import {
   Square,
   X,
   Server,
+  Smartphone,
 } from 'lucide-react';
 import { useNmStore } from '@/stores/nm';
 import { useFavoriteStore } from '@/stores/favorite';
 import { useChatToolbarStore } from '@/stores/chatToolbar';
 import { useWorkspaceStore } from '@/stores/workspace';
+import { ensureMobileBridge } from '@/stores/mobile';
 import AccountMenu from '@/components/account/AccountMenu';
 import './layout.scss';
 
 const menuItems = [
   { id: 'agent', label: 'Agent', path: '/agent', icon: Bot },
   { id: 'serve', label: 'Agent 服务', path: '/serve', icon: Server },
+  { id: 'remote', label: '手机遥控', path: '/remote', icon: Smartphone },
   { id: 'workspace', label: '工作空间', path: '/workspace', icon: FolderOpen },
   { id: 'market-mcp', label: '扩展管理', path: '/market/mcp', icon: Blocks },
   { id: 'market-skills', label: '技能管理', path: '/market/skills', icon: GraduationCap },
@@ -50,11 +53,12 @@ export default function AppLayout() {
 
   const titleBusy = nmScanning || nmCleaning;
 
-  // 初始化：收藏开发模式 + 工具栏数据 + 工作空间
+  // 初始化：收藏开发模式 + 工具栏数据 + 工作空间 + 手机遥控桥监听
   useEffect(() => {
     loadFavorite();
     loadInitialToolbar();
     loadFromSettings();
+    void ensureMobileBridge();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

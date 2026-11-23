@@ -601,6 +601,20 @@ pub async fn agent_start_run(
         model_name
     );
 
+    // 手机镜像：用户消息条目。桌面端 pushUser 是纯本地行为不产生事件，
+    // 手机对话流里永远看不到自己发了什么；这里在 Run 真正准入后补发一条
+    // user_message（首条事件），手机端借此立即渲染用户气泡，并在「新对话」
+    // 发送场景下据此收养 PC 新建的会话（见 mobile_bridge_mobile.html onEnvelope）
+    crate::mobile_bridge::broadcast_event(
+        "agent-event",
+        &json!({
+            "type": "user_message",
+            "session_id": session_id,
+            // user_text 在下方记忆采集（observe_text）还要用，这里不能被 json! 按值消费
+            "text": user_text.clone(),
+        }),
+    );
+
     // 4. 事件转发任务：Envelope → agent-event + JSONL 日志；Run 结束（tx 全部 drop）后自然退出
     let forward_app = app.clone();
     let active = Arc::clone(&state.active);
@@ -628,7 +642,10 @@ pub async fn agent_start_run(
             if let Some(dir) = &log_dir {
                 log_event(dir, &env);
             }
-            let _ = forward_app.emit("agent-event", ui_payload(&env));
+            // 同一载荷：桌面 Tauri 事件 + 手机遥控 WS 镜像（无人连接时 no-op）
+            let ui = ui_payload(&env);
+            let _ = forward_app.emit("agent-event", &ui);
+            crate::mobile_bridge::broadcast_event("agent-event", &ui);
         }
         // 先结算后记忆：流关闭即释放准入并通知 UI（底部 loading 随渲染
         // 完成立即消失），记忆提交放在 settled 之后后台执行——开 agent
@@ -649,13 +666,12 @@ pub async fn agent_start_run(
                 active.remove(&settled_session);
             }
         }
-        let _ = forward_app.emit(
-            "agent-run-settled",
-            json!({
-                "session_id": settled_session,
-                "persistence_error": persistence_error,
-            }),
-        );
+        let settled_payload = json!({
+            "session_id": settled_session,
+            "persistence_error": persistence_error,
+        });
+        let _ = forward_app.emit("agent-run-settled", &settled_payload);
+        crate::mobile_bridge::broadcast_event("run-settled", &settled_payload);
         if let Some(engine) = observe_engine {
             // 项目绑定：本 Run 提炼的记忆落到对应项目作用域，避免跨项目串线。
             // best-effort：失败只记日志。键与 recall 侧 ProjectBoundProvider

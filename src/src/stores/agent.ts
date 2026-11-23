@@ -7,7 +7,8 @@
  * 职责边界：
  * - store 持有会话数据与运行状态：sessionId / entries / running / status / error /
  *   projectPath / input / sessions（历史列表）
- * - 输入弹层（@/ /）、历史面板开关、模型参数（systemPrompt 等）是易失 UI 状态，留在页面组件
+ * - 输入弹层（@/ /）、历史面板开关是易失 UI 状态，留在页面组件；systemPrompt 在
+ *   chatToolbar store（与模型选择同处，手机直发 stores/mobile.ts 要读到同一份）
  * - agent_start_run / agent_cancel / agent_permission_decide 的调用留在页面组件
  *   （依赖表单与模型选择校验），store 只承接结果状态
  */

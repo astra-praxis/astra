@@ -339,10 +339,10 @@ impl PermissionBridge for HubBridge {
         let in_tool = req.tool_call_id.is_empty();
         let id = if in_tool {
             let id = in_tool_permission_id();
-            let _ = self.app.emit(
-                "agent-event",
-                in_tool_permission_event(&self.session_id, &id, &req.tool_name, &req.summary),
-            );
+            let event =
+                in_tool_permission_event(&self.session_id, &id, &req.tool_name, &req.summary);
+            let _ = self.app.emit("agent-event", &event);
+            crate::mobile_bridge::broadcast_event("agent-event", &event);
             id
         } else {
             req.tool_call_id
@@ -354,10 +354,9 @@ impl PermissionBridge for HubBridge {
         };
         // 回执 permission_decided：前端确认卡落定（复用既有渲染）
         if in_tool {
-            let _ = self.app.emit(
-                "agent-event",
-                in_tool_permission_decided_event(&self.session_id, &id, decision),
-            );
+            let event = in_tool_permission_decided_event(&self.session_id, &id, decision);
+            let _ = self.app.emit("agent-event", &event);
+            crate::mobile_bridge::broadcast_event("agent-event", &event);
         }
         decision
     }

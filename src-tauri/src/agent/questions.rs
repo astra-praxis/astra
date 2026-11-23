@@ -122,12 +122,12 @@ impl agent_core::UserQuestionBridge for QuestionBridge {
         allow_free_text: bool,
     ) -> std::result::Result<String, String> {
         let (qid, rx) = self.hub.register(&self.session_id);
+        let payload = question_payload(&self.session_id, &qid, &question, options, allow_free_text);
         self.app
-            .emit(
-                "agent-question",
-                question_payload(&self.session_id, &qid, &question, options, allow_free_text),
-            )
+            .emit("agent-question", &payload)
             .map_err(|e| format!("发送问题失败: {e}"))?;
+        // 手机遥控镜像：提问卡同步给已连接的手机（允许手机端作答）
+        crate::mobile_bridge::broadcast_event("agent-question", &payload);
         match rx.await {
             Ok(Some(answer)) => Ok(answer),
             Ok(None) => Err("用户取消回答".into()),

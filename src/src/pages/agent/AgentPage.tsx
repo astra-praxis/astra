@@ -282,8 +282,10 @@ export default function AgentPage() {
   const runningModels = useChatToolbarStore((s) => s.runningModels);
   const showSettings = useChatToolbarStore((s) => s.showSettings);
 
-  // ===== 参数（SettingsSheet；system_prompt 传给 agent_start_run，温度/token 后端暂不支持已移除） =====
-  const [systemPrompt, setSystemPrompt] = useState('');
+  // ===== 参数（SettingsSheet；system_prompt 传给 agent_start_run，温度/token 后端暂不支持已移除）
+  // 状态在 chatToolbar store：手机直发（stores/mobile.ts）要与队列续发读到同一份 systemPrompt =====
+  const systemPrompt = useChatToolbarStore((s) => s.systemPrompt);
+  const setSystemPrompt = useChatToolbarStore((s) => s.setSystemPrompt);
 
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
   const selectedModel = runningModels.find((m) => m.port === selectedModelPort) ?? null;

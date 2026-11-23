@@ -7,6 +7,7 @@ mod app;
 mod extensions;
 mod friendly;
 mod memory;
+mod mobile_bridge;
 mod net_util;
 mod proc_util;
 mod providers;
@@ -159,6 +160,7 @@ pub fn run() {
         ))
         .manage(app::downloader::DownloadManager::new())
         .manage(agent::AgentState::default())
+        .manage(mobile_bridge::MobileBridgeState::default())
         .manage(Mutex::new(HashMap::<
             String,
             app::dev_mode::RunningDevProcess,
@@ -419,6 +421,12 @@ pub fn run() {
             serve_console::serve_console_status,
             serve_console::serve_console_start,
             serve_console::serve_console_open,
+            // 手机遥控桥（LAN 配对 + WS 镜像 + 队列转发）
+            mobile_bridge::mobile_bridge_start,
+            mobile_bridge::mobile_bridge_stop,
+            mobile_bridge::mobile_bridge_status,
+            mobile_bridge::mobile_bridge_push_queue,
+            mobile_bridge::mobile_bridge_server_event,
             // Agent Sessions
             agent::sessions::list_agent_sessions,
             agent::sessions::save_agent_session,

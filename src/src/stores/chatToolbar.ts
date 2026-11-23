@@ -43,6 +43,9 @@ interface ChatToolbarState {
   overrideModelName: string | null;
   isSending: boolean;
   showSettings: boolean;
+  /** 系统提示词（SettingsSheet 编辑；agent_start_run 的 system_prompt）。
+   *  放 store 而非页面组件：手机直发（stores/mobile.ts）要与队列续发读到同一份 */
+  systemPrompt: string;
 
   providers: ProviderConfig[];
   providerModels: ModelInfo[];
@@ -61,6 +64,7 @@ interface ChatToolbarState {
   setOverrideModelName: (name: string | null) => void;
   setIsSending: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
+  setSystemPrompt: (v: string) => void;
   setSessionsCount: (n: number) => void;
   setOnClear: (fn: () => void) => void;
   setOnToggleSidebar: (fn: () => void) => void;
@@ -77,6 +81,7 @@ export const useChatToolbarStore = create<ChatToolbarState>((set, get) => ({
   overrideModelName: null,
   isSending: false,
   showSettings: false,
+  systemPrompt: '',
 
   providers: [],
   providerModels: [],
@@ -97,6 +102,7 @@ export const useChatToolbarStore = create<ChatToolbarState>((set, get) => ({
   setOverrideModelName: (name) => set({ overrideModelName: name }),
   setIsSending: (v) => set({ isSending: v }),
   setShowSettings: (v) => set({ showSettings: v }),
+  setSystemPrompt: (v) => set({ systemPrompt: v }),
   setSessionsCount: (n) => set({ sessionsCount: n }),
   setOnClear: (fn) => set({ onClear: fn }),
   setOnToggleSidebar: (fn) => set({ onToggleSidebar: fn }),

@@ -16,6 +16,7 @@
 //! WS 与 HTTP API 都要求 token（query 参数）；token 只存在于 QR 与内存，不落盘。
 //! 手机页面是浏览器打开的静态 HTML（本模块内嵌），无需安装任何 App。
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -34,8 +35,72 @@ fn bus() -> &'static broadcast::Sender<String> {
     BUS.get_or_init(|| broadcast::channel(1024).0)
 }
 
+// ===== 正在进行的 Run 事件缓冲（mid-run 加入的手机补看当前轮） =====
+//
+// 磁盘 agent_sessions.json 只在 Run 结算后由前端保存：中途扫码的手机拉历史
+// 会缺整个当前轮。这里按会话缓存每个 Run 的实时事件，hello 时下发给新连接
+//（S0 单活动 Run → 全局最多一个非 settled 的缓冲）。手机端把 live 事件直接
+// 写进 pending 缓冲，复用既有的收养/回放路径，零新增回放代码。
+// 缓冲在下一次该会话 user_message（新 Run 开始）时重置，不主动清理。
+
+#[derive(Default)]
+struct LiveRun {
+    events: Vec<Value>,
+    settled: bool,
+}
+
+/// 单个 Run 缓冲的事件上限（超长 Run 截断保头：手机端至少看得到开头）
+const LIVE_EVENTS_CAP: usize = 800;
+
+fn live_runs() -> &'static Mutex<HashMap<String, LiveRun>> {
+    static LIVE: OnceLock<Mutex<HashMap<String, LiveRun>>> = OnceLock::new();
+    LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 把宿主事件记进对应会话的 live 缓冲（直接 append，不挂在广播接收端上，
+/// bus lagged 丢事件不影响这里）
+fn record_live(kind: &str, payload: &Value) {
+    let Some(sid) = payload.get("session_id").and_then(|v| v.as_str()) else {
+        return;
+    };
+    if sid.is_empty() {
+        return;
+    }
+    let Ok(mut map) = live_runs().lock() else {
+        return;
+    };
+    if kind == "agent-event" {
+        let is_user = payload.get("type").and_then(|v| v.as_str()) == Some("user_message");
+        let entry = map.entry(sid.to_string()).or_default();
+        if is_user {
+            // 新一轮 Run 从用户消息开始：重置缓冲，丢弃上一轮的尾部事件
+            entry.events.clear();
+            entry.settled = false;
+        }
+        if entry.events.len() < LIVE_EVENTS_CAP {
+            entry.events.push(payload.clone());
+        }
+    } else if kind == "run-settled" {
+        if let Some(entry) = map.get_mut(sid) {
+            entry.settled = true;
+        }
+    }
+}
+
+/// hello 用：收集所有非 settled Run 的事件（S0 下通常至多一个会话）
+fn live_events_for_hello() -> Vec<Value> {
+    let Ok(map) = live_runs().lock() else {
+        return Vec::new();
+    };
+    map.values()
+        .filter(|run| !run.settled)
+        .flat_map(|run| run.events.iter().cloned())
+        .collect()
+}
+
 /// 镜像一条宿主事件给所有手机（kind 复用 Tauri 事件名，如 "agent-event"）
 pub fn broadcast_event(kind: &str, payload: &Value) {
+    record_live(kind, payload);
     broadcast_msg(&json!({ "type": kind, "payload": payload }));
 }
 
@@ -69,6 +134,8 @@ struct BridgeRunning {
     paired: Arc<AtomicUsize>,
     /// 前端推来的队列快照（camelCase QueuedMessage 去图片），hello 时下发
     queue: Arc<Mutex<Vec<Value>>>,
+    /// 前端推来的当前查看会话 id（activeTabId），hello 时作为 current 下发
+    view: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone)]
@@ -77,6 +144,7 @@ struct BridgeShared {
     token: Arc<String>,
     paired: Arc<AtomicUsize>,
     queue: Arc<Mutex<Vec<Value>>>,
+    view: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,11 +180,13 @@ pub async fn mobile_bridge_start(
     let token = Arc::new(uuid::Uuid::new_v4().simple().to_string());
     let paired = Arc::new(AtomicUsize::new(0));
     let queue = Arc::new(Mutex::new(Vec::new()));
+    let view = Arc::new(Mutex::new(None));
     let shared = BridgeShared {
         app: app.clone(),
         token: Arc::clone(&token),
         paired: Arc::clone(&paired),
         queue: Arc::clone(&queue),
+        view: Arc::clone(&view),
     };
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", 0))
@@ -145,6 +215,7 @@ pub async fn mobile_bridge_start(
         join,
         paired,
         queue,
+        view,
     };
     let info = info_for(&app, &running);
     *guard = Some(running);
@@ -189,6 +260,17 @@ pub fn mobile_bridge_push_queue(state: State<'_, MobileBridgeState>, items: Vec<
     if let Some(running) = inner.as_ref() {
         *running.queue.lock().unwrap_or_else(|e| e.into_inner()) = items.clone();
         broadcast_msg(&json!({ "type": "queue", "items": items }));
+    }
+}
+
+/// 前端在当前查看会话（activeTabId）变化时推送：镜像并广播 view 给手机。
+/// 手机端只有停在「新对话」时才跟进收养，不劫持正在浏览其他会话的设备
+#[tauri::command]
+pub fn mobile_bridge_push_view(state: State<'_, MobileBridgeState>, session_id: String) {
+    let inner = state.inner.blocking_lock();
+    if let Some(running) = inner.as_ref() {
+        *running.view.lock().unwrap_or_else(|e| e.into_inner()) = Some(session_id.clone());
+        broadcast_msg(&json!({ "type": "view", "session_id": session_id }));
     }
 }
 
@@ -406,17 +488,28 @@ async fn ws_connection(socket: axum::extract::ws::WebSocket, shared: BridgeShare
     );
     broadcast_msg(&json!({ "type": "pair", "count": paired_now }));
 
-    // hello 快照：先订阅总线再发快照，连接期间事件不丢
+    // hello 快照：先订阅总线再发快照，连接期间事件不丢。
+    // current：PC 当前查看的会话（手机端停在「新对话」时跟进收养）；
+    // live：进行中 Run 的实时事件（mid-run 加入的手机补看当前轮，
+    // 配合磁盘历史缺失的窗口）；已结算的 Run 不下发（磁盘已有，回放会重复）
     let queue = shared
         .queue
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
+    let current = shared
+        .view
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let live = live_events_for_hello();
     let hello = json!({
         "type": "hello",
         "sessions": session_metas(&shared.app).unwrap_or_default(),
         "queue": queue,
         "paired": paired_now,
+        "current": current,
+        "live": live,
     });
     let _ = out_tx.send(hello.to_string()).await;
 
@@ -487,6 +580,11 @@ async fn handle_client_msg(
                 .as_str()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
+            // 发送者设备名（手机端本地生成，桥不注册身份，纯透传；重名无害）
+            let sender = v["sender"]
+                .as_str()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
             let _ = shared.app.emit(
                 "mobile-bridge-event",
                 json!({
@@ -495,6 +593,7 @@ async fn handle_client_msg(
                     "session_id": session_id,
                     "text": body,
                     "skill": skill,
+                    "sender": sender,
                 }),
             );
         }
@@ -580,6 +679,57 @@ async fn handle_client_msg(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_run_buffer_resets_on_user_message_and_marks_settled() {
+        let sid = "sess-live";
+        record_live(
+            "agent-event",
+            &json!({ "type": "message_delta", "session_id": sid, "text": "a" }),
+        );
+        record_live(
+            "agent-event",
+            &json!({ "type": "tool_call_started", "session_id": sid, "tool_call_id": "t1" }),
+        );
+        {
+            let map = live_runs().lock().unwrap();
+            let run = map.get(sid).unwrap();
+            assert_eq!(run.events.len(), 2);
+            assert!(!run.settled);
+        }
+        // 新 Run 的用户消息重置缓冲
+        record_live(
+            "agent-event",
+            &json!({ "type": "user_message", "session_id": sid, "text": "再来一轮" }),
+        );
+        {
+            let map = live_runs().lock().unwrap();
+            let run = map.get(sid).unwrap();
+            assert_eq!(run.events.len(), 1);
+            assert_eq!(run.events[0]["type"], "user_message");
+            assert!(!run.settled);
+        }
+        // 结算置位后 hello 不再下发
+        record_live("run-settled", &json!({ "session_id": sid }));
+        assert!(live_events_for_hello()
+            .iter()
+            .all(|e| e["session_id"] != sid));
+    }
+    #[test]
+    fn live_run_buffer_ignores_events_without_session() {
+        // 与其他测试共享全局 LIVE_RUNS，不能断言总长度（并行执行会互相干扰），
+        // 只断言无 session_id 的事件不会创建缓冲
+        record_live(
+            "agent-event",
+            &json!({ "type": "toast", "text": "no session" }),
+        );
+        record_live("queue", &json!({ "items": [] }));
+        let map = live_runs().lock().unwrap();
+        assert!(
+            map.get("sess-no-such").is_none(),
+            "无 session_id 的事件不应创建 live 缓冲"
+        );
+    }
 
     #[test]
     fn lan_ip_filter_excludes_tunnel_and_link_local_ranges() {

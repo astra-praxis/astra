@@ -74,6 +74,11 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
       // 重启 = 新 token = 桥侧空镜像；立即推一次让 hello 快照有数据
       pushQueueSnapshot();
       pushConfig();
+      // view 镜像同理：桥重启后 current 丢失，强制重推当前查看的会话。
+      // draft 会话磁盘上不存在，不推（手机停在「新对话」等真实会话出现）
+      lastPushedView = undefined;
+      const ag = useAgentStore.getState();
+      if (ag.sessionId && !ag.isDraft) pushView(ag.sessionId);
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e), starting: false });
     }
@@ -140,6 +145,16 @@ async function knownSkills(): Promise<MobileSkillLite[]> {
   return skillsCache;
 }
 
+// ===== 当前查看会话镜像（hello 的 current / view 广播） =====
+
+let lastPushedView: string | undefined;
+
+function pushView(sessionId: string) {
+  if (lastPushedView === sessionId) return;
+  lastPushedView = sessionId;
+  invoke('mobile_bridge_push_view', { sessionId }).catch(() => {});
+}
+
 function applyPlan(plan: EnqueuePlan): boolean {
   const st = useAgentStore.getState();
   switch (plan.action) {
@@ -192,6 +207,7 @@ async function directSend(
   text: string,
   skill: string | null,
   expectedId: string,
+  sender?: string,
 ): Promise<DirectSendOutcome> {
   const toolbar = useChatToolbarStore.getState();
   const invalid = (msg: string): DirectSendOutcome => {
@@ -220,7 +236,7 @@ async function directSend(
   // 新消息 = 新意图接管：清旧失败横幅与输入框错误；绝不清 input（等价 keepInput）
   st.setRunError(null);
   st.setError('');
-  st.pushUser(raw); // 会话记录保留原始 /技能名 文本，回放时可读
+  st.pushUser(raw, undefined, sender); // 会话记录保留原始 /技能名 文本，回放时可读；sender 供多设备共享时展示来源
   st.setRunState(true, 'analyzing');
   const provider = toolbar.providers.find((p) => p.id === toolbar.selectedProviderId) ?? null;
   try {
@@ -252,7 +268,7 @@ async function directSend(
   }
 }
 
-async function handleEnqueue(payload: { session_id: string | null; text: string }) {
+async function handleEnqueue(payload: { session_id: string | null; text: string; sender?: string }) {
   const parsed = parseMobileSend(String(payload.text ?? ''), await knownSkills());
   if (!parsed.ok) {
     phoneToast(parsed.error);
@@ -287,18 +303,18 @@ async function handleEnqueue(payload: { session_id: string | null; text: string 
   if (plan.direct) {
     // 空闲直发：跳过队列直接起跑（消息不在队列面板闪现）
     const expectedId = useAgentStore.getState().sessionId;
-    const outcome = await directSend(parsed.raw, parsed.text, parsed.skill, expectedId);
+    const outcome = await directSend(parsed.raw, parsed.text, parsed.skill, expectedId, payload.sender);
     if (outcome === 'sent') phoneToast('已发送');
     if (outcome === 'queued') {
       // PC 此刻忙 / 会话被切走：兜底入队（准入拒绝不丢消息），续发 effect 接手
-      useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill);
+      useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender });
       phoneToast('PC 正忙，已加入队列');
     }
     // 'failed'：提示已在 directSend 内弹出，不入队（见 DirectSendOutcome 注释）
     return;
   }
   // 目标正在运行：入队等本轮结束后的既有续发
-  useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill);
+  useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender });
   phoneToast('已加入队列，本轮结束后自动发送');
 }
 
@@ -392,6 +408,8 @@ interface BridgeEvent {
   session_id?: string | null;
   text?: string;
   skill?: string | null;
+  /** send 载荷的发送者设备名（多设备共享时标记来源） */
+  sender?: string;
   id?: string;
   target_id?: string;
   after?: boolean;
@@ -411,7 +429,11 @@ async function handleBridgeEvent(ev: BridgeEvent) {
       // 双层去重（msg_id LRU + 同会话同文本短窗口）：WS 消息重复投递或手机端
       // 触摸双击时只入队一次，杜绝「直接发送 + 队列再续发一遍」的二连跑
       if (enqueueDeduper.duplicate(ev.msg_id, String(ev.text ?? ''), ev.session_id ?? null, Date.now())) break;
-      await handleEnqueue({ session_id: ev.session_id ?? null, text: String(ev.text ?? '') });
+      await handleEnqueue({
+        session_id: ev.session_id ?? null,
+        text: String(ev.text ?? ''),
+        sender: ev.sender,
+      });
       break;
     case 'queue_reorder':
       // 只允许同会话内排序的校验在 reorderQueued 里（跨会话/未知 id 一律不动）
@@ -529,6 +551,13 @@ export function ensureMobileBridge(): Promise<void> {
           s.autoMode !== prev.autoMode
         ) {
           scheduleConfigPush();
+        }
+      })),
+      // 当前查看会话变化 → 推 view 给手机（停在「新对话」的手机跟进收养）。
+      // draft 会话磁盘上不存在，不推；等它起跑转正（isDraft 翻转）再推
+      Promise.resolve().then(() => useAgentStore.subscribe((s, prev) => {
+        if ((s.sessionId !== prev.sessionId || s.isDraft !== prev.isDraft) && !s.isDraft) {
+          pushView(s.sessionId);
         }
       })),
     ]);

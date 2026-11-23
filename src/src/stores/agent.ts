@@ -101,7 +101,7 @@ export function withId<T extends object>(entry: T): T & EntryIdent {
 
 export type Entry =
   | ({ kind: 'notice'; text: string } & EntryIdent)
-  | ({ kind: 'user'; text: string; images?: UserImage[] } & EntryIdent)
+  | ({ kind: 'user'; text: string; images?: UserImage[]; /** 发送者设备名（手机遥控多设备场景；桌面端本机发送不写） */ sender?: string } & EntryIdent)
   | ({ kind: 'assistant'; text: string; streaming: boolean } & EntryIdent)
   | ({
       /** 模型思考过程（reasoning），流式追加；参考 Zed 的 thinking 块 */
@@ -181,6 +181,8 @@ export interface QueuedMessage {
   sessionId: string;
   /** 附带图片（多模态 M1；排队时随消息一起走） */
   images?: UserImage[];
+  /** 发送者设备名（手机遥控入队的消息标记来源；续发时随消息带入对话流） */
+  sender?: string;
 }
 
 /** 取指定会话队首（全局队列按会话子队列 FIFO，互不阻塞） */
@@ -650,7 +652,7 @@ interface AgentState extends RunWindow {
   /** Run 进行中排队的消息（按会话子队列 FIFO；发送调用留在页面组件，见文件头职责边界） */
   queue: QueuedMessage[];
   /** 排队消息（opts.front = 插到同会话子队首，供「打断并优先发送」用） */
-  enqueueMessage: (raw: string, text: string, skill: string | null, opts?: { front?: boolean }, images?: UserImage[]) => void;
+  enqueueMessage: (raw: string, text: string, skill: string | null, opts?: { front?: boolean; sender?: string }, images?: UserImage[]) => void;
   removeQueued: (id: string) => void;
   /** 拖拽排序：把 id 挪到 targetId 之前 / 之后（after=true 为之后）。
    *  只允许同会话内排序，跨会话或未知 id 一律不动（子队列顺序即续发顺序） */
@@ -661,7 +663,7 @@ interface AgentState extends RunWindow {
   /** 设置自动压缩阈值（localStorage 持久化，0 = 关闭） */
   setAutoCompactTokens: (v: number) => void;
   setRunState: (running: boolean, status: string | null) => void;
-  pushUser: (text: string, images?: UserImage[]) => void;
+  pushUser: (text: string, images?: UserImage[], sender?: string) => void;
   /** checkpoint 恢复后用后端回传的历史重建条目（仅当会话一致且无运行中任务） */
   restoreEntries: (sessionId: string, entries: Entry[]) => void;
   /** Serve bot 反向通道通知：追加 notice 条目，不动运行状态 */
@@ -757,6 +759,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         text,
         skill,
         sessionId: s.sessionId,
+        ...(opts?.sender ? { sender: opts.sender } : {}),
         ...(images && images.length > 0 ? { images } : {}),
       };
       if (opts?.front) {
@@ -816,14 +819,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         : {}),
     })),
-  pushUser: (text, images) =>
+  pushUser: (text, images, sender) =>
     set((s) => ({
       entries: [
         ...s.entries,
-        // 纯图片消息合法；无图时不写字段，保持旧会话 JSON 形状不变
+        // 纯图片消息合法；无图时不写字段，保持旧会话 JSON 形状不变。
+        // sender 仅手机遥控消息携带（落盘后经 /api/session 共享给所有设备）
         ...(images && images.length > 0
-          ? [withId({ kind: 'user' as const, text, images })]
-          : [withId({ kind: 'user' as const, text })]),
+          ? [withId({ kind: 'user' as const, text, images, ...(sender ? { sender } : {}) })]
+          : [withId({ kind: 'user' as const, text, ...(sender ? { sender } : {}) })]),
       ],
       isDraft: false,
       // 首条消息触发：隐式草稿补上 tab 转正

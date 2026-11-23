@@ -155,13 +155,16 @@ test('sanitizeQueueSnapshot strips images and keeps the rest', () => {
   const items = [
     { id: 'q1', raw: '/demo hi', text: 'hi', skill: 'demo', sessionId: 'a1', images: [{ data: 'xxx', width: 1, height: 1 }] },
     { id: 'q2', raw: 'plain', text: 'plain', skill: null, sessionId: 'a2' },
+    { id: 'q3', raw: '手机消息', text: '手机消息', skill: null, sessionId: 'a1', sender: '乙' },
   ];
   const out = sanitizeQueueSnapshot(items);
-  assert.equal(out.length, 2);
+  assert.equal(out.length, 3);
   assert.equal('images' in out[0], false);
   // 跨 realm 对象不能 deepEqual，用 JSON 串比较
   assert.equal(JSON.stringify(out[0]), JSON.stringify({ id: 'q1', raw: '/demo hi', text: 'hi', skill: 'demo', sessionId: 'a1' }));
   assert.equal(JSON.stringify(out[1]), JSON.stringify({ id: 'q2', raw: 'plain', text: 'plain', skill: null, sessionId: 'a2' }));
+  // 手机入队的消息：sender 透传给桥（多设备时手机端展示来源）
+  assert.equal(JSON.stringify(out[2]), JSON.stringify({ id: 'q3', raw: '手机消息', text: '手机消息', skill: null, sessionId: 'a1', sender: '乙' }));
 });
 
 test('shouldActivateAfterSettle only for parked sessions with pending queue items', () => {

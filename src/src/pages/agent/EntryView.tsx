@@ -21,6 +21,7 @@ import {
   Loader2,
   MonitorUp,
   Pencil,
+  Smartphone,
   Sparkles,
   Terminal,
   Wrench,
@@ -287,6 +288,13 @@ export const EntryView = memo(function EntryView({
       return (
         <div className="aentry aentry--user" data-idx={index}>
           <div className="aentry__bubble">
+            {/* 手机遥控发送的设备名徽标（桌面本机发送无 sender，不占位） */}
+            {entry.sender && (
+              <div className="aentry__sender">
+                <Smartphone size={11} strokeWidth={2} />
+                {entry.sender}
+              </div>
+            )}
             {onEdit && (
               <button
                 type="button"

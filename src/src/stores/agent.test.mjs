@@ -721,6 +721,25 @@ test('multimodal: pushUser and enqueueMessage carry attached images', () => {
   assert.ok(!('images' in store.getState().queue.at(-1)));
 });
 
+test('sender: pushUser and enqueueMessage carry device name for mobile-bridge multi-device', () => {
+  const store = load().useAgentStore;
+  // 桌面本机发送不写 sender：旧会话 JSON 形状不变
+  store.getState().pushUser('本机消息');
+  const local = store.getState().entries.at(-1);
+  assert.ok(!('sender' in local));
+  // 手机遥控发送带 sender，落盘后随 /api/session 共享给所有设备
+  store.getState().pushUser('手机消息', undefined, '乙');
+  const remote = store.getState().entries.at(-1);
+  assert.equal(remote.sender, '乙');
+  // 队列同样携带 sender，续发时经 doSend → pushUser 带入对话流
+  store.getState().enqueueMessage('排队甲', '排队甲', null, { sender: '丙' });
+  const queued = store.getState().queue.at(-1);
+  assert.equal(queued.sender, '丙');
+  // 无 sender 的排队不写字段
+  store.getState().enqueueMessage('排队乙', '排队乙', null);
+  assert.ok(!('sender' in store.getState().queue.at(-1)));
+});
+
 test('archiveSession calls agent_archive_session and refreshes; failure surfaces in error', async () => {
   const commands = [];
   let failArchive = false;

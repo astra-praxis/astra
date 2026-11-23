@@ -134,6 +134,14 @@
     box-shadow: inset 0 1px 4px rgba(0, 0, 0, .28);
   }
   .entry--user .bubble img { border: 1px solid var(--user-card-border); }
+  /* 发送者徽标：多设备同码时别人的消息标来源（嵌在深色用户卡顶部） */
+  .bubble__sender {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; color: var(--user-card-text);
+    opacity: .62; margin-bottom: 5px; max-width: 100%;
+  }
+  .bubble__sender span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bubble__sender .ico { width: 12px; height: 12px; flex-shrink: 0; }
   .entry--assistant .bubble { background: none; border: 0; box-shadow: none; padding: 0; }
   .entry--assistant img, .entry--user img { max-width: 200px; border-radius: 8px; display: block; margin-top: 6px; }
   .cursor { display: inline-block; width: 7px; height: 15px; background: var(--brand); vertical-align: -2px; animation: blink 1s steps(2) infinite; border-radius: 1px; }
@@ -359,6 +367,14 @@
   .qitem { display: flex; align-items: center; gap: 6px; padding: 9px 8px; border-bottom: 1px solid var(--divider); animation: entry-in .3s cubic-bezier(.22,.9,.34,1.1) both; }
   .qitem__body { flex: 1; min-width: 0; }
   .qitem__sess { font-size: 11px; color: var(--brand-strong); }
+  /* 队列项的发送者小胶囊（同码多设备时区分来源） */
+  .qitem__sender {
+    display: inline-block; margin-left: 6px; padding: 1px 7px 2px;
+    font-size: 10px; font-weight: 600; border-radius: 999px;
+    background: var(--shimmer); color: var(--brand-strong);
+    vertical-align: 1px; max-width: 76px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
   .qitem__text { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
   .qitem__btn { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--text-2); flex-shrink: 0; transition: transform .12s ease; }
   .qitem__btn .ico { width: 15px; height: 15px; }
@@ -385,6 +401,19 @@
 
   /* ===== 配置 sheet（模型 / 思考 / 放权） ===== */
   .cfg__sec { padding: 14px 16px 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+  /* 本机名称行：输入 + 保存（多设备发送者标记） */
+  .cfg__name { display: flex; gap: 8px; padding: 8px 16px 4px; }
+  .cfg__name__input {
+    flex: 1; min-width: 0; padding: 9px 12px; border-radius: 12px;
+    background: var(--surface-soft); border: 1px solid var(--border);
+    color: var(--text); font-size: 14px; outline: none; transition: border-color .15s ease;
+  }
+  .cfg__name__input:focus { border-color: var(--brand); }
+  .cfg__name__btn {
+    padding: 9px 16px; border-radius: 12px; background: var(--accent); color: #fff;
+    font-size: 13.5px; font-weight: 600; flex-shrink: 0; transition: transform .12s ease;
+  }
+  .cfg__name__btn:active { transform: scale(.94); }
   .cfg__sec:not(:first-child) { margin-top: 10px; border-top: 1px solid var(--divider); }
   .cfg__opts { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px 4px; }
   .cfg__opts--grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -483,6 +512,7 @@
     var ICON_SPRITE =
       '<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">' +
       '<symbol id="ico-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>' +
+      '<symbol id="ico-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/></symbol>' +
       '<symbol id="ico-layers" viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></symbol>' +
       '<symbol id="ico-send" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></symbol>' +
       '<symbol id="ico-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>' +
@@ -677,6 +707,18 @@
     // ===== 全局状态 =====
     var state = {
       ws: null, wsOk: false, backoff: 1000,
+      // 本机名称：多设备扫同一码时区分发送者（本地生成 + localStorage 持久化，
+      // 桥不做身份注册，重名无害）；可在设置 sheet 顶部改名
+      name: (function () {
+        try {
+          var n = localStorage.getItem('mb_name');
+          if (n) return n;
+          n = '设备' + Math.floor(10 + Math.random() * 90);
+          localStorage.setItem('mb_name', n);
+          return n;
+        } catch (e) { return '设备'; }
+      })(),
+      pickedNew: false,        // 用户主动点了「新对话」（true 时不再自动跟进 PC 的 view）
       sessionsLoaded: false,   // 会话列表是否已首次到达（未到达前抽屉显示骨架占位）
       sessions: [],            // 会话元数据（hello / 手动刷新）
       queue: [],               // PC 队列镜像（camelCase QueuedMessage）
@@ -774,7 +816,28 @@
           state.queue = msg.queue || [];
           state.sessionsLoaded = true;
           if (msg.config) state.config = msg.config;
+          // mid-run 加入：进行中 Run 的实时事件直接写进 pending，
+          // 收养/打开该会话时走既有回放路径（磁盘历史缺当前轮，由 live 补齐）
+          (msg.live || []).forEach(function (env) {
+            var sid = env && env.session_id;
+            if (!sid || state.entries[sid]) return;
+            (state.pending[sid] = state.pending[sid] || []).push(env);
+            trackRunning(sid, env);
+          });
+          // PC 正在看某个会话而本机还停在「新对话」：跟进收养，
+          // 共享对话内容（多设备同码的核心场景）；正在主动新建或等收养时不劫持
+          if (msg.current && (state.current === null || state.current === NEW) &&
+              !state.pickedNew && !state.sentText) {
+            adoptSession(msg.current);
+          }
           renderDrawer(); renderQueue(); renderTop(); renderCfgChips(); renderCfgSheet(); renderStream();
+          break;
+        case 'view':
+          // PC 切换会话：仅跟进停在默认态的手机（主动选过会话/新建/等收养的不动）
+          if (msg.session_id && (state.current === null || state.current === NEW) &&
+              !state.pickedNew && !state.sentText) {
+            adoptSession(msg.session_id);
+          }
           break;
         case 'agent-event':
           onEnvelope(msg.payload || {});
@@ -850,6 +913,7 @@
     function adoptSession(sid) {
       state.sentAt = 0;
       state.sentText = '';
+      state.pickedNew = false;
       state.current = sid;
       renderTop(); renderDrawer();
       fetch(base + '/api/session/' + encodeURIComponent(sid) + '?token=' + encodeURIComponent(token))
@@ -910,12 +974,14 @@
         case 'user_message':
           // PC 起跑时镜像的用户消息（桌面 pushUser 是本地行为，不产生事件）。
           // 向前扫描：同文本的 user 条目已存在则跳过（隐形重试会重复广播；
-          // 历史已含该条时回放也不能重复）
+          // 历史已含该条时回放也不能重复）。sender：多设备同码时标记来源
           var ut = env.text || '';
+          var ue = { kind: 'user', text: ut };
+          if (env.sender) ue.sender = env.sender;
           for (var ui = list.length - 1; ui >= 0; ui--) {
-            if (list[ui].kind === 'user') { if (list[ui].text === ut) break; push({ kind: 'user', text: ut }); break; }
+            if (list[ui].kind === 'user') { if (list[ui].text === ut) break; push(ue); break; }
           }
-          if (ui < 0) push({ kind: 'user', text: ut });
+          if (ui < 0) push(ue);
           break;
         case 'message_delta':
           if (last && last.kind === 'assistant' && last.streaming) { last.text += esc(env.text || ''); }
@@ -978,6 +1044,7 @@
     // ===== 打开会话（HTTP 历史 + 回放缓冲事件） =====
     function openSession(sid) {
       state.current = sid;
+      state.pickedNew = sid === NEW; // 主动新建：不再自动跟进 PC 的 view
       renderTop(); renderDrawer();
       if (sid === NEW) { state.entries[NEW] = []; renderStream(); return; }
       fetch(base + '/api/session/' + encodeURIComponent(sid) + '?token=' + encodeURIComponent(token))
@@ -1074,6 +1141,7 @@
           type: 'send', msg_id: ++state.msgSeq,
           session_id: state.current === NEW ? null : state.current,
           text: text,
+          sender: state.name,
         };
         // WS 未就绪时保留输入框明说，不再静默丢字
         if (!wsSend(payload)) { toast('未连接到 PC，请稍候重试'); return; }
@@ -1171,6 +1239,13 @@
         case 'user': {
           wrap = el('div', 'entry entry--user');
           var b = el('div', 'bubble', entry.text);
+          // 发送者徽标：别人的消息标来源（自己的/桌面端本机的不标）
+          if (entry.sender && entry.sender !== state.name) {
+            var sg = el('div', 'bubble__sender');
+            sg.appendChild(svgIcon('phone', 12));
+            sg.appendChild(el('span', null, entry.sender));
+            b.insertBefore(sg, b.firstChild);
+          }
           wrap.appendChild(b);
           (entry.images || []).forEach(function (img) {
             var im = document.createElement('img');
@@ -1405,7 +1480,10 @@
         down.onclick = function () { wsSend({ type: 'queue_reorder', id: item.id, target_id: state.queue[idx + 1].id, after: true }); };
         rm.onclick = function () { wsSend({ type: 'queue_remove', id: item.id }); };
         var body = el('div', 'qitem__body');
-        body.appendChild(el('div', 'qitem__sess', sessionLabel(item.sessionId)));
+        var sess = el('div', 'qitem__sess', sessionLabel(item.sessionId));
+        // 手机入队的消息标发送者（多设备同码时区分来源）
+        if (item.sender) sess.appendChild(el('span', 'qitem__sender', item.sender));
+        body.appendChild(sess);
         body.appendChild(el('div', 'qitem__text', item.text || item.raw || ''));
         row.appendChild(up); row.appendChild(down); row.appendChild(body); row.appendChild(rm);
         list.appendChild(row);
@@ -1477,6 +1555,28 @@
       body.innerHTML = '';
       var c = state.config;
       if (!c) { body.appendChild(el('div', 'sheet__empty', '等待桌面端配置…')); return; }
+
+      // 本机名称：多设备扫同一码时，发送的消息在 PC / 其他手机上标来源
+      body.appendChild(el('div', 'cfg__sec', '本机名称'));
+      var nameRow = el('div', 'cfg__name');
+      var nameInput = el('input', 'cfg__name__input');
+      nameInput.type = 'text';
+      nameInput.maxLength = 12;
+      nameInput.value = state.name;
+      nameInput.placeholder = '设备名（最多 12 字）';
+      var nameBtn = el('button', 'cfg__name__btn', '保存');
+      nameBtn.onclick = function () {
+        var v = nameInput.value.trim();
+        if (!v) { toast('名称不能为空'); return; }
+        state.name = v;
+        try { localStorage.setItem('mb_name', v); } catch (e) {}
+        toast('已保存，消息将标记为「' + v + '」');
+        renderCfgSheet();
+        renderStream(); // 已渲染的历史徽标同步刷新（自己改名后不再标自己）
+      };
+      nameRow.appendChild(nameInput);
+      nameRow.appendChild(nameBtn);
+      body.appendChild(nameRow);
 
       body.appendChild(el('div', 'cfg__sec', '思考模式'));
       body.appendChild(seg([{ v: true, t: '开' }, { v: false, t: '关' }], c.thinking_enabled, function (v) {

@@ -306,6 +306,16 @@
   .fab--show { opacity: 1; visibility: visible; transform: none; }
   .fab:active { transform: scale(.9); }
 
+  /* ===== 嵌入模式（原生壳）：壳提供顶栏/输入区/抽屉/队列/配置，页面只留消息流 =====
+     !important 用于压过 JS 给 .fab 动态设置的行内 bottom */
+  body.embed .topbar,
+  body.embed .composer,
+  body.embed .banner,
+  body.embed .drawer,
+  body.embed .sheet { display: none !important; }
+  body.embed .fab { bottom: calc(env(safe-area-inset-bottom) + 16px) !important; }
+  body.embed .stream { padding-bottom: 20px; }
+
   /* ===== 加载占位（微光扫过） ===== */
   .skeleton { position: relative; overflow: hidden; background: var(--surface-soft); border: 1px solid var(--divider); }
   .skeleton::after {
@@ -492,6 +502,17 @@
   <script>
   (function () {
     'use strict';
+
+    // ===== 嵌入模式（原生壳）：fragment 附加参数 embed=1 / open=<sessionId|new>
+    // 必须在下方 replaceState 清 hash 之前解析；凭证仍是首段（& 前的字符，旧二维码兼容）
+    var hashParams = {};
+    location.hash.replace(/^#/, '').split('&').slice(1).forEach(function (kv) {
+      var i = kv.indexOf('=');
+      if (i > 0) hashParams[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+    });
+    var EMBED = hashParams.embed === '1';
+    var OPEN_TARGET = hashParams.open || '';
+    if (EMBED) document.body.classList.add('embed');
 
     // ===== 配对凭证：QR 链接 fragment 携带（不进 URL query / 服务器日志） =====
     // 两种形态：临时 token（重启失效，sessionStorage 存本页会话）或
@@ -779,6 +800,7 @@
       msgSeq: Date.now(),
       sentAt: 0,               // 从「新对话」发出消息的时刻（收养新会话用）
       sentText: '',            // 从「新对话」发出的消息文本（收养时精确匹配）
+      openApplied: false,      // 嵌入模式：open 参数已应用（只在首连 hello 生效一次）
     };
 
     var NEW = '__new__';
@@ -882,6 +904,13 @@
             (state.pending[sid] = state.pending[sid] || []).push(env);
             trackRunning(sid, env);
           });
+          // 嵌入模式：壳通过 open 参数指定首连打开的会话，优先生效，
+          // 且阻止下方对 PC current 的自动收养（openSession 已设置 current/pickedNew）
+          if (EMBED && !state.openApplied) {
+            state.openApplied = true;
+            if (OPEN_TARGET === 'new') openSession(NEW);
+            else if (OPEN_TARGET) openSession(OPEN_TARGET);
+          }
           // PC 正在看某个会话而本机还停在「新对话」：跟进收养，
           // 共享对话内容（多设备同码的核心场景）；正在主动新建或等收养时不劫持
           if (msg.current && (state.current === null || state.current === NEW) &&

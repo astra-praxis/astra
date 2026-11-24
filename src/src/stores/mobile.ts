@@ -246,6 +246,7 @@ async function directSend(
         user_text: text,
         images: [],
         skill,
+        sender: sender ?? null,
         provider_id: toolbar.sourceType === 'provider' ? toolbar.selectedProviderId : null,
         model_port: toolbar.sourceType === 'model' ? toolbar.selectedModelPort : null,
         model:

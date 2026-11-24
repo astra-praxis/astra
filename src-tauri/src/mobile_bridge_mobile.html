@@ -513,6 +513,7 @@
       '<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">' +
       '<symbol id="ico-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>' +
       '<symbol id="ico-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/></symbol>' +
+      '<symbol id="ico-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>' +
       '<symbol id="ico-layers" viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></symbol>' +
       '<symbol id="ico-send" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></symbol>' +
       '<symbol id="ico-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>' +
@@ -1239,11 +1240,15 @@
         case 'user': {
           wrap = el('div', 'entry entry--user');
           var b = el('div', 'bubble', entry.text);
-          // 发送者徽标：别人的消息标来源（自己的/桌面端本机的不标）
-          if (entry.sender && entry.sender !== state.name) {
+          // 发送者徽标：别人的手机消息标设备名，无 sender（桌面本机发）的标
+          // 「桌面端」；自己的消息不标。误差：v0.6.23 之前手机发的历史消息
+          // 也没有 sender，会被标成桌面端——旧数据无法区分，接受
+          var senderName =
+            entry.sender && entry.sender !== state.name ? entry.sender : (!entry.sender ? '桌面端' : '');
+          if (senderName) {
             var sg = el('div', 'bubble__sender');
-            sg.appendChild(svgIcon('phone', 12));
-            sg.appendChild(el('span', null, entry.sender));
+            sg.appendChild(svgIcon(senderName === '桌面端' ? 'monitor' : 'phone', 12));
+            sg.appendChild(el('span', null, senderName));
             b.insertBefore(sg, b.firstChild);
           }
           wrap.appendChild(b);

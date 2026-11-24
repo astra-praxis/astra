@@ -467,15 +467,18 @@ export default function AgentPage() {
     [autoRetry, runError, retryError, runStreaming],
   );
 
-  /** 构建 agent_start_run 请求体（手动发送 / 队列续发 / 隐形继续 / 重试共用） */
+  /** 构建 agent_start_run 请求体（手动发送 / 队列续发 / 隐形继续 / 重试共用）。
+   *  sender：手机遥控发送的设备名（随 user_message 广播给所有手机标来源；
+   *  桌面本机发送不传 → 广播里为 null，手机端标「桌面端」） */
   const buildRunReq = useCallback(
-    (text: string, skillName: string | null) => {
+    (text: string, skillName: string | null, sender?: string) => {
       const st = useChatToolbarStore.getState();
       return {
         session_id: sessionId,
         user_text: text,
         images: [],
         skill: skillName,
+        sender: sender ?? null,
         provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
         model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
         model:
@@ -567,7 +570,7 @@ export default function AgentPage() {
       retryStartedRef.current = true;
 
       try {
-        await invoke('agent_start_run', { req: buildRunReq(text, skillName) });
+        await invoke('agent_start_run', { req: buildRunReq(text, skillName, opts?.sender) });
         return true;
       } catch (e) {
         setRunState(false, null);

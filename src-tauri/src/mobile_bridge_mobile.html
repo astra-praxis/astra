@@ -493,10 +493,20 @@
   (function () {
     'use strict';
 
-    // ===== 配对 token：QR 链接 fragment 携带（不进 URL query / 服务器日志） =====
-    var token = (location.hash.match(/^#([A-Za-z0-9_-]+)/) || [])[1] || sessionStorage.getItem('astra-pair-token') || '';
-    if (token) {
-      sessionStorage.setItem('astra-pair-token', token);
+    // ===== 配对凭证：QR 链接 fragment 携带（不进 URL query / 服务器日志） =====
+    // 两种形态：临时 token（重启失效，sessionStorage 存本页会话）或
+    // 持久设备 key（mbk_ 前缀，localStorage 长期保存，失效后清除要求重扫）
+    var cred = (location.hash.match(/^#([A-Za-z0-9_-]+)/) || [])[1] || '';
+    if (!cred) {
+      try {
+        cred = sessionStorage.getItem('mb_temp_token') || localStorage.getItem('mb_key') || '';
+      } catch (e) { cred = ''; }
+    }
+    if (cred) {
+      try {
+        if (/^mbk_/.test(cred)) localStorage.setItem('mb_key', cred);
+        else sessionStorage.setItem('mb_temp_token', cred);
+      } catch (e) {}
       history.replaceState(null, '', location.pathname);
     } else {
       document.getElementById('app').innerHTML =
@@ -507,6 +517,43 @@
       return;
     }
     var base = location.origin;
+
+    // ===== 认证：HTTP 直接用 Bearer 凭证；WS 不能带 header，用一次性短时效票据 =====
+    function authHeaders() {
+      return { 'Authorization': 'Bearer ' + cred };
+    }
+    // 凭证失效（401/403）：清掉本地保存的持久 key，停下重连，引导重新扫码
+    function handleAuthFail(status) {
+      if (status === 429) {
+        toast('认证尝试过于频繁，请稍后再试');
+        scheduleReconnect();
+        return;
+      }
+      try {
+        localStorage.removeItem('mb_key');
+        sessionStorage.removeItem('mb_temp_token');
+      } catch (e) {}
+      state.wsOk = false;
+      if (state.ws) { try { state.ws.onclose = null; state.ws.close(); } catch (e) {} state.ws = null; }
+      var app = $('#app');
+      if (app) {
+        app.className = '';
+        app.removeAttribute('data-built');
+        app.innerHTML =
+          '<div>' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="width:52px;height:52px;opacity:.45;margin-bottom:12px" aria-hidden="true">' +
+          '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>' +
+          '<div class="gate__label">绑定已失效（可能已被撤销或过期）<br>请从桌面端重新扫码</div></div>';
+      }
+    }
+    function fetchTicket() {
+      return fetch(base + '/api/ticket', { method: 'POST', headers: authHeaders() })
+        .then(function (r) {
+          if (!r.ok) throw r.status;
+          return r.json();
+        })
+        .then(function (data) { return data.ticket; });
+    }
 
     // ===== SVG 图标 sprite：挂在 body 上，#app 的 innerHTML 重建不影响它 =====
     var ICON_SPRITE =
@@ -722,6 +769,7 @@
       pickedNew: false,        // 用户主动点了「新对话」（true 时不再自动跟进 PC 的 view）
       sessionsLoaded: false,   // 会话列表是否已首次到达（未到达前抽屉显示骨架占位）
       sessions: [],            // 会话元数据（hello / 手动刷新）
+      scoped: null,            // 单会话分享模式：绑定的会话 id；null = 全部会话
       queue: [],               // PC 队列镜像（camelCase QueuedMessage）
       config: null,            // PC 配置镜像（模型来源 / 思考 / 放权）
       current: null,           // 当前查看的会话 id；null = 新对话模式
@@ -783,25 +831,32 @@
     }
     function connect() {
       var proto = base.indexOf('https:') === 0 ? 'wss://' : 'ws://';
-      var ws;
-      try { ws = new WebSocket(proto + location.host + '/api/ws?token=' + encodeURIComponent(token)); }
-      catch (e) { scheduleReconnect(); return; }
-      state.ws = ws;
-      ws.onopen = function () {
-        state.wsOk = true; state.backoff = 1000;
-        refreshSessions();
-        renderTop();
-      };
-      ws.onmessage = function (ev) {
-        var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-        handleServer(msg);
-      };
-      ws.onclose = function () {
-        state.wsOk = false; state.ws = null;
-        renderTop();
-        scheduleReconnect();
-      };
-      ws.onerror = function () { try { ws.close(); } catch (e) {} };
+      // 先换一次性票据再连 WS（票据短时效，每次重连重换，避免长期凭证进 URL）
+      fetchTicket().then(function (ticket) {
+        var ws;
+        try { ws = new WebSocket(proto + location.host + '/api/ws?ticket=' + encodeURIComponent(ticket)); }
+        catch (e) { scheduleReconnect(); return; }
+        state.ws = ws;
+        ws.onopen = function () {
+          state.wsOk = true; state.backoff = 1000;
+          refreshSessions();
+          renderTop();
+        };
+        ws.onmessage = function (ev) {
+          var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+          handleServer(msg);
+        };
+        ws.onclose = function () {
+          state.wsOk = false; state.ws = null;
+          renderTop();
+          scheduleReconnect();
+        };
+        ws.onerror = function () { try { ws.close(); } catch (e) {} };
+      }).catch(function (status) {
+        // 网络抖动（非 HTTP 状态码）继续退避重试；明确拒绝按凭证失效处理
+        if (typeof status === 'number') handleAuthFail(status);
+        else scheduleReconnect();
+      });
     }
     function scheduleReconnect() {
       setTimeout(connect, state.backoff);
@@ -816,6 +871,8 @@
           state.sessions = msg.sessions || [];
           state.queue = msg.queue || [];
           state.sessionsLoaded = true;
+          // 单会话分享（设备密钥限定）：锁定绑定会话，隐藏「新对话」
+          state.scoped = msg.scope === 'one' ? (msg.current || null) : null;
           if (msg.config) state.config = msg.config;
           // mid-run 加入：进行中 Run 的实时事件直接写进 pending，
           // 收养/打开该会话时走既有回放路径（磁盘历史缺当前轮，由 live 补齐）
@@ -878,10 +935,10 @@
 
     // ===== 会话列表（HTTP） =====
     function refreshSessions() {
-      fetch(base + '/api/sessions?token=' + encodeURIComponent(token))
+      fetch(base + '/api/sessions', { headers: authHeaders() })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function (list) { state.sessionsLoaded = true; state.sessions = list || []; renderDrawer(); renderQueue(); renderTop(); })
-        .catch(function () {});
+        .catch(function (status) { if (status === 401 || status === 403) handleAuthFail(status); });
     }
 
     // ===== 信封 → 条目（与桌面 agent.ts applyEnvelope 同语义的精简版） =====
@@ -917,7 +974,7 @@
       state.pickedNew = false;
       state.current = sid;
       renderTop(); renderDrawer();
-      fetch(base + '/api/session/' + encodeURIComponent(sid) + '?token=' + encodeURIComponent(token))
+      fetch(base + '/api/session/' + encodeURIComponent(sid), { headers: authHeaders() })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(finishAdopt, finishAdopt);
       function finishAdopt(detail) {
@@ -1050,7 +1107,7 @@
       state.pickedNew = sid === NEW; // 主动新建：不再自动跟进 PC 的 view
       renderTop(); renderDrawer();
       if (sid === NEW) { state.entries[NEW] = []; renderStream(); return; }
-      fetch(base + '/api/session/' + encodeURIComponent(sid) + '?token=' + encodeURIComponent(token))
+      fetch(base + '/api/session/' + encodeURIComponent(sid), { headers: authHeaders() })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function (detail) {
           // r.json() 产出的对象本就是本页私有，直接标注即可（深拷贝纯属浪费，
@@ -1422,11 +1479,13 @@
       ensureShell();
       var list = $('#sessList');
       list.innerHTML = '';
-      var newBtn = el('button', 'sess sess--new' + (state.current === NEW ? ' sess--active' : ''));
-      newBtn.appendChild(svgIcon('plus', 15));
-      newBtn.appendChild(document.createTextNode('新对话'));
-      newBtn.onclick = function () { openSession(NEW); $('#drawer').classList.remove('drawer--open'); };
-      list.appendChild(newBtn);
+      if (!state.scoped) {
+        var newBtn = el('button', 'sess sess--new' + (state.current === NEW ? ' sess--active' : ''));
+        newBtn.appendChild(svgIcon('plus', 15));
+        newBtn.appendChild(document.createTextNode('新对话'));
+        newBtn.onclick = function () { openSession(NEW); $('#drawer').classList.remove('drawer--open'); };
+        list.appendChild(newBtn);
+      }
       if (!state.sessionsLoaded) {
         // 会话列表未到达：微光骨架行
         for (var si = 0; si < 4; si++) list.appendChild(skeletonRow());

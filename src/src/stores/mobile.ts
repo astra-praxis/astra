@@ -57,6 +57,37 @@ interface MobileBridgeState {
   stop: () => Promise<void>;
   /** 对账：刷新运行态与配对数；桥在跑但前端丢了二维码（webview 重载）→ 重开换新 QR */
   refresh: () => Promise<void>;
+  /** 持久设备 key 列表 */
+  keys: BridgeKeyView[];
+  keysLoading: boolean;
+  /** 创建持久设备 key（二维码只出现这一次） */
+  createKey: (opts: { name: string; scopeSessionId?: string | null; expiresDays?: number | null }) => Promise<CreatedKey>;
+  /** 撤销设备 key（返回踢掉的在线连接数） */
+  revokeKey: (id: string) => Promise<number>;
+  refreshKeys: () => Promise<void>;
+}
+
+/** 设备 key 列表视图（Rust to_view：不含 hash/secret） */
+export interface BridgeKeyView {
+  id: string;
+  name: string;
+  scope: { kind: 'all' | 'session'; session_id?: string };
+  scope_tag: 'all' | 'one';
+  created_at: number;
+  expires_at: number | null;
+  revoked_at: number | null;
+  last_used_at: number | null;
+  last_ip: string | null;
+}
+
+/** 创建返回（secret 只出现一次，QR 立即展示） */
+export interface CreatedKey {
+  id: string;
+  secret: string;
+  url: string;
+  qr_svg: string;
+  name: string;
+  scope: { kind: 'all' | 'session'; session_id?: string };
 }
 
 export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
@@ -65,6 +96,8 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
   paired: 0,
   starting: false,
   error: '',
+  keys: [],
+  keysLoading: false,
   start: async () => {
     if (get().starting || get().running) return;
     set({ starting: true, error: '' });
@@ -105,6 +138,29 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
       set({ running: status.running, paired: status.running ? status.paired : 0 });
     } catch {
       // 后端不可用（本地调试）时忽略
+    }
+  },
+  createKey: async ({ name, scopeSessionId, expiresDays }) => {
+    const created = await invoke<CreatedKey>('mobile_bridge_key_create', {
+      name,
+      scopeSessionId: scopeSessionId || null,
+      expiresDays: expiresDays ?? null,
+    });
+    void get().refreshKeys();
+    return created;
+  },
+  revokeKey: async (id) => {
+    const kicked = await invoke<number>('mobile_bridge_key_revoke', { keyId: id });
+    void get().refreshKeys();
+    return kicked;
+  },
+  refreshKeys: async () => {
+    set({ keysLoading: true });
+    try {
+      const keys = await invoke<BridgeKeyView[]>('mobile_bridge_key_list');
+      set({ keys, keysLoading: false });
+    } catch {
+      set({ keysLoading: false });
     }
   },
 }));

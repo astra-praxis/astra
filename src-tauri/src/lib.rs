@@ -8,6 +8,7 @@ mod extensions;
 mod friendly;
 mod memory;
 mod mobile_bridge;
+mod mobile_keys;
 mod net_util;
 mod proc_util;
 mod providers;
@@ -429,6 +430,9 @@ pub fn run() {
             mobile_bridge::mobile_bridge_push_view,
             mobile_bridge::mobile_bridge_push_event,
             mobile_bridge::mobile_bridge_server_event,
+            mobile_bridge::mobile_bridge_key_create,
+            mobile_bridge::mobile_bridge_key_list,
+            mobile_bridge::mobile_bridge_key_revoke,
             // Agent Sessions
             agent::sessions::list_agent_sessions,
             agent::sessions::save_agent_session,

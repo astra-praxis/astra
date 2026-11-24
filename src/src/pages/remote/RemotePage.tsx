@@ -278,7 +278,7 @@ export default function RemotePage() {
                 <input
                   type="password"
                   className="remote-page__key-input remote-page__relay-token"
-                  placeholder="接入令牌（ASTRA_RELAY_TOKEN）"
+                  placeholder="接入令牌（≥32 字符，openssl rand -hex 24）"
                   value={relayToken}
                   autoComplete="off"
                   onChange={(e) => setRelayToken(e.target.value)}

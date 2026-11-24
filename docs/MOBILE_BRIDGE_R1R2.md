@@ -140,7 +140,9 @@ QR = url#<secret>（fragment 不进服务器日志/历史）
 | 3 | 前端 mobile.ts + RemotePage 中继卡片 + scss | ✅ |
 | 4 | 测试：cargo 全量 + relay 集成测试（假 relay + 回显桥过真 maintain/pipe_task）+ node 三件套 + typecheck + build | ✅ |
 | 5 | relay/README.md 部署文档 | ✅ |
-| 6 | 提交 feat(remote) + tag v0.6.28 + push | ⬜ |
+| 6 | 提交 feat(remote) + tag v0.6.28 + push | ✅ |
+| 7 | 安全加固（外部安全分析 P0/P1/P2）：池上限/握手超时/token≥32/accept 不阻塞/空闲淘汰/keepalive/owner 校验/range 溢出/peek 读/Semaphore | ✅ |
+| 8 | 提交 fix(relay) + tag v0.6.29 + push | ⬜ |
 
 ## 四、验证清单
 
@@ -176,6 +178,22 @@ QR = url#<secret>（fragment 不进服务器日志/历史）
   中文转义/CR 检查 ✅
 - relay crate 独立编译 ✅（修：std MutexGuard 跨 await 两处、tokio TcpStream 无
   try_clone → 注册连接整体移进 EOF 监视任务）
+
+### R3 安全加固验证记录（2026-11-24，v0.6.29）
+
+- 外部安全分析采纳清单（P0/P1/P2 全修，P3 部分）：池每通道 ≤64 + 全局 ≤4096
+  （超限 `ERR pool full`）；握手 10s 超时；token 启动强制 ≥32 字符（桌面端同步预检）；
+  数据端口 accept 每手机独立 spawn（不再串行阻塞 15s）；池内管道 30s 空闲淘汰；
+  注册/管道连接 TCP keepalive（socket2，60s/30s）防半开悬挂；通道 owner 校验防误删；
+  data_range 用 u64 算防 `base=0,end=65535` 溢出 panic；首行改 peek+read_exact
+  （无逐字节 syscall，管道前缀不丢）；控制/手机并发 Semaphore（512/512）；
+  恒时比较含长度填充（无长度侧信道）
+- relay 单测 4 项：constant_time_eq、preferred_port 极限段（含 base=1/end=65535）、
+  read_first_line 尾随字节保留（管道前缀不丢）、IdlePipe 超龄判定
+- 端到端复验（长令牌）：HTTP 经数据端口 ✅、PIPE→OK ✅、错令牌 `ERR bad handshake` ✅、
+  桌面端断连释放通道（curl 拒连）✅、短令牌启动被拒 ✅
+- cargo test 218 passed；typecheck ✅；README 补信任边界 + TLS 终止三方案
+  （stunnel/nginx stream/Caddy l4）+ 安全加固清单
 
 ## 五、踩坑备忘
 

@@ -249,6 +249,13 @@ pub async fn relay_start(
     if token.is_empty() {
         return Err("接入令牌不能为空".to_string());
     }
+    // 与 relay 侧启动校验一致：短令牌会被拒，提前报错免得白等注册超时
+    if token.len() < 32 {
+        return Err(format!(
+            "接入令牌过短（{} < 32 字符），服务器侧需用 `openssl rand -hex 24` 生成",
+            token.len()
+        ));
+    }
     {
         let relay = state.relay.lock().map_err(|e| e.to_string())?;
         if relay.is_some() {

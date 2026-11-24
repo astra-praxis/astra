@@ -96,7 +96,7 @@ apps/mobile/
 | R4.0 | PWA 化（manifest + iOS meta + 图标） | 无，立即可做 | 待做 |
 | R4.1-scaffold | 独立开源客户端仓库 `~/workplace/astra-mobile`（iOS 壳脚手架 + 绑定协议文档） | 无 | ✅ 已建（dac0169） |
 | R4.1-embed | 手机页嵌入模式：fragment `embed=1`（隐藏页面自带顶栏/输入区/抽屉/队列，只留消息流）+ `open=<id\|new>`（首连指定会话） | 无 | ✅ v0.6.30 |
-| R4.1-chrome | 壳原生 chrome：顶栏/左抽屉（搜索+历史+用户入口）/输入条/队列面板/配置 sheet，壳自持 WS | R4.1-embed | 进行中 |
+| R4.1-chrome | 壳原生 chrome：顶栏/左抽屉（搜索+历史+用户入口）/输入条/队列面板/配置 sheet，壳自持 WS | R4.1-embed | ✅ 原生 chrome 完成（23def77），CI 流水线（b38c118） |
 | R4.1a | Android 壳（扫码/Keystore/WebView/深链） | Android Studio | 占位 |
 | R4.1b | iOS 壳完善（本机无 Xcode，编译验证待环境） | Xcode；分发需开发者账号 | 待验证 |
 | R4.2 | 打磨：深链 astra://、多桌面凭证管理、启动直连 | R4.1 | 待做 |

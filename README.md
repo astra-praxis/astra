@@ -19,6 +19,7 @@ Astra 是一个基于 Tauri 2 的**本地优先 AI Agent 桌面应用**。选择
 - **长期记忆**：跨会话自动沉淀，本地加密存储
 - **多模型支持**：OpenAI 兼容 API 与本地模型服务
 - **Artifact**：集中展示任务生成的文档与结果
+- **手机遥控**：桌面端生成二维码，手机扫码绑定后可远程查看与参与对话，跨网络可用
 - **桌面集成**：Tauri 2 原生桌面体验，多窗口 / 单实例
 
 ## 核心亮点
@@ -51,6 +52,8 @@ GitHub Actions 一键构建并发布 macOS / Windows / Linux 安装包，版本�
 | 构建工具 | Vite、pnpm |
 | 扩展协议 | MCP、ACP |
 | 本地存储 | SQLite |
+| 手机客户端 | SwiftUI、WKWebView、AVFoundation（[astra-praxis/astra-mobile](https://github.com/astra-praxis/astra-mobile)） |
+| 手机中继 | Rust TCP 中继（零解析管道 + 令牌认证），可选自部署 |
 
 ## 功能完成度
 
@@ -94,6 +97,8 @@ GitHub Actions 一键构建并发布 macOS / Windows / Linux 安装包，版本�
 - **多模型**：OpenAI 兼容 API 与本地模型服务
 - **桌面集成**：Tauri 2 多窗口 / 单实例 / 托盘 / 全局热键
 - **三端自动发布**：GitHub Actions 构建 macOS / Windows / Linux 安装包
+- **手机遥控桥**：桌面端内嵌桥接服务，扫码绑定手机；支持嵌入模式页面与原生客户端两种形态
+- **手机客户端（iOS）**：开源 Swift 壳（[astra-praxis/astra-mobile](https://github.com/astra-praxis/astra-mobile)），原生历史抽屉 / 输入条 / 队列，WebView 渲染消息流
 
 ### ⬜ 未完成 / 触发式规划
 

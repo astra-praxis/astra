@@ -142,7 +142,9 @@ QR = url#<secret>（fragment 不进服务器日志/历史）
 | 5 | relay/README.md 部署文档 | ✅ |
 | 6 | 提交 feat(remote) + tag v0.6.28 + push | ✅ |
 | 7 | 安全加固（外部安全分析 P0/P1/P2）：池上限/握手超时/token≥32/accept 不阻塞/空闲淘汰/keepalive/owner 校验/range 溢出/peek 读/Semaphore | ✅ |
-| 8 | 提交 fix(relay) + tag v0.6.29 + push | ⬜ |
+| 8 | 提交 fix(relay) + tag v0.6.29 + push | ✅ |
+| 9 | R4.1-embed 手机页嵌入模式（fragment `embed=1` 只渲染消息流 + `open=<id\|new>` 指定首连会话，v0.6.30） | ✅ |
+| 10 | R4.1-chrome 原生 iOS 壳（开源仓库 [astra-praxis/astra-mobile](https://github.com/astra-praxis/astra-mobile)，原生顶栏/抽屉/输入条/队列/配置，WebView 只渲染消息流，壳自持 WS） | ✅ |
 
 ## 四、验证清单
 

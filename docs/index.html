@@ -56,7 +56,7 @@
   "downloadUrl": "https://github.com/astra-praxis/astra/releases/latest",
   "description": "Astra 是装在自己电脑上的桌面 Agent。它能改文件、跑命令、查资料。写入和执行会停在会话里，等你点批准或拒绝。记忆加密留在本机。",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "featureList": ["编辑文件", "写入和命令等待批准", "记忆加密留在本机", "MCP 与技能", "多会话并行", "检查点恢复", "产物集中查看"]
+  "featureList": ["编辑文件", "写入和命令等待批准", "记忆加密留在本机", "MCP 与技能", "多会话并行", "检查点恢复", "产物集中查看", "手机扫码遥控"]
 }
 </script>
 <style>
@@ -682,6 +682,7 @@
   <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
   <symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.94 15.5A2 2 0 0 1 8.5 14.06 14.6 14.6 0 0 1 8 12a14.6 14.6 0 0 1 .5-2.06A2 2 0 0 1 9.94 8.5 14.6 14.6 0 0 1 12 8c.7 0 1.4.17 2.06.5A2 2 0 0 1 15.5 9.94c.33.66.5 1.35.5 2.06s-.17 1.4-.5 2.06A2 2 0 0 1 14.06 15.5 14.6 14.6 0 0 1 12 16c-.7 0-1.4-.17-2.06-.5"/><path d="M18 2l.5 1.5L20 4l-1.5.5L18 6l-.5-1.5L16 4l1.5-.5z"/><path d="M4 18l.5 1.5L6 20l-1.5.5L4 22l-.5-1.5L2 20l1.5-.5z"/></symbol>
   <symbol id="i-gh" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.8-1.3-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c3.3-1.5 3.3-1.2 3.3-1.2.6 1.7.1 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="3"/><path d="M12 18h.01"/></symbol>
 </svg>
 
 <header class="site-head">
@@ -890,6 +891,11 @@
         <h3 data-i18n="c6_h">能从检查点回来</h3>
         <p data-i18n="c6_p">对话历史落锚点，工作区留 git 快照。改坏了可以退回到之前的某一步。</p>
       </div>
+      <div class="card reveal" style="--d:180ms">
+        <span class="ic"><svg><use href="#i-phone"/></svg></span>
+        <h3 data-i18n="c7_h">手机上也能管着它</h3>
+        <p data-i18n="c7_p">桌面端亮出二维码，手机扫码就绑定。出门在外也能看会话、补一句话，消息会排进电脑的队列。</p>
+      </div>
     </div>
   </section>
 
@@ -990,6 +996,7 @@
         </p>
         <p class="dl-status" id="dlStatus" data-i18n="dl_loading">正在读取最新版本…</p>
         <p class="more"><a href="https://github.com/astra-praxis/astra/releases" target="_blank" rel="noopener" data-i18n="dl_all">全部版本</a></p>
+        <p class="more"><svg style="width:13px;height:13px;vertical-align:-2px"><use href="#i-phone"/></svg> <a href="https://github.com/astra-praxis/astra-mobile" target="_blank" rel="noopener" data-i18n="dl_mobile">手机客户端（iOS，开源）</a></p>
       </div>
       <div class="dl-card reveal" style="--d:110ms">
         <div class="dl-card-h">
@@ -1076,6 +1083,7 @@
       c4_h: 'MCP 与技能', c4_p: '外部能力按 MCP 接进来。技能是给自己写的说明书，对话里用 / 就能调用。',
       c5_h: '产物集中查看', c5_p: '这一轮写出来的文档、脚本、图片都在 Artifact 里，点开就能看，不用回翻聊天记录。',
       c6_h: '能从检查点回来', c6_p: '对话历史落锚点，工作区留 git 快照。改坏了可以退回到之前的某一步。',
+      c7_h: '手机上也能管着它', c7_p: '桌面端亮出二维码，手机扫码就绑定。出门在外也能看会话、补一句话，消息会排进电脑的队列。',
       pol_eyebrow: '边界是分级别的', pol_h: '不是一刀切地信任，也不是一刀切地拦',
       pol_p: '每个工具调用都会过一遍策略。只读的可以直接放行，会改变磁盘或对外部产生影响的要你点头，明显越界的直接拒绝。',
       pol1_lvl: 'L1 · 自动放行', pol1_h: '只读的事',
@@ -1104,12 +1112,13 @@
       dl_fail: '暂时读不到最新版本，按钮会打开 Releases 页面。',
       dl_current: '当前版本 {version}', dl_head: '安装包',
       dl_win_offline: 'Windows 离线安装包', dl_all: '全部版本', dl_yours: '你的系统',
+      dl_mobile: '手机客户端（iOS，开源）',
       dl_btn_mac: '下载 macOS 版', dl_btn_win: '下载 Windows 版', dl_btn_linux: '下载 Linux 版', dl_btn_unknown: '查看最新版本',
       arch_arm_mac: 'Apple 芯片', arch_arm: 'arm64', arch_x64: 'x64',
       foot: 'Astra · MIT License', toggle_label: 'EN', og_locale: 'zh_CN',
       shot_hero: 'Astra 的会话窗口，侧栏和两个会话标签',
       shot_ui: 'Astra 会话里等待批准的文件修改',
-      features: ['编辑文件', '写入和命令等待批准', '记忆加密留在本机', 'MCP 与技能', '多会话并行', '检查点恢复', '产物集中查看']
+      features: ['编辑文件', '写入和命令等待批准', '记忆加密留在本机', 'MCP 与技能', '多会话并行', '检查点恢复', '产物集中查看', '手机扫码遥控']
     },
     en: {
       doc_title: 'Astra — a desktop agent on your computer',
@@ -1160,6 +1169,7 @@
       c4_h: 'MCP and skills', c4_p: 'External capabilities come in over MCP. A skill is just a set of instructions you keep in a folder, called with / in the conversation.',
       c5_h: 'Outputs in one place', c5_p: 'Documents, scripts, and images from a run collect in Artifacts. Open them there instead of re-reading the transcript.',
       c6_h: 'Return to a checkpoint', c6_p: 'Conversation history gets an anchor and the workspace keeps a git snapshot, so you can step back to an earlier point.',
+      c7_h: 'Keep an eye on it from your phone', c7_p: 'The desktop shows a QR code; scan it and your phone is bound. Check sessions and send a message on the go — it lines up in the queue on your computer.',
       pol_eyebrow: 'The boundary has levels', pol_h: 'Not blanket trust, and not blanket blocking',
       pol_p: 'Every tool call passes a policy. Read-only work runs straight away, anything that changes the disk or the outside world waits for you, and clear overreach is refused outright.',
       pol1_lvl: 'L1 · Automatic', pol1_h: 'Read-only work',
@@ -1188,12 +1198,13 @@
       dl_fail: 'The latest release could not be read. The button opens the Releases page.',
       dl_current: 'Current release {version}', dl_head: 'Installers',
       dl_win_offline: 'Windows offline installer', dl_all: 'All releases', dl_yours: 'Your system',
+      dl_mobile: 'Mobile client (iOS, open source)',
       dl_btn_mac: 'Download for macOS', dl_btn_win: 'Download for Windows', dl_btn_linux: 'Download for Linux', dl_btn_unknown: 'See the latest release',
       arch_arm_mac: 'Apple Silicon', arch_arm: 'arm64', arch_x64: 'x64',
       foot: 'Astra · MIT License', toggle_label: '中文', og_locale: 'en_US',
       shot_hero: 'Astra session window with the sidebar and two session tabs',
       shot_ui: 'A file edit waiting for approval in an Astra session',
-      features: ['Edit files', 'Writes and commands wait for approval', 'Memory encrypted on the machine', 'MCP and skills', 'Several sessions at once', 'Checkpoint restore', 'Outputs in one place']
+      features: ['Edit files', 'Writes and commands wait for approval', 'Memory encrypted on the machine', 'MCP and skills', 'Several sessions at once', 'Checkpoint restore', 'Outputs in one place', 'Control from your phone']
     }
   };
 

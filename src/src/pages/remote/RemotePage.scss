@@ -309,6 +309,38 @@
     margin-left: auto;
   }
 
+  /* ===== 公网中继 ===== */
+  &__relay-form {
+    display: grid;
+    grid-template-columns: 1fr 110px;
+    gap: 8px;
+
+    .remote-page__relay-host {
+      grid-column: 1 / -1;
+    }
+
+    .remote-page__relay-port {
+      flex: none;
+    }
+
+    .remote-page__relay-token {
+      grid-column: 1 / -1;
+    }
+
+    .remote-page__key-add {
+      justify-self: end;
+    }
+  }
+
+  &__relay-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--success-bg, rgba(34, 197, 94, 0.15));
+    color: var(--success-500, #22c55e);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
   &__form-error {
     padding: 8px 12px;
     border: 1px solid var(--error-border);

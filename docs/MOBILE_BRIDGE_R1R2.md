@@ -1,7 +1,7 @@
 # 手机遥控桥 R1+R2：持久设备 Key + 票据认证 + 固定端口 + 单会话 Scope
 
 > 跟踪文档：需求汇总 + 实现方案 + 进度。随实现推进更新。
-> 目标版本：v0.6.27（conventional commit + 附注 tag + push）。
+> R1+R2 目标版本 v0.6.27（已完成）；R3 中继目标版本 v0.6.28。
 
 ## 一、需求汇总（用户原话归纳）
 
@@ -93,7 +93,54 @@ QR = url#<secret>（fragment 不进服务器日志/历史）
 | 7 | 手机 HTML：fragment 取凭证（mbk_→localStorage / 临时→sessionStorage）→ 换票 → WS ticket → Bearer fetch；scoped 隐藏新对话；401 清凭证显示失效门页 | ✅ |
 | 8 | Mock 升级（/api/ticket、WS ticket、scope 过滤、多凭证：mocktoken=all / mbk_s1=仅 s1 / mbk_bad=401） | ✅ |
 | 9 | 测试：Rust 单测 + node 测试三件套 + mock 浏览器实测 | ✅ |
-| 10 | 提交 feat(remote) + tag v0.6.27 + push | ⬜ |
+| 10 | 提交 feat(remote) + tag v0.6.27 + push | ✅ |
+
+## 三A、R3 公网中继（relay）——目标 v0.6.28
+
+### 需求（用户原话归纳）
+
+- 「如果我有一台服务器，是不是可以通过服务器做转发，就不用局限于局域网了」
+- 桌面端主动连出服务器（穿透 NAT），手机从任何网络经服务器接入；扫码/设备密钥
+  入口自动切换
+
+### 设计（已定，TCP 池式管道，对流量零解析）
+
+- **relay 独立 crate `relay/`**（零 axum，纯 tokio TCP）：
+  - 控制协议（首行文本 `\n` 结尾，之后纯字节）：`REGISTER <token>` → `PORT <n>`
+    （连接保持 = 通道持有者，断开释放通道+断全池管道）；`PIPE <token> <端口>` →
+    `OK`（进空闲池，手机连数据端口时弹一条 1:1 对接 `copy_bidirectional`）
+  - 数据端口按 **token FNV-1a 哈希**优先分配（重连端口不变 → QR/入口稳定），被占
+    则环形探测下一个；`constant_time_eq` 防计时侧信道；手动逐字节读首行
+    （不用 BufReader，避免管道缓冲残留）；注册连接整体移进 EOF 监视任务
+    （tokio TcpStream 无 try_clone）
+  - env：`ASTRA_RELAY_TOKEN`（必填）/ `ASTRA_RELAY_CONTROL_PORT`(21000) /
+    `ASTRA_RELAY_DATA_BASE`(21001) / `ASTRA_RELAY_DATA_END`(21099)
+- **桌面端 `src-tauri/src/mobile_relay.rs`**：
+  - `maintain` 主循环：注册 → `pool_loop`（400ms 补管道至 12 条；每条 = PIPE →
+    OK → 连本机桥端口 → 双向拷贝；结束自动补）→ 注册 EOF/停机退出；失败指数退避
+    1→30s 重注册；每次注册成功把数据端口写入 port_slot
+  - `relay_start`：确保桥已运行（`ensure_bridge_running`）→ 起维护循环 → 等首次
+    注册拿数据端口（12s 超时判败）→ 写入 `MobileBridgeState.relay`
+  - `relay_stop`：停机 → 入口回落局域网；`relay_view` 给 info/status/key QR 用
+- **mobile_bridge.rs 集成**：`MobileBridgeState` 加 `relay` 字段（std Mutex）；
+  `mobile_bridge_start` 拆出 `ensure_bridge_running` + `full_info`；`info_for` 中继
+  优先（url/qr/port 指向 relay 数据端口）；`mobile_bridge_key_create` 的 QR 同步切
+  中继入口；`mobile_bridge_stop` 一并停 relay（桥一停管道对端就死，留着力只会空转）
+- **前端**：`mobile.ts` relayOn/relayStart/relayStop + info.relay 字段；
+  RemotePage 公网中继卡片（地址/控制端口/令牌表单 + 已开启态 + 停止）；
+  **手机 HTML 零改动**（fetch 相对路径，经 relay 域名天然同源）
+- **手机页 / 桥协议零改动**：同样的 HTML、ticket、scope、WS
+
+### 状态
+
+| # | 步骤 | 状态 |
+|---|------|------|
+| 1 | relay crate 编译 + 端到端验证（node 模拟桌面端：注册/管道/HTTP 直达/负例/断连释放/稳定端口） | ✅ |
+| 2 | 桌面端 mobile_relay.rs + mobile_bridge.rs 集成 + lib.rs 注册 | ✅ |
+| 3 | 前端 mobile.ts + RemotePage 中继卡片 + scss | ✅ |
+| 4 | 测试：cargo 全量 + relay 集成测试（假 relay + 回显桥过真 maintain/pipe_task）+ node 三件套 + typecheck + build | ✅ |
+| 5 | relay/README.md 部署文档 | ✅ |
+| 6 | 提交 feat(remote) + tag v0.6.28 + push | ⬜ |
 
 ## 四、验证清单
 
@@ -115,6 +162,20 @@ QR = url#<secret>（fragment 不进服务器日志/历史）
   - `#mbk_bad`：401 → 门页「绑定已失效，请重新扫码」，凭证未残留（localStorage/sessionStorage 清空）✅
   - curl 验证：scoped ticket 返回 `scope:one`；scoped /api/sessions 只返回 s1；scoped /api/session/s2 → 403；错误凭证 → 401
   - ⚠️ 调试坑：同 URL 仅换 fragment（#mocktoken→#mbk_s1）浏览器不会重载页面，需先去 about:blank 再导航
+
+### R3 验证记录（2026-11-24）
+
+- **relay 端到端**（本地起 relay + node 模拟桌面端）：REGISTER→PORT 分配；PIPE→OK
+  进池；curl 经数据端口 HTTP 直达本地服务 ✅；PIPE 未注册端口 → `ERR unknown port`
+  ✅；桌面端断连 → 通道释放（curl 拒连 + PIPE 被拒）✅；同一 token 重连两次端口
+  不变（哈希稳定）✅；错误令牌 → `ERR bad handshake` ✅
+- **桌面端集成测试**（假 relay + 回显桥，跑真 maintain/pipe_task）：注册解析 PORT；
+  手机经数据端口写字节→管道→回显原样返回；停机信号干净退出；3 项全过
+- cargo test 全量：**218 passed / 0 failed**（+3 mobile_relay）；node 三件套
+  **63 passed**；typecheck ✅；`pnpm --dir src build` ✅；cargo check 无新警告；
+  中文转义/CR 检查 ✅
+- relay crate 独立编译 ✅（修：std MutexGuard 跨 await 两处、tokio TcpStream 无
+  try_clone → 注册连接整体移进 EOF 监视任务）
 
 ## 五、踩坑备忘
 

@@ -375,12 +375,15 @@ fn resolve_auth_creds(
 
 pub struct MobileBridgeState {
     inner: tokio::sync::Mutex<Option<BridgeRunning>>,
+    /// 中继客户端（mobile_relay）：Some = 入口走 relay，info/key QR 自动切换
+    pub(crate) relay: std::sync::Mutex<Option<crate::mobile_relay::RelayRunning>>,
 }
 
 impl Default for MobileBridgeState {
     fn default() -> Self {
         Self {
             inner: tokio::sync::Mutex::new(None),
+            relay: std::sync::Mutex::new(None),
         }
     }
 }
@@ -420,6 +423,16 @@ pub struct BridgeInfo {
     /// 入口地址的二维码（SVG 字符串）
     pub qr_svg: String,
     pub lan_ip: String,
+    /// 中继模式：Some = 入口经公网 relay；None = 局域网直连
+    pub relay: Option<RelayStatus>,
+}
+
+/// 中继入口状态（R3：桌面端主动连出公网 relay，突破局域网限制）
+#[derive(Debug, Clone, Serialize)]
+pub struct RelayStatus {
+    pub host: String,
+    pub control_port: u16,
+    pub data_port: u16,
 }
 
 #[derive(Debug, Serialize)]
@@ -428,6 +441,7 @@ pub struct BridgeStatus {
     pub port: Option<u16>,
     pub paired: usize,
     pub lan_ip: String,
+    pub relay: Option<RelayStatus>,
 }
 
 /// 启动桥服务（已在运行则原样返回现有信息：QR 不变，避免每次打开页面都换 token）
@@ -436,9 +450,19 @@ pub async fn mobile_bridge_start(
     app: AppHandle,
     state: State<'_, MobileBridgeState>,
 ) -> Result<BridgeInfo, String> {
+    ensure_bridge_running(&app, &state).await?;
+    full_info(&app, &state).await
+}
+
+/// 确保桥服务在跑（没开则启动）；mobile_bridge_start 与 relay_start 共用。
+/// 返回桥监听端口（relay 管道的对端）
+pub(crate) async fn ensure_bridge_running(
+    app: &AppHandle,
+    state: &MobileBridgeState,
+) -> Result<u16, String> {
     let mut guard = state.inner.lock().await;
     if let Some(running) = guard.as_ref() {
-        return Ok(info_for(&app, running));
+        return Ok(running.port);
     }
     let token = Arc::new(uuid::Uuid::new_v4().simple().to_string());
     let paired = Arc::new(AtomicUsize::new(0));
@@ -456,13 +480,13 @@ pub async fn mobile_bridge_start(
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     // 端口持久化：优先复用上次成功端口（URL 稳定，持久 key 才有意义），
     // 被占则向下试探 20 个，仍不行回退随机端口（port 0 = 内核分配）
-    let preferred = crate::mobile_keys::load_saved_port(&app);
+    let preferred = crate::mobile_keys::load_saved_port(app);
     let listener = pick_listener(preferred).await?;
     let port = listener
         .local_addr()
         .map_err(|e| format!("桥服务地址读取失败: {e}"))?
         .port();
-    crate::mobile_keys::save_port(&app, port);
+    crate::mobile_keys::save_port(app, port);
     let router = build_router(shared);
     let join = tokio::spawn(async move {
         if let Err(e) = axum::serve(
@@ -488,15 +512,28 @@ pub async fn mobile_bridge_start(
         view,
         conns,
     };
-    let info = info_for(&app, &running);
+    let port = running.port;
     *guard = Some(running);
-    app_log!(info, "mobile-bridge", "started on port {}", info.port);
-    Ok(info)
+    app_log!(info, "mobile-bridge", "started on port {port}");
+    Ok(port)
 }
 
-/// 停止桥服务（断开所有手机连接；队列真相在前端，不受影响）
+/// 当前完整入口信息（含中继模式；中继优先于局域网 URL）
+pub(crate) async fn full_info(
+    _app: &AppHandle,
+    state: &MobileBridgeState,
+) -> Result<BridgeInfo, String> {
+    let guard = state.inner.lock().await;
+    let running = guard.as_ref().ok_or_else(|| "手机遥控未开启".to_string())?;
+    let relay = crate::mobile_relay::relay_view(state);
+    Ok(info_for(running, relay.as_ref()))
+}
+
+/// 停止桥服务（断开所有手机连接；队列真相在前端，不受影响）。
+/// 中继若在跑也一并停掉：桥一停管道对端就死了，留着只会空转
 #[tauri::command]
 pub async fn mobile_bridge_stop(state: State<'_, MobileBridgeState>) -> Result<(), String> {
+    crate::mobile_relay::relay_stop(&state).await?;
     let mut guard = state.inner.lock().await;
     if let Some(running) = guard.take() {
         running.paired.store(0, Ordering::Relaxed);
@@ -521,6 +558,7 @@ pub async fn mobile_bridge_status(
             .map(|r| r.paired.load(Ordering::Relaxed))
             .unwrap_or(0),
         lan_ip: lan_ip(),
+        relay: crate::mobile_relay::relay_view(&state),
     })
 }
 
@@ -610,7 +648,12 @@ pub fn mobile_bridge_key_create(
         expires_at,
     );
     crate::mobile_keys::save_keys(&app, &keys)?;
-    let url = format!("http://{}:{}/m#{}", lan_ip(), running.port, secret);
+    // 入口地址与桥 info 同源：中继在跑就走 relay 数据端口（设备 key 的 QR 同样可跨网）
+    let relay = crate::mobile_relay::relay_view(&state);
+    let url = match relay.as_ref() {
+        Some(r) => format!("http://{}:{}/m#{}", r.host, r.data_port, secret),
+        None => format!("http://{}:{}/m#{}", lan_ip(), running.port, secret),
+    };
     let qr_svg = qr_svg(&url)?;
     Ok(KeyCreated {
         id: key.key_id,
@@ -669,21 +712,31 @@ pub async fn mobile_bridge_key_revoke(
     Ok(kicked)
 }
 
-fn info_for(app: &AppHandle, running: &BridgeRunning) -> BridgeInfo {
-    let _ = app;
+fn info_for(running: &BridgeRunning, relay: Option<&RelayStatus>) -> BridgeInfo {
     let lan_ip = lan_ip();
-    let url = format!("http://{lan_ip}:{}/m#{}", running.port, running.token);
+    let (url, mode_port) = match relay {
+        // 中继模式：入口 = relay 数据端口（数据端口哈希自 token，重连不变）
+        Some(r) => (
+            format!("http://{}:{}/m#{}", r.host, r.data_port, running.token),
+            r.data_port,
+        ),
+        None => (
+            format!("http://{lan_ip}:{}/m#{}", running.port, running.token),
+            running.port,
+        ),
+    };
     let qr_svg = qr_svg(&url).unwrap_or_else(|e| {
         app_log!(error, "mobile-bridge", "qr render failed: {e}");
         String::new()
     });
     BridgeInfo {
         running: true,
-        port: running.port,
+        port: mode_port,
         token: running.token.as_str().to_string(),
         url,
         qr_svg,
         lan_ip,
+        relay: relay.cloned(),
     }
 }
 

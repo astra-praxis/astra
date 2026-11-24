@@ -36,6 +36,8 @@ export interface MobileBridgeInfo {
   /** 入口地址的二维码（SVG 字符串） */
   qr_svg: string;
   lan_ip: string;
+  /** 中继模式：非 null = 入口经公网 relay（url/qr 已指向中继） */
+  relay: { host: string; control_port: number; data_port: number } | null;
 }
 
 interface BridgeStatus {
@@ -43,6 +45,7 @@ interface BridgeStatus {
   port: number | null;
   paired: number;
   lan_ip: string;
+  relay: { host: string; control_port: number; data_port: number } | null;
 }
 
 interface MobileBridgeState {
@@ -65,6 +68,13 @@ interface MobileBridgeState {
   /** 撤销设备 key（返回踢掉的在线连接数） */
   revokeKey: (id: string) => Promise<number>;
   refreshKeys: () => Promise<void>;
+  /** 公网中继：桌面端主动连出 relay 服务器，手机从任意网络接入（不再限局域网） */
+  relayOn: boolean;
+  relayStarting: boolean;
+  relayStopping: boolean;
+  relayError: string;
+  relayStart: (opts: { host: string; controlPort: number; token: string }) => Promise<void>;
+  relayStop: () => Promise<void>;
 }
 
 /** 设备 key 列表视图（Rust to_view：不含 hash/secret） */
@@ -135,7 +145,7 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
         await get().start();
         return;
       }
-      set({ running: status.running, paired: status.running ? status.paired : 0 });
+      set({ running: status.running, paired: status.running ? status.paired : 0, relayOn: status.relay != null });
     } catch {
       // 后端不可用（本地调试）时忽略
     }
@@ -161,6 +171,42 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
       set({ keys, keysLoading: false });
     } catch {
       set({ keysLoading: false });
+    }
+  },
+  relayOn: false,
+  relayStarting: false,
+  relayStopping: false,
+  relayError: '',
+  relayStart: async ({ host, controlPort, token }) => {
+    if (get().relayStarting || get().relayOn) return;
+    set({ relayStarting: true, relayError: '' });
+    try {
+      const info = await invoke<MobileBridgeInfo>('mobile_bridge_relay_start', {
+        host,
+        controlPort,
+        token,
+      });
+      // 成功后 info.url/qr 已切换为中继入口（桥没开会自动开）
+      set({ info, running: true, relayOn: true, relayStarting: false });
+    } catch (e) {
+      set({
+        relayError: e instanceof Error ? e.message : String(e),
+        relayStarting: false,
+      });
+    }
+  },
+  relayStop: async () => {
+    set({ relayStopping: true, relayError: '' });
+    try {
+      await invoke('mobile_bridge_relay_stop');
+      // 桥仍在跑，重新拿 LAN 入口（mobile_bridge_start 已在跑则原样返回）
+      const info = await invoke<MobileBridgeInfo>('mobile_bridge_start');
+      set({ info, relayOn: false, relayStopping: false });
+    } catch (e) {
+      set({
+        relayError: e instanceof Error ? e.message : String(e),
+        relayStopping: false,
+      });
     }
   },
 }));

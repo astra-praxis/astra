@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Copy, KeyRound, Play, Plus, RefreshCw, Smartphone, Square, Trash2, WifiOff,
+  Check, Copy, Globe, KeyRound, Play, Plus, RefreshCw, Smartphone, Square, Trash2, WifiOff,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { ensureMobileBridge, useMobileBridgeStore, type BridgeKeyView, type CreatedKey } from '@/stores/mobile';
@@ -42,6 +42,12 @@ export default function RemotePage() {
   const refreshKeys = useMobileBridgeStore((s) => s.refreshKeys);
   const createKey = useMobileBridgeStore((s) => s.createKey);
   const revokeKey = useMobileBridgeStore((s) => s.revokeKey);
+  const relayOn = useMobileBridgeStore((s) => s.relayOn);
+  const relayStarting = useMobileBridgeStore((s) => s.relayStarting);
+  const relayStopping = useMobileBridgeStore((s) => s.relayStopping);
+  const relayError = useMobileBridgeStore((s) => s.relayError);
+  const relayStart = useMobileBridgeStore((s) => s.relayStart);
+  const relayStop = useMobileBridgeStore((s) => s.relayStop);
 
   const [urlCopied, setUrlCopied] = useState(false);
   // 持久 key 表单
@@ -52,6 +58,10 @@ export default function RemotePage() {
   const [formError, setFormError] = useState('');
   const [created, setCreated] = useState<CreatedKey | null>(null);
   const [createdCopied, setCreatedCopied] = useState(false);
+  // 公网中继表单
+  const [relayHost, setRelayHost] = useState('');
+  const [relayPort, setRelayPort] = useState('21000');
+  const [relayToken, setRelayToken] = useState('');
   // 会话列表（scope 单会话下拉）
   const [sessions, setSessions] = useState<AgentSessionMeta[]>([]);
   const [revokingId, setRevokingId] = useState('');
@@ -137,6 +147,11 @@ export default function RemotePage() {
   const activeKeys = useMemo(() => keys.filter((k) => !k.revoked_at), [keys]);
   const revokedKeys = useMemo(() => keys.filter((k) => k.revoked_at), [keys]);
 
+  const submitRelayStart = useCallback(() => {
+    const port = Number(relayPort) || 21000;
+    void relayStart({ host: relayHost, controlPort: port, token: relayToken });
+  }, [relayHost, relayPort, relayToken, relayStart]);
+
   return (
     <div className="remote-page">
       <header className="remote-page__head">
@@ -172,7 +187,11 @@ export default function RemotePage() {
             <span className="remote-page__state">
               {paired > 0 ? `已连接 ${paired} 台手机` : '等待手机扫码…'}
             </span>
-            <span className="remote-page__lan">局域网 {info?.lan_ip} · 端口 {info?.port}</span>
+            <span className="remote-page__lan">
+              {info?.relay
+                ? `中继 ${info.relay.host}:${info.relay.data_port}`
+                : `局域网 ${info?.lan_ip} · 端口 ${info?.port}`}
+            </span>
             <button type="button" className="remote-page__icon-btn" onClick={() => void refresh()} title="刷新状态">
               <RefreshCw size={14} />
             </button>
@@ -207,6 +226,75 @@ export default function RemotePage() {
                 随时撤销）请用下方的设备密钥。
               </p>
             </div>
+          </section>
+
+          {/* ===== 公网中继 ===== */}
+          <section className="remote-page__card remote-page__relay">
+            <div className="remote-page__keys-head">
+              <h3>
+                <Globe size={15} /> 公网中继
+                {info?.relay && <span className="remote-page__relay-badge">已开启</span>}
+              </h3>
+              {info?.relay && (
+                <button
+                  type="button"
+                  className="remote-page__danger"
+                  disabled={relayStopping}
+                  onClick={() => void relayStop()}
+                >
+                  <Square size={12} strokeWidth={3} />
+                  {relayStopping ? '停止中…' : '停止中继'}
+                </button>
+              )}
+            </div>
+            <p className="remote-page__hint remote-page__keys-intro">
+              局域网直连不可用（手机不在同一网络）时，可在一台公网/可达服务器上部署
+              astra-relay（见仓库 relay/README.md），桌面端会主动连出，手机从任何网络
+              经中继接入。开启后上方二维码与设备密钥自动切换为中继入口。
+            </p>
+            {info?.relay ? (
+              <p className="remote-page__hint">
+                中继入口：{info.relay.host}:{info.relay.data_port}（数据端口随令牌固定，
+                重连不变）。手机照常扫码即可，流量经服务器转发但端到端凭证验证不变。
+              </p>
+            ) : (
+              <div className="remote-page__key-form remote-page__relay-form">
+                <input
+                  type="text"
+                  className="remote-page__key-input remote-page__relay-host"
+                  placeholder="服务器地址，如 relay.example.com"
+                  value={relayHost}
+                  onChange={(e) => setRelayHost(e.target.value)}
+                />
+                <input
+                  type="number"
+                  className="remote-page__key-input remote-page__relay-port"
+                  placeholder="控制端口"
+                  value={relayPort}
+                  min={1}
+                  max={65535}
+                  onChange={(e) => setRelayPort(e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="remote-page__key-input remote-page__relay-token"
+                  placeholder="接入令牌（ASTRA_RELAY_TOKEN）"
+                  value={relayToken}
+                  autoComplete="off"
+                  onChange={(e) => setRelayToken(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="remote-page__primary remote-page__key-add"
+                  disabled={relayStarting || !relayHost.trim() || !relayToken.trim()}
+                  onClick={submitRelayStart}
+                >
+                  <Play size={14} />
+                  {relayStarting ? '连接中…' : '开启中继'}
+                </button>
+              </div>
+            )}
+            {relayError && <div className="remote-page__form-error" role="alert">{relayError}</div>}
           </section>
 
           {/* ===== 持久设备 key ===== */}

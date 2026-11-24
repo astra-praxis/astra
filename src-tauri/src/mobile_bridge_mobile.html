@@ -932,7 +932,7 @@
         delete state.pending[sid];
         buffered.forEach(function (item) {
           if (item.__question) onQuestion(item.__question);
-          else { trackRunning(sid, item); applyEnvelope(sid, item); }
+          else { trackRunning(sid, item); applyEnvelope(sid, item, true); }
         });
         renderStream();
       }
@@ -962,7 +962,7 @@
       }
     }
 
-    function applyEnvelope(sid, env) {
+    function applyEnvelope(sid, env, replay) {
       var list = entriesOf(sid);
       var last = list[list.length - 1];
       function push(entry) { list.push(entry); }
@@ -973,12 +973,14 @@
       }
       switch (env.type) {
         case 'user_message':
-          // PC 起跑时镜像的用户消息（桌面 pushUser 是本地行为，不产生事件）。
-          // 向前扫描：同文本的 user 条目已存在则跳过（隐形重试会重复广播；
-          // 历史已含该条时回放也不能重复）。sender：多设备同码时标记来源
+          // 用户消息镜像：前端 pushUser（按下发送）时即时广播，不等 Run 准入；
+          // sender：多设备同码时标记来源。回放（历史+缓冲可能重叠）才向前扫描
+          // 同文本条目防重复；实时事件直接追加——连发两条相同文本是合法消息，
+          // 旧版回放式去重误杀第二条
           var ut = env.text || '';
           var ue = { kind: 'user', text: ut };
           if (env.sender) ue.sender = env.sender;
+          if (!replay) { push(ue); break; }
           for (var ui = list.length - 1; ui >= 0; ui--) {
             if (list[ui].kind === 'user') { if (list[ui].text === ut) break; push(ue); break; }
           }
@@ -1063,7 +1065,7 @@
           delete state.pending[sid];
           buffered.forEach(function (item) {
             if (item.__question) onQuestion(item.__question);
-            else { trackRunning(sid, item); applyEnvelope(sid, item); }
+            else { trackRunning(sid, item); applyEnvelope(sid, item, true); }
           });
           renderStream();
         })
@@ -1153,7 +1155,7 @@
         void send.offsetWidth;
         send.classList.add('is-launch');
         try { navigator.vibrate && navigator.vibrate(10); } catch (e) {}
-        // 新对话模式的发送记录：PC 起跑时广播的 user_message 是剥过 /技能前缀的
+        // 新对话模式的发送记录：PC 发送时广播的 user_message 是剥过 /技能前缀的
         // 文本，这里用同款正则预剥离后再存，收养时才能精确匹配
         if (payload.session_id === null) {
           state.sentAt = now;

@@ -274,6 +274,16 @@ pub fn mobile_bridge_push_view(state: State<'_, MobileBridgeState>, session_id: 
     }
 }
 
+/// 前端在 pushUser（用户按下发送）时镜像首条 user_message：时机早于 Run 准入
+///（checkpoint / MCP 装配等启动开销可达数秒），任一终端发送后所有设备立即
+/// 同步。kind 复用 Tauri 事件名（如 "agent-event"），走 broadcast_event 同一条
+/// 「镜像 + live 缓冲」链路（user_message 重置该会话的 live 缓冲，mid-run
+/// 加入的手机从新用户消息开始补看）
+#[tauri::command]
+pub fn mobile_bridge_push_event(kind: String, payload: Value) {
+    broadcast_event(&kind, &payload);
+}
+
 /// 前端向手机广播任意协议消息（toast 提示、会话列表刷新通知等）
 #[tauri::command]
 pub fn mobile_bridge_server_event(value: Value) {

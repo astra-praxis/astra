@@ -83,10 +83,6 @@ pub struct AgentStartReq {
     /// 前端生成的会话 id（同会话复用 Thread 与历史）
     pub session_id: String,
     pub user_text: String,
-    /// 发送者设备名（手机遥控多设备场景；桌面端本机发送不传）。
-    /// 随 user_message 广播给所有手机，多设备同看时能区分是谁发的
-    #[serde(default)]
-    pub sender: Option<String>,
     /// 用户附带的图片（规范 PNG 的 base64 与尺寸，经 agent_normalize_image 归一化）。
     /// 需要后端 vision 能力（image_recognition 开启）；与文本保持顺序（文本在前）。
     #[serde(default)]
@@ -605,21 +601,10 @@ pub async fn agent_start_run(
         model_name
     );
 
-    // 手机镜像：用户消息条目。桌面端 pushUser 是纯本地行为不产生事件，
-    // 手机对话流里永远看不到自己发了什么；这里在 Run 真正准入后补发一条
-    // user_message（首条事件），手机端借此立即渲染用户气泡，并在「新对话」
-    // 发送场景下据此收养 PC 新建的会话（见 mobile_bridge_mobile.html onEnvelope）
-    crate::mobile_bridge::broadcast_event(
-        "agent-event",
-        &json!({
-            "type": "user_message",
-            "session_id": session_id,
-            // user_text 在下方记忆采集（observe_text）还要用，这里不能被 json! 按值消费
-            "text": user_text.clone(),
-            // 发送者设备名（None → 手机端不渲染徽标，视为桌面端本机发送）
-            "sender": req.sender.clone(),
-        }),
-    );
+    // user_message 不在这里镜像：手机端的首条用户气泡由前端在 pushUser（按下
+    // 发送）时即时广播（mobile_bridge_push_event），不等本命令的启动开销
+    //（checkpoint / MCP 装配可达数秒，原准入广播让消息几乎与回复同时出现）；
+    // 隐形继续/重试不进对话流，也不该在手机端产生幽灵气泡
 
     // 4. 事件转发任务：Envelope → agent-event + JSONL 日志；Run 结束（tx 全部 drop）后自然退出
     let forward_app = app.clone();

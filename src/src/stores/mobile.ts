@@ -198,6 +198,22 @@ function applyPlan(plan: EnqueuePlan): boolean {
  *    两次）——两种都不兜底入队 */
 type DirectSendOutcome = 'sent' | 'queued' | 'failed';
 
+/** 用户消息即时镜像：任一终端按下发送（pushUser）即广播 user_message 给所有手机，
+ *  不等 Run 准入（checkpoint / MCP 装配等启动开销可达数秒，原先手机端气泡几乎与
+ *  agent 回复同时出现）。载荷与原 run.rs 准入广播一致：text 是剥过 /技能 前缀的
+ *  任务文本（手机端「新对话」收养的文本匹配依赖它）；sender 缺省 = 桌面本机发送 */
+export function broadcastUserMessage(sessionId: string, text: string, sender?: string): void {
+  invoke('mobile_bridge_push_event', {
+    kind: 'agent-event',
+    payload: {
+      type: 'user_message',
+      session_id: sessionId,
+      text,
+      ...(sender ? { sender } : {}),
+    },
+  }).catch(() => {});
+}
+
 /** 手机直发（目标会话空闲时跳过队列）：复刻 AgentPage.startRun 的核心序
  *  （校验 → 监听 → 守卫 → 清横幅 → pushUser → setRunState → invoke）。
  *  与桌面手动发送的等价性：不清输入框草稿（等价 keepInput）、清 runError/error、
@@ -237,6 +253,7 @@ async function directSend(
   st.setRunError(null);
   st.setError('');
   st.pushUser(raw, undefined, sender); // 会话记录保留原始 /技能名 文本，回放时可读；sender 供多设备共享时展示来源
+  broadcastUserMessage(st.sessionId, text, sender); // 按下发送即镜像给所有手机，不等 Run 准入
   st.setRunState(true, 'analyzing');
   const provider = toolbar.providers.find((p) => p.id === toolbar.selectedProviderId) ?? null;
   try {
@@ -246,7 +263,6 @@ async function directSend(
         user_text: text,
         images: [],
         skill,
-        sender: sender ?? null,
         provider_id: toolbar.sourceType === 'provider' ? toolbar.selectedProviderId : null,
         model_port: toolbar.sourceType === 'model' ? toolbar.selectedModelPort : null,
         model:

@@ -17,6 +17,7 @@ import OrbArt from '@/components/illustrations/OrbArt';
 
 import { useChatToolbarStore } from '@/stores/chatToolbar';
 import { useAgentStore, ensureAgentListeners, refreshAgentStatus, nextQueuedFor, type Entry, type QueuedMessage, type UserImage, withId } from '@/stores/agent';
+import { broadcastUserMessage } from '@/stores/mobile';
 import { useWorkspaceStore } from '@/stores/workspace';
 import { isSendEnter } from '@/hooks/useMention';
 import { EntryView, EntriesFooter, userMsgPreview, VIRTUOSO_COMPONENTS } from './EntryView';
@@ -468,17 +469,15 @@ export default function AgentPage() {
   );
 
   /** 构建 agent_start_run 请求体（手动发送 / 队列续发 / 隐形继续 / 重试共用）。
-   *  sender：手机遥控发送的设备名（随 user_message 广播给所有手机标来源；
-   *  桌面本机发送不传 → 广播里为 null，手机端标「桌面端」） */
+   *  发送者不再进请求体：user_message 镜像改由前端按下发送时广播（broadcastUserMessage） */
   const buildRunReq = useCallback(
-    (text: string, skillName: string | null, sender?: string) => {
+    (text: string, skillName: string | null) => {
       const st = useChatToolbarStore.getState();
       return {
         session_id: sessionId,
         user_text: text,
         images: [],
         skill: skillName,
-        sender: sender ?? null,
         provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
         model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
         model:
@@ -562,6 +561,8 @@ export default function AgentPage() {
         onAdmitted?.();
         // sender：手机遥控发送的设备名（落盘后多设备共享历史时展示来源）
         pushUser(raw, undefined, opts?.sender); // 会话记录保留原始 /技能名 文本，回放时可读
+        // 按下发送即镜像 user_message 给所有手机（不等 Run 准入）；sender 标来源
+        broadcastUserMessage(sessionId, text, opts?.sender);
       }
       setRunState(true, 'analyzing');
       // 准入即算「已起跑」：不依赖观察到 running 翻转（React 把 setRunState(true)
@@ -570,7 +571,7 @@ export default function AgentPage() {
       retryStartedRef.current = true;
 
       try {
-        await invoke('agent_start_run', { req: buildRunReq(text, skillName, opts?.sender) });
+        await invoke('agent_start_run', { req: buildRunReq(text, skillName) });
         return true;
       } catch (e) {
         setRunState(false, null);

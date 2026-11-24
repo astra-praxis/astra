@@ -427,6 +427,7 @@ pub fn run() {
             mobile_bridge::mobile_bridge_status,
             mobile_bridge::mobile_bridge_push_queue,
             mobile_bridge::mobile_bridge_push_view,
+            mobile_bridge::mobile_bridge_push_event,
             mobile_bridge::mobile_bridge_server_event,
             // Agent Sessions
             agent::sessions::list_agent_sessions,

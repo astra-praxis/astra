@@ -10,6 +10,7 @@
 //! 端口稳定性：relay 按 token 哈希分配数据端口，断线重连端口不变，
 //! 入口 URL / 二维码 / 设备 key 的 QR 都稳定。
 
+use std::sync::atomic::{AtomicUsize as StdAtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
@@ -23,6 +24,9 @@ use tokio_rustls::{rustls, TlsConnector};
 
 /// 空闲管道池目标数（浏览器并发连接 ~6，WS 占 1，余量应对并发 fetch）
 const POOL_TARGET: usize = 12;
+/// 连续失败管道数达到即判定通道已失效（relay 侧已释放/网络异常）→ 主动退出
+/// 池循环触发重注册。半开注册连接（FIN 丢失，read 永远不返回）靠它自愈
+const MAX_CONSEC_PIPE_FAIL: usize = 8;
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(6);
 const PIPE_READY_TIMEOUT: Duration = Duration::from_secs(6);
 /// relay_start 等首次注册成功的上限（注册失败/超时则整体失败返回）
@@ -114,11 +118,17 @@ fn tls_connector() -> TlsConnector {
         .clone()
 }
 
-/// 连 relay（明文或 TLS），host 必须是域名才能做 TLS 证书校验
+/// 连 relay（明文或 TLS），host 必须是域名才能做 TLS 证书校验。
+/// 所有连接开启 TCP keepalive：注册连接是长生命周期纯空闲连接，
+/// 网络路径上任何静默掐断（NAT 超时/中间盒）都要靠探活包尽早暴露
 async fn connect_relay(host: &str, port: u16, tls: bool) -> Result<RelayConn, String> {
     let tcp = TcpStream::connect((host, port))
         .await
         .map_err(|e| format!("relay {host}:{port} 连接失败: {e}"))?;
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(30))
+        .with_interval(Duration::from_secs(10));
+    let _ = socket2::SockRef::from(&tcp).set_tcp_keepalive(&keepalive);
     if !tls {
         return Ok(RelayConn::Plain(tcp));
     }
@@ -188,7 +198,13 @@ async fn pipe_task(
     bridge_port: u16,
     tls: bool,
     alive: Arc<StdMutex<usize>>,
+    consec_fail: Arc<StdAtomicUsize>,
 ) {
+    // 计数在 spawn 即生效（在途 + 已建立都算），池循环按总量补足；
+    // 此前只减不增，池永远显示为空，每 400ms 狂补 12 条 = 30 连接/秒的洪流
+    if let Ok(mut n) = alive.lock() {
+        *n += 1;
+    }
     let res: Result<(), String> = async {
         let mut ctrl = connect_relay(&host, control_port, tls).await?;
         ctrl.write_all(format!("PIPE {token} {data_port}\n").as_bytes())
@@ -212,13 +228,17 @@ async fn pipe_task(
     .await;
     if let Err(e) = res {
         crate::app_log!(debug, "mobile-relay", "管道结束: {e}");
+        consec_fail.fetch_add(1, Ordering::Relaxed);
+    } else {
+        consec_fail.store(0, Ordering::Relaxed);
     }
     if let Ok(mut n) = alive.lock() {
         *n = n.saturating_sub(1);
     }
 }
 
-/// 池循环：注册连接存活期间持续补管道；注册断开（EOF）→ 返回触发重注册
+/// 池循环：注册连接存活期间持续补管道；注册断开（EOF）或管道连续失败
+/// （通道已失效但注册连接半开）→ 返回触发重注册
 async fn pool_loop(
     mut reg: RelayConn,
     host: String,
@@ -230,6 +250,7 @@ async fn pool_loop(
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let alive = Arc::new(StdMutex::new(0usize));
+    let consec_fail = Arc::new(StdAtomicUsize::new(0));
     let mut tick = tokio::time::interval(Duration::from_millis(400));
     let mut buf = [0u8; 256];
     loop {
@@ -247,6 +268,11 @@ async fn pool_loop(
                 }
             }
             _ = tick.tick() => {
+                if consec_fail.load(Ordering::Relaxed) >= MAX_CONSEC_PIPE_FAIL {
+                    crate::app_log!(warn, "mobile-relay",
+                        "管道连续失败 {consec_fail:?} 次，判定通道失效，重注册");
+                    return;
+                }
                 let cur = alive.lock().map(|n| *n).unwrap_or(POOL_TARGET);
                 for _ in cur..POOL_TARGET {
                     tokio::spawn(pipe_task(
@@ -257,6 +283,7 @@ async fn pool_loop(
                         bridge_port,
                         tls,
                         Arc::clone(&alive),
+                        Arc::clone(&consec_fail),
                     ));
                 }
             }
@@ -557,6 +584,91 @@ mod tests {
             }
         });
         port
+    }
+
+    /// 假 relay 变体：REGISTER→PORT 后把注册连接持有到 EOF（模拟半开），
+    /// 但所有 PIPE 一律拒绝（模拟 relay 侧通道已失效/已被释放），
+    /// 统计注册次数与 PIPE 连接数（洪流回归验证用）
+    async fn spawn_rejecting_relay(
+        token: &'static str,
+    ) -> (u16, Arc<StdAtomicUsize>, Arc<StdAtomicUsize>) {
+        let ctrl = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let ctrl_port = ctrl.local_addr().unwrap().port();
+        let token = token.to_string();
+        let data_port = 21004u16; // 拒绝分支只验字符串，不真绑端口
+        let regs = Arc::new(StdAtomicUsize::new(0));
+        let pipes = Arc::new(StdAtomicUsize::new(0));
+        let r = Arc::clone(&regs);
+        let p = Arc::clone(&pipes);
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = ctrl.accept().await else {
+                    break;
+                };
+                let token = token.clone();
+                let regs = Arc::clone(&r);
+                let pipes = Arc::clone(&p);
+                tokio::spawn(async move {
+                    let line = read_first_line(&mut sock).await.unwrap_or_default();
+                    match line.split_whitespace().collect::<Vec<_>>().as_slice() {
+                        ["REGISTER", t] if t == &token => {
+                            regs.fetch_add(1, Ordering::Relaxed);
+                            let _ = sock
+                                .write_all(format!("PORT {data_port}\n").as_bytes())
+                                .await;
+                            // 保持连接（模拟半开：EOF 永不到达桌面端）
+                            let mut b = [0u8; 64];
+                            loop {
+                                match sock.read(&mut b).await {
+                                    Ok(0) | Err(_) => break,
+                                    Ok(_) => {}
+                                }
+                            }
+                        }
+                        ["PIPE", t, _] if t == &token => {
+                            pipes.fetch_add(1, Ordering::Relaxed);
+                            let _ = sock.write_all(b"ERR nope\n").await;
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        });
+        (ctrl_port, regs, pipes)
+    }
+
+    /// 回归：通道在 relay 侧已失效但注册连接半开（EOF 永不到达）时，
+    /// 管道连续失败要触发重注册；同时验证池计数修复后不再洪流补管
+    #[tokio::test]
+    async fn maintain_reregisters_when_pipes_rejected() {
+        let (ctrl_port, regs, pipes) = spawn_rejecting_relay("tk4").await;
+        let slot = Arc::new(StdMutex::new(None));
+        let (tx, rx) = watch::channel(false);
+        let join = tokio::spawn(maintain(
+            "127.0.0.1".to_string(),
+            ctrl_port,
+            "tk4".to_string(),
+            1, // 桥端口不可达也无所谓：PIPE 在 relay 侧就被拒
+            false,
+            Arc::clone(&slot),
+            rx,
+        ));
+        let _ = wait_slot(&slot).await;
+        // 5 秒内应完成至少 2 轮「注册→管道全拒→判定失效→重注册」
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        tx.send(true).unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(3), join).await;
+        let reg_count = regs.load(Ordering::Relaxed);
+        let pipe_count = pipes.load(Ordering::Relaxed);
+        assert!(reg_count >= 2, "通道失效后未重注册（注册次数 {reg_count}）");
+        // 修复前：池计数不增，每 400ms 补 12 条 → 5 秒 ≥ 150 条 PIPE；
+        // 修复后：每轮最多 POOL_TARGET 条在途，随重注册轮次线性增长
+        assert!(
+            pipe_count < reg_count * POOL_TARGET * 2,
+            "PIPE 洪流回归（{pipe_count} 条 / {reg_count} 轮）"
+        );
     }
 
     async fn wait_slot(slot: &StdMutex<Option<u16>>) -> u16 {

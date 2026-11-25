@@ -48,6 +48,9 @@ export default function RemotePage() {
   const relayError = useMobileBridgeStore((s) => s.relayError);
   const relayStart = useMobileBridgeStore((s) => s.relayStart);
   const relayStop = useMobileBridgeStore((s) => s.relayStop);
+  const relayConfig = useMobileBridgeStore((s) => s.relayConfig);
+  const relayConfigLoaded = useMobileBridgeStore((s) => s.relayConfigLoaded);
+  const relayConfigLoad = useMobileBridgeStore((s) => s.relayConfigLoad);
 
   const [urlCopied, setUrlCopied] = useState(false);
   // 持久 key 表单
@@ -71,7 +74,17 @@ export default function RemotePage() {
     void ensureMobileBridge();
     void refresh();
     void refreshKeys();
-  }, [refresh, refreshKeys]);
+    void relayConfigLoad();
+  }, [refresh, refreshKeys, relayConfigLoad]);
+
+  // 已入库的中继配置回填表单（仅当表单还是初始空值时，避免覆盖正在输入的内容）
+  useEffect(() => {
+    if (!relayConfigLoaded || !relayConfig) return;
+    setRelayHost((h) => h || relayConfig.host);
+    setRelayPort((p) => (p === '21000' ? String(relayConfig.control_port) : p));
+    setRelayToken((t) => t || relayConfig.token);
+    setRelayTls(relayConfig.tls);
+  }, [relayConfigLoaded, relayConfig]);
 
   // 配对数变化由 pair 事件驱动；轮询兜底对账（如手机直接关页面）
   useEffect(() => {

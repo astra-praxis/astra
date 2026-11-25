@@ -436,6 +436,8 @@ pub fn run() {
             mobile_bridge::mobile_bridge_key_revoke,
             mobile_relay::mobile_bridge_relay_start,
             mobile_relay::mobile_bridge_relay_stop,
+            mobile_relay::mobile_relay_config_get,
+            mobile_relay::mobile_relay_config_save,
             // Agent Sessions
             agent::sessions::list_agent_sessions,
             agent::sessions::save_agent_session,

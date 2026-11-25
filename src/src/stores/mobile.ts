@@ -75,6 +75,18 @@ interface MobileBridgeState {
   relayError: string;
   relayStart: (opts: { host: string; controlPort: number; token: string; tls: boolean }) => Promise<void>;
   relayStop: () => Promise<void>;
+  /** 已入库的中继配置（relay.json）：表单回填用；开启成功后自动落盘 */
+  relayConfig: RelayConfig | null;
+  relayConfigLoaded: boolean;
+  relayConfigLoad: () => Promise<void>;
+}
+
+/** 中继连接配置（Rust RelayConfig：成功开启后存 relay.json） */
+export interface RelayConfig {
+  host: string;
+  control_port: number;
+  token: string;
+  tls: boolean;
 }
 
 /** 设备 key 列表视图（Rust to_view：不含 hash/secret） */
@@ -177,6 +189,17 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
   relayStarting: false,
   relayStopping: false,
   relayError: '',
+  relayConfig: null,
+  relayConfigLoaded: false,
+  relayConfigLoad: async () => {
+    try {
+      const cfg = await invoke<RelayConfig | null>('mobile_relay_config_get');
+      set({ relayConfig: cfg, relayConfigLoaded: true });
+    } catch {
+      // 后端不可用（本地调试）时忽略
+      set({ relayConfigLoaded: true });
+    }
+  },
   relayStart: async ({ host, controlPort, token, tls }) => {
     if (get().relayStarting || get().relayOn) return;
     set({ relayStarting: true, relayError: '' });
@@ -187,8 +210,13 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
         token,
         tls,
       });
-      // 成功后 info.url/qr 已切换为中继入口（桥没开会自动开）
+      // 成功后 info.url/qr 已切换为中继入口（桥没开会自动开）；配置入库供下次回填
       set({ info, running: true, relayOn: true, relayStarting: false });
+      void invoke('mobile_relay_config_save', {
+        config: { host, control_port: controlPort, token, tls } satisfies RelayConfig,
+      })
+        .then(() => set({ relayConfig: { host, control_port: controlPort, token, tls } }))
+        .catch(() => {});
     } catch (e) {
       set({
         relayError: e instanceof Error ? e.message : String(e),

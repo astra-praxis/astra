@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize as StdAtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tokio::io::{copy_bidirectional, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -508,6 +508,56 @@ pub async fn mobile_bridge_relay_stop(
     state: State<'_, crate::mobile_bridge::MobileBridgeState>,
 ) -> Result<(), String> {
     relay_stop(&state).await
+}
+
+// ===== 中继配置持久化（relay.json）=====
+
+/// 持久化的中继连接配置：成功开启中继后落盘，下次进设置页回填表单。
+/// token 为接入凭证明文，存账户私有 data_dir（与设备 key 同目录）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RelayConfig {
+    pub host: String,
+    pub control_port: u16,
+    pub token: String,
+    pub tls: bool,
+}
+
+fn config_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = crate::app::accounts::data_dir(app)?.join("mobile_bridge");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 mobile_bridge 目录失败: {e}"))?;
+    Ok(dir.join("relay.json"))
+}
+
+fn load_relay_config(app: &tauri::AppHandle) -> Result<Option<RelayConfig>, String> {
+    let path = config_path(app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读取中继配置失败: {e}"))?;
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|e| format!("解析中继配置失败: {e}"))
+}
+
+fn save_relay_config(app: &tauri::AppHandle, cfg: &RelayConfig) -> Result<(), String> {
+    let path = config_path(app)?;
+    let text = serde_json::to_string_pretty(cfg).map_err(|e| format!("序列化中继配置失败: {e}"))?;
+    // 原子写：先写临时文件再改名（同 keys.json）
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text).map_err(|e| format!("写入中继配置失败: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("替换中继配置失败: {e}"))
+}
+
+/// 读取已保存的中继配置（无则 null，表单保持空）
+#[tauri::command]
+pub fn mobile_relay_config_get(app: AppHandle) -> Result<Option<RelayConfig>, String> {
+    load_relay_config(&app)
+}
+
+/// 保存中继配置（开启中继成功后由前端调用）
+#[tauri::command]
+pub fn mobile_relay_config_save(app: AppHandle, config: RelayConfig) -> Result<(), String> {
+    save_relay_config(&app, &config)
 }
 
 #[cfg(test)]

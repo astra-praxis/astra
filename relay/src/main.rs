@@ -25,9 +25,13 @@
 //!
 //! 环境变量：
 //!   ASTRA_RELAY_TOKEN        桌面端接入令牌（必填，≥32 字符）
+//!   ASTRA_RELAY_BIND         监听地址（默认 0.0.0.0；TLS 终止部署时设 127.0.0.1，
+//!                            让 TLS 层绑公网同一批端口，relay 只收回环）
 //!   ASTRA_RELAY_CONTROL_PORT 控制端口（默认 21000）
 //!   ASTRA_RELAY_DATA_BASE    数据端口起始（默认 21001）
 //!   ASTRA_RELAY_DATA_END     数据端口结束（默认 21099，含）
+//!   ASTRA_RELAY_LOG_DIR      日志目录（不设则只输出 stderr；设了则按天滚动落盘）
+//!   ASTRA_RELAY_LOG_LEVEL    日志级别（默认 info，支持 trace/debug/info/warn/error）
 //!
 //! 用法：cargo build --release 后把 target/release/astra-relay 放到服务器运行
 //!（放行控制端口与数据端口段），桌面端「手机遥控」页填服务器地址 + 控制端口 +
@@ -40,6 +44,8 @@ use std::time::{Duration, Instant};
 use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::EnvFilter;
 
 /// 每通道空闲管道上限（桌面端池目标 12，留 5x 余量）
 const MAX_PIPES_PER_CHANNEL: usize = 64;
@@ -95,14 +101,44 @@ fn set_keepalive(stream: &TcpStream) {
     let _ = socket2::SockRef::from(stream).set_tcp_keepalive(&ka);
 }
 
+/// 初始化日志：默认输出 stderr；设了 ASTRA_RELAY_LOG_DIR 则同时按天滚动落盘
+/// （astra-relay.log.<日期>）。返回的 guard 必须在 main 里持有到进程结束，
+/// 否则后台写线程被提前回收会丢日志。
+fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
+    let level = std::env::var("ASTRA_RELAY_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+    let filter = EnvFilter::new(level);
+    match std::env::var("ASTRA_RELAY_LOG_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => {
+            let appender = tracing_appender::rolling::daily(dir.trim(), "astra-relay.log");
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            // 落盘的同时保留 stderr 输出（systemd/journald 也能收到一份）
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_ansi(false)
+                .with_writer(writer)
+                .init();
+            guard
+        }
+        _ => {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_ansi(false)
+                .init();
+            let (_, guard) = tracing_appender::non_blocking(std::io::stderr());
+            guard
+        }
+    }
+}
+
 fn main() {
+    let _log_guard = init_logging();
     let token = std::env::var("ASTRA_RELAY_TOKEN").unwrap_or_default();
     if token.is_empty() {
-        eprintln!("环境变量 ASTRA_RELAY_TOKEN 未设置：桌面端接入令牌必填（防任意注册）");
+        error!("环境变量 ASTRA_RELAY_TOKEN 未设置：桌面端接入令牌必填（防任意注册）");
         std::process::exit(1);
     }
     if token.trim().len() < TOKEN_MIN_LEN {
-        eprintln!(
+        error!(
             "ASTRA_RELAY_TOKEN 过短（{} < {TOKEN_MIN_LEN} 字符）：弱令牌会被公网爆破，\
              请用 `openssl rand -hex 24` 生成",
             token.trim().len()
@@ -110,6 +146,11 @@ fn main() {
         std::process::exit(1);
     }
     let token = token.trim().to_string();
+    let bind: String = std::env::var("ASTRA_RELAY_BIND")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
     let control_port: u16 = std::env::var("ASTRA_RELAY_CONTROL_PORT")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -123,11 +164,11 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(21099);
     if data_end < data_base {
-        eprintln!("ASTRA_RELAY_DATA_END ({data_end}) 不能小于 ASTRA_RELAY_DATA_BASE ({data_base})");
+        error!("ASTRA_RELAY_DATA_END ({data_end}) 不能小于 ASTRA_RELAY_DATA_BASE ({data_base})");
         std::process::exit(1);
     }
     if data_base == 0 {
-        eprintln!("ASTRA_RELAY_DATA_BASE 不能为 0（端口 0 = 随机分配，数据端口必须确定）");
+        error!("ASTRA_RELAY_DATA_BASE 不能为 0（端口 0 = 随机分配，数据端口必须确定）");
         std::process::exit(1);
     }
     // 端口段长度用 u64 算（u16 差值 +1 在 base=0/end=65535 时会溢出成 0 → 取模 panic）
@@ -145,18 +186,21 @@ fn main() {
         .build()
         .expect("构建 tokio runtime 失败");
     rt.block_on(async move {
-        let listener = TcpListener::bind(("0.0.0.0", control_port))
+        let listener = TcpListener::bind((bind.as_str(), control_port))
             .await
-            .unwrap_or_else(|e| panic!("控制端口 {control_port} 绑定失败: {e}"));
-        eprintln!(
-            "astra-relay 就绪：控制端口 {control_port}，数据端口 {data_base}-{data_end}\
+            .unwrap_or_else(|e| {
+                error!("控制端口 {bind}:{control_port} 绑定失败: {e}");
+                std::process::exit(1);
+            });
+        info!(
+            "astra-relay 就绪：监听 {bind}，控制端口 {control_port}，数据端口 {data_base}-{data_end}\
              （管道上限 {MAX_PIPES_TOTAL}，公网部署请前置 TLS）"
         );
         loop {
             let (stream, peer) = match listener.accept().await {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("accept 失败: {e}");
+                    error!("accept 失败: {e}");
                     continue;
                 }
             };
@@ -166,10 +210,11 @@ fn main() {
             };
             let registry = Arc::clone(&registry);
             let token = token.clone();
+            let bind = bind.clone();
             let phone_sema = Arc::clone(&phone_sema);
             tokio::spawn(async move {
                 handle_control(
-                    stream, peer, registry, token, data_base, data_range, phone_sema, permit,
+                    stream, peer, registry, token, bind, data_base, data_range, phone_sema, permit,
                 )
                 .await;
             });
@@ -221,6 +266,7 @@ async fn handle_control(
     peer: std::net::SocketAddr,
     registry: SharedRegistry,
     token: String,
+    bind: String,
     data_base: u16,
     data_range: u64,
     phone_sema: Arc<Semaphore>,
@@ -235,14 +281,17 @@ async fn handle_control(
     let parts: Vec<&str> = first.split_whitespace().collect();
     match parts.as_slice() {
         ["REGISTER", t] if constant_time_eq(t, &token) => {
-            register_channel(stream, registry, &token, data_base, data_range, phone_sema).await;
+            register_channel(
+                stream, peer, registry, &token, &bind, data_base, data_range, phone_sema,
+            )
+            .await;
         }
         ["PIPE", t, port] if constant_time_eq(t, &token) => match port.parse::<u16>() {
-            Ok(port) => supply_pipe(stream, registry, &token, port).await,
-            Err(_) => {}
+            Ok(port) => supply_pipe(stream, peer, registry, &token, port).await,
+            Err(_) => warn!("PIPE 端口非法来自 {peer}: {port}"),
         },
         _ => {
-            eprintln!("拒绝非法握手来自 {peer}");
+            warn!("拒绝非法握手来自 {peer}");
             let _ = stream.write_all(b"ERR bad handshake\n").await;
         }
     }
@@ -262,8 +311,10 @@ fn preferred_port(token: &str, data_base: u16, data_range: u64) -> u16 {
 
 async fn register_channel(
     mut stream: TcpStream,
+    peer: std::net::SocketAddr,
     registry: SharedRegistry,
     token: &str,
+    bind: &str,
     data_base: u16,
     data_range: u64,
     phone_sema: Arc<Semaphore>,
@@ -284,15 +335,17 @@ async fn register_channel(
         if occupied.contains(&p) {
             continue;
         }
-        if let Ok(l) = TcpListener::bind(("0.0.0.0", p)).await {
+        if let Ok(l) = TcpListener::bind((bind, p)).await {
             bound = Some((p, l));
             break;
         }
     }
     let Some((port, listener)) = bound else {
+        warn!("通道注册失败：无空闲数据端口（peer={peer}）");
         let _ = stream.write_all(b"ERR no free data port\n").await;
         return;
     };
+    info!("通道注册成功：port={port} peer={peer}");
     set_keepalive(&stream);
     if stream
         .write_all(format!("PORT {port}\n").as_bytes())
@@ -311,7 +364,10 @@ async fn register_channel(
             loop {
                 let (phone, _peer) = match listener.accept().await {
                     Ok(v) => v,
-                    Err(_) => break,
+                    Err(e) => {
+                        debug!("数据端口 {port} accept 失败：{e}");
+                        break;
+                    }
                 };
                 // 并发「等管道」上限：满时此处等待（accept 暂停，backlog 兜底）
                 let Ok(permit) = phone_sema.clone().acquire_owned().await else {
@@ -377,10 +433,15 @@ async fn wait_and_pair(registry: SharedRegistry, port: u16, mut phone: TcpStream
         };
         if let Some(mut pipe) = taken {
             // 纯字节互拷：手机 ⇄ 管道（管道对端是桌面端桥的本地端口）
-            let _ = copy_bidirectional(&mut pipe, &mut phone).await;
+            let n = copy_bidirectional(&mut pipe, &mut phone)
+                .await
+                .map(|(a, b)| a + b)
+                .unwrap_or(0);
+            debug!("手机会话结束：port={port} 转发字节 {n}");
             return;
         }
         if Instant::now() >= deadline {
+            debug!("手机等待管道超时：port={port}");
             return; // 没等到管道：放弃该手机连接（手机侧重试）
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -395,13 +456,23 @@ fn release_channel(registry: &SharedRegistry, port: u16, owner: &str) {
         return;
     }
     if let Some(ch) = reg.channels.remove(&port) {
+        info!(
+            "通道断开释放：port={port}（剩余通道 {}）",
+            reg.channels.len()
+        );
         ch.accept_task.abort();
         reg.pipes_total -= ch.pipes.len();
     }
 }
 
 /// 管道供给：校验端口已注册且属于该令牌 → 回 OK → 进空闲池（双重上限）
-async fn supply_pipe(mut stream: TcpStream, registry: SharedRegistry, token: &str, port: u16) {
+async fn supply_pipe(
+    mut stream: TcpStream,
+    peer: std::net::SocketAddr,
+    registry: SharedRegistry,
+    token: &str,
+    port: u16,
+) {
     enum Admit {
         Ok,
         UnknownPort,
@@ -420,10 +491,12 @@ async fn supply_pipe(mut stream: TcpStream, registry: SharedRegistry, token: &st
     match verdict {
         Admit::Ok => {}
         Admit::UnknownPort => {
+            warn!("PIPE 拒绝（未知端口/不属该令牌）：port={port} peer={peer}");
             let _ = stream.write_all(b"ERR unknown port\n").await;
             return;
         }
         Admit::PoolFull => {
+            warn!("PIPE 拒绝（池满）：port={port} peer={peer}");
             let _ = stream.write_all(b"ERR pool full\n").await;
             return;
         }
@@ -445,6 +518,10 @@ async fn supply_pipe(mut stream: TcpStream, registry: SharedRegistry, token: &st
                 since: Instant::now(),
             });
             reg.pipes_total += 1;
+            debug!(
+                "管道入池：port={port} peer={peer}（池总数 {}）",
+                reg.pipes_total
+            );
         }
     }
     // 不可达路径（刚校验过）：stream drop 即关闭

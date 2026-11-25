@@ -62,6 +62,7 @@ export default function RemotePage() {
   const [relayHost, setRelayHost] = useState('');
   const [relayPort, setRelayPort] = useState('21000');
   const [relayToken, setRelayToken] = useState('');
+  const [relayTls, setRelayTls] = useState(false);
   // 会话列表（scope 单会话下拉）
   const [sessions, setSessions] = useState<AgentSessionMeta[]>([]);
   const [revokingId, setRevokingId] = useState('');
@@ -149,8 +150,8 @@ export default function RemotePage() {
 
   const submitRelayStart = useCallback(() => {
     const port = Number(relayPort) || 21000;
-    void relayStart({ host: relayHost, controlPort: port, token: relayToken });
-  }, [relayHost, relayPort, relayToken, relayStart]);
+    void relayStart({ host: relayHost, controlPort: port, token: relayToken, tls: relayTls });
+  }, [relayHost, relayPort, relayToken, relayTls, relayStart]);
 
   return (
     <div className="remote-page">
@@ -254,8 +255,8 @@ export default function RemotePage() {
             </p>
             {info?.relay ? (
               <p className="remote-page__hint">
-                中继入口：{info.relay.host}:{info.relay.data_port}（数据端口随令牌固定，
-                重连不变）。手机照常扫码即可，流量经服务器转发但端到端凭证验证不变。
+                中继入口：{info.relay.tls ? 'https' : 'http'}://{info.relay.host}:{info.relay.data_port}
+                （数据端口随令牌固定，重连不变）。手机照常扫码即可，流量经服务器转发但端到端凭证验证不变。
               </p>
             ) : (
               <div className="remote-page__key-form remote-page__relay-form">
@@ -283,6 +284,14 @@ export default function RemotePage() {
                   autoComplete="off"
                   onChange={(e) => setRelayToken(e.target.value)}
                 />
+                <label className="remote-page__relay-tls">
+                  <input
+                    type="checkbox"
+                    checked={relayTls}
+                    onChange={(e) => setRelayTls(e.target.checked)}
+                  />
+                  TLS（服务器已前置 TLS 终止，入口用 https://）
+                </label>
                 <button
                   type="button"
                   className="remote-page__primary remote-page__key-add"

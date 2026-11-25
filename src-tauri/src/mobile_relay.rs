@@ -10,14 +10,16 @@
 //! 端口稳定性：relay 按 token 哈希分配数据端口，断线重连端口不变，
 //! 入口 URL / 二维码 / 设备 key 的 QR 都稳定。
 
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
-use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{copy_bidirectional, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
+use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::{rustls, TlsConnector};
 
 /// 空闲管道池目标数（浏览器并发连接 ~6，WS 占 1，余量应对并发 fetch）
 const POOL_TARGET: usize = 12;
@@ -32,6 +34,8 @@ pub struct RelayEntry {
     pub host: String,
     pub control_port: u16,
     pub data_port: u16,
+    /// 服务器前置了 TLS 终止：入口 URL/QR 用 https://
+    pub tls: bool,
 }
 
 /// 运行中的中继客户端（存在 MobileBridgeState.relay 里）
@@ -41,8 +45,94 @@ pub struct RelayRunning {
     pub join: tokio::task::JoinHandle<()>,
 }
 
+/// relay 控制连接：明文 TCP，或服务器前置 TLS 终止（stunnel）时的 TLS 流。
+/// 同一套协议（REGISTER/PIPE）跑在上面，上层不感知区别
+enum RelayConn {
+    Plain(TcpStream),
+    Tls(Box<tokio_rustls::client::TlsStream<TcpStream>>),
+}
+
+impl AsyncRead for RelayConn {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match &mut *self {
+            RelayConn::Plain(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+            RelayConn::Tls(s) => std::pin::Pin::new(s.as_mut()).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for RelayConn {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match &mut *self {
+            RelayConn::Plain(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+            RelayConn::Tls(s) => std::pin::Pin::new(s.as_mut()).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match &mut *self {
+            RelayConn::Plain(s) => std::pin::Pin::new(s).poll_flush(cx),
+            RelayConn::Tls(s) => std::pin::Pin::new(s.as_mut()).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match &mut *self {
+            RelayConn::Plain(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+            RelayConn::Tls(s) => std::pin::Pin::new(s.as_mut()).poll_shutdown(cx),
+        }
+    }
+}
+
+/// TLS 连接器（进程内单例：根证书只需加载一次）。
+/// 根证书用 webpki-roots（Mozilla 根集），服务器是 Let's Encrypt 签发的正规域名证书
+fn tls_connector() -> TlsConnector {
+    static CONNECTOR: OnceLock<TlsConnector> = OnceLock::new();
+    CONNECTOR
+        .get_or_init(|| {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            TlsConnector::from(Arc::new(config))
+        })
+        .clone()
+}
+
+/// 连 relay（明文或 TLS），host 必须是域名才能做 TLS 证书校验
+async fn connect_relay(host: &str, port: u16, tls: bool) -> Result<RelayConn, String> {
+    let tcp = TcpStream::connect((host, port))
+        .await
+        .map_err(|e| format!("relay {host}:{port} 连接失败: {e}"))?;
+    if !tls {
+        return Ok(RelayConn::Plain(tcp));
+    }
+    let server_name = ServerName::try_from(host.to_string())
+        .map_err(|_| format!("TLS 需要域名地址，{host} 不是有效域名"))?;
+    tls_connector()
+        .connect(server_name, tcp)
+        .await
+        .map(|s| RelayConn::Tls(Box::new(s)))
+        .map_err(|e| format!("relay {host}:{port} TLS 握手失败: {e}"))
+}
+
 /// 手动读一行（逐字节：与 relay 侧约定一致，PIPE 连接读完首行后原样当管道用）
-async fn read_first_line(stream: &mut TcpStream) -> Option<String> {
+async fn read_first_line(stream: &mut (impl AsyncRead + Unpin)) -> Option<String> {
     let mut buf = Vec::new();
     let mut byte = [0u8; 1];
     loop {
@@ -64,10 +154,13 @@ async fn read_first_line(stream: &mut TcpStream) -> Option<String> {
 
 /// 连 relay 控制端口 REGISTER，等 PORT 响应。返回 (注册连接, 数据端口)。
 /// 注册连接由调用方持有（保持 = 通道存活），断开即被 relay 释放通道。
-async fn register(host: &str, control_port: u16, token: &str) -> Result<(TcpStream, u16), String> {
-    let mut stream = TcpStream::connect((host, control_port))
-        .await
-        .map_err(|e| format!("relay 控制端口 {host}:{control_port} 连接失败: {e}"))?;
+async fn register(
+    host: &str,
+    control_port: u16,
+    token: &str,
+    tls: bool,
+) -> Result<(RelayConn, u16), String> {
+    let mut stream = connect_relay(host, control_port, tls).await?;
     stream
         .write_all(format!("REGISTER {token}\n").as_bytes())
         .await
@@ -93,12 +186,11 @@ async fn pipe_task(
     token: String,
     data_port: u16,
     bridge_port: u16,
+    tls: bool,
     alive: Arc<StdMutex<usize>>,
 ) {
     let res: Result<(), String> = async {
-        let mut ctrl = TcpStream::connect((host.as_str(), control_port))
-            .await
-            .map_err(|e| format!("PIPE 连接失败: {e}"))?;
+        let mut ctrl = connect_relay(&host, control_port, tls).await?;
         ctrl.write_all(format!("PIPE {token} {data_port}\n").as_bytes())
             .await
             .map_err(|e| format!("PIPE 发送失败: {e}"))?;
@@ -109,11 +201,10 @@ async fn pipe_task(
         if line != "OK" {
             return Err(format!("PIPE 被拒: {line}"));
         }
-        let bridge = TcpStream::connect(("127.0.0.1", bridge_port))
+        let mut bridge = TcpStream::connect(("127.0.0.1", bridge_port))
             .await
             .map_err(|e| format!("本机桥端口连接失败: {e}"))?;
-        let (mut a, mut b) = (ctrl, bridge);
-        copy_bidirectional(&mut a, &mut b)
+        copy_bidirectional(&mut ctrl, &mut bridge)
             .await
             .map_err(|e| format!("管道拷贝中断: {e}"))?;
         Ok(())
@@ -129,12 +220,13 @@ async fn pipe_task(
 
 /// 池循环：注册连接存活期间持续补管道；注册断开（EOF）→ 返回触发重注册
 async fn pool_loop(
-    mut reg: TcpStream,
+    mut reg: RelayConn,
     host: String,
     control_port: u16,
     token: String,
     data_port: u16,
     bridge_port: u16,
+    tls: bool,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let alive = Arc::new(StdMutex::new(0usize));
@@ -163,6 +255,7 @@ async fn pool_loop(
                         token.clone(),
                         data_port,
                         bridge_port,
+                        tls,
                         Arc::clone(&alive),
                     ));
                 }
@@ -178,12 +271,15 @@ async fn maintain(
     control_port: u16,
     token: String,
     bridge_port: u16,
+    tls: bool,
     port_slot: Arc<StdMutex<Option<u16>>>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let mut backoff_secs = 1u64;
     loop {
-        match tokio::time::timeout(REGISTER_TIMEOUT, register(&host, control_port, &token)).await {
+        match tokio::time::timeout(REGISTER_TIMEOUT, register(&host, control_port, &token, tls))
+            .await
+        {
             Ok(Ok((reg, data_port))) => {
                 backoff_secs = 1;
                 if let Ok(mut slot) = port_slot.lock() {
@@ -192,7 +288,8 @@ async fn maintain(
                 crate::app_log!(
                     info,
                     "mobile-relay",
-                    "通道注册成功 {host}:{control_port} → 数据端口 {data_port}"
+                    "通道注册成功 {host}:{control_port} → 数据端口 {data_port}{}",
+                    if tls { "（TLS）" } else { "" }
                 );
                 pool_loop(
                     reg,
@@ -201,6 +298,7 @@ async fn maintain(
                     token.clone(),
                     data_port,
                     bridge_port,
+                    tls,
                     shutdown_rx.clone(),
                 )
                 .await;
@@ -240,6 +338,7 @@ pub async fn relay_start(
     host: String,
     control_port: u16,
     token: String,
+    tls: bool,
 ) -> Result<crate::mobile_bridge::BridgeInfo, String> {
     let host = host.trim().trim_end_matches('/').trim().to_string();
     let token = token.trim().to_string();
@@ -272,6 +371,7 @@ pub async fn relay_start(
         control_port,
         token.clone(),
         bridge_port,
+        tls,
         Arc::clone(&port_slot),
         shutdown_rx.clone(),
     ));
@@ -300,6 +400,7 @@ pub async fn relay_start(
             host,
             control_port,
             data_port,
+            tls,
         },
         shutdown: shutdown_tx,
         join,
@@ -347,6 +448,7 @@ pub fn relay_view(
         host: r.entry.host.clone(),
         control_port: r.entry.control_port,
         data_port: r.entry.data_port,
+        tls: r.entry.tls,
     })
 }
 
@@ -360,8 +462,17 @@ pub async fn mobile_bridge_relay_start(
     host: String,
     control_port: u16,
     token: String,
+    tls: Option<bool>,
 ) -> Result<crate::mobile_bridge::BridgeInfo, String> {
-    relay_start(&app, &state, host, control_port, token).await
+    relay_start(
+        &app,
+        &state,
+        host,
+        control_port,
+        token,
+        tls.unwrap_or(false),
+    )
+    .await
 }
 
 /// 停止中继：入口回落局域网直连
@@ -461,10 +572,12 @@ mod tests {
     #[tokio::test]
     async fn register_parses_port_reply() {
         let (ctrl_port, _) = spawn_fake_relay("tk1").await;
-        let (_sock, data_port) = register("127.0.0.1", ctrl_port, "tk1").await.unwrap();
+        let (_sock, data_port) = register("127.0.0.1", ctrl_port, "tk1", false)
+            .await
+            .unwrap();
         assert!(data_port > 0);
         // 错误令牌被拒（假 relay 不响应 → 读到 EOF 返回 None → Err）
-        let r = register("127.0.0.1", ctrl_port, "wrong").await;
+        let r = register("127.0.0.1", ctrl_port, "wrong", false).await;
         assert!(r.is_err());
     }
 
@@ -479,6 +592,7 @@ mod tests {
             ctrl_port,
             "tk2".to_string(),
             echo_port,
+            false,
             Arc::clone(&slot),
             rx,
         ));
@@ -504,9 +618,9 @@ mod tests {
 
     #[tokio::test]
     async fn maintain_retries_after_relay_drop() {
-        // 注册成功后断开注册连接（模拟 relay 重启/网络中断）→ maintain 应重注册
         let (ctrl_port, _) = spawn_fake_relay("tk3").await;
         let echo_port = spawn_echo().await;
+        // 注册成功后断开注册连接（模拟 relay 重启/网络中断）→ maintain 应重注册
         let slot = Arc::new(StdMutex::new(None));
         let (tx, rx) = watch::channel(false);
         let join = tokio::spawn(maintain(
@@ -514,6 +628,7 @@ mod tests {
             ctrl_port,
             "tk3".to_string(),
             echo_port,
+            false,
             Arc::clone(&slot),
             rx,
         ));
@@ -527,5 +642,18 @@ mod tests {
         }
         tx.send(true).unwrap();
         let _ = tokio::time::timeout(Duration::from_secs(3), join).await;
+    }
+
+    /// 端到端真实验证（需外网 + 服务器存活）手动跑：
+    /// RELAY_TOKEN=<hex24> cargo test --lib tls_register_real_server -- --ignored --nocapture
+    /// 走完整 TLS 路径：rustls 握手 + Let's Encrypt 证书校验 + REGISTER→PORT
+    #[tokio::test]
+    #[ignore = "需外网与真实服务器，手动跑"]
+    async fn tls_register_real_server() {
+        let host = "praxisastra.duckdns.org";
+        let token = std::env::var("RELAY_TOKEN").expect("RELAY_TOKEN 环境变量");
+        let (reg, data_port) = register(host, 21000, &token, true).await.unwrap();
+        println!("TLS 注册成功 → 数据端口 {data_port}");
+        drop(reg); // 断开即释放通道
     }
 }

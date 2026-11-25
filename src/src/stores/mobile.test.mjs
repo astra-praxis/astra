@@ -243,51 +243,71 @@ test('planModelSelection: provider source requires known provider; model trimmed
   assert.match(plan.error, /未知的模型来源/);
 });
 
-// ===== createEnqueueDeduper：手机入队消息去重 =====
+// ===== createEnqueueDeduper：手机入队消息去重（按客户端隔离） =====
 
+// 首参 client：桥分配的连接 id；web 页与各手机 App 的 msg_id 各自从 1 起步，
+// 裸按 msg_id 判重会把他端消息误杀（真机实证）
 test('deduper: same msg_id delivered twice is dropped once (duplicate delivery)', () => {
   const { createEnqueueDeduper } = load();
   const d = createEnqueueDeduper();
-  assert.equal(d.duplicate(1, '你好', 's1', 1000), false);
+  assert.equal(d.duplicate('c1', 1, '你好', 's1', 1000), false);
   // 同 msg_id 重复投递（监听器重复注册等）→ 丢弃
-  assert.equal(d.duplicate(1, '你好', 's1', 1100), true);
-  assert.equal(d.duplicate(1, '你好', 's1', 99999), true);
+  assert.equal(d.duplicate('c1', 1, '你好', 's1', 1100), true);
+  assert.equal(d.duplicate('c1', 1, '你好', 's1', 99999), true);
   // 新 msg_id 正常放行
-  assert.equal(d.duplicate(2, '再见', 's1', 1200), false);
+  assert.equal(d.duplicate('c1', 2, '再见', 's1', 1200), false);
+});
+
+test('deduper: same msg_id from another client is NOT a duplicate', () => {
+  const { createEnqueueDeduper } = load();
+  const d = createEnqueueDeduper();
+  // web 页发过 msg_id=1；App 连接 c2 也从 msg_id=1 起步 → 必须放行
+  assert.equal(d.duplicate('c1', 1, '你好', 's1', 1000), false);
+  assert.equal(d.duplicate('c2', 1, '你好', 's1', 1100), false);
+  // 同客户端的重复投递仍然拦截
+  assert.equal(d.duplicate('c2', 1, '你好', 's1', 1200), true);
 });
 
 test('deduper: identical text within 1500ms window is dropped (ghost double-tap)', () => {
   const { createEnqueueDeduper } = load();
   const d = createEnqueueDeduper();
-  assert.equal(d.duplicate(10, '跑任务', 's1', 1000), false);
-  // 不同 msg_id 但同会话同文本、窗口内 → 兜底丢弃
-  assert.equal(d.duplicate(11, '跑任务', 's1', 2000), true);
+  assert.equal(d.duplicate('c1', 10, '跑任务', 's1', 1000), false);
+  // 不同 msg_id 但同客户端同会话同文本、窗口内 → 兜底丢弃
+  assert.equal(d.duplicate('c1', 11, '跑任务', 's1', 2000), true);
   // 窗口外放行（合法的同文本重发）
-  assert.equal(d.duplicate(12, '跑任务', 's1', 2600), false);
+  assert.equal(d.duplicate('c1', 12, '跑任务', 's1', 2600), false);
   // 不同会话不互斥
-  assert.equal(d.duplicate(13, '跑任务', 's2', 2700), false);
+  assert.equal(d.duplicate('c1', 13, '跑任务', 's2', 2700), false);
   // 不同文本不互斥
-  assert.equal(d.duplicate(14, '换个任务', 's2', 2800), false);
+  assert.equal(d.duplicate('c1', 14, '换个任务', 's2', 2800), false);
+});
+
+test('deduper: same text from different clients within window both pass (multi-device)', () => {
+  const { createEnqueueDeduper } = load();
+  const d = createEnqueueDeduper();
+  // 两个人同时发同一句话：都要送达，不能互杀
+  assert.equal(d.duplicate('c1', 1, '开会', 's1', 1000), false);
+  assert.equal(d.duplicate('c2', 1, '开会', 's1', 1500), false);
 });
 
 test('deduper: empty text skips text-window dedup but still dedups msg_id', () => {
   const { createEnqueueDeduper } = load();
   const d = createEnqueueDeduper();
-  assert.equal(d.duplicate(null, '', 's1', 1000), false);
-  assert.equal(d.duplicate(null, '', 's1', 1100), false); // 空文本不做窗口去重
-  assert.equal(d.duplicate(20, '干活', 's1', 1200), false);
-  assert.equal(d.duplicate(20, '干活', 's1', 1300), true); // msg_id 去重不受影响
+  assert.equal(d.duplicate('c1', null, '', 's1', 1000), false);
+  assert.equal(d.duplicate('c1', null, '', 's1', 1100), false); // 空文本不做窗口去重
+  assert.equal(d.duplicate('c1', 20, '干活', 's1', 1200), false);
+  assert.equal(d.duplicate('c1', 20, '干活', 's1', 1300), true); // msg_id 去重不受影响
 });
 
 test('deduper: LRU caps at 128 entries, oldest msg_id is forgotten', () => {
   const { createEnqueueDeduper } = load();
   const d = createEnqueueDeduper();
   // 灌满 128 个
-  for (let i = 0; i < 128; i++) assert.equal(d.duplicate(i, `m${i}`, 's1', 1000 + i), false);
+  for (let i = 0; i < 128; i++) assert.equal(d.duplicate('c1', i, `m${i}`, 's1', 1000 + i), false);
   // 第 129 个把最老的（msg_id=0）挤出
-  assert.equal(d.duplicate(128, 'm128', 's1', 1200), false);
+  assert.equal(d.duplicate('c1', 128, 'm128', 's1', 1200), false);
   // msg_id=0 已被挤出 → 不再判定为重复（放行）
-  assert.equal(d.duplicate(0, 'm0', 's1', 1300), false);
+  assert.equal(d.duplicate('c1', 0, 'm0', 's1', 1300), false);
   // 重插 0 时按 LRU 把次老的 1 挤出（正确行为），最近的 128 仍在 → 重复
-  assert.equal(d.duplicate(128, 'm128', 's1', 1400), true);
+  assert.equal(d.duplicate('c1', 128, 'm128', 's1', 1400), true);
 });

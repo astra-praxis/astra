@@ -1,0 +1,45 @@
+# astra-relay systemd 服务单元
+#
+# 安装：
+#   sudo cp deploy/astra-relay.service /etc/systemd/system/
+#   sudo mkdir -p /opt/astra-relay && sudo cp target/release/astra-relay /opt/astra-relay/
+#   # 生成令牌并写入单元文件（或用 EnvironmentFile=/etc/astra-relay.env 管理）
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now astra-relay
+#
+# 日志：
+#   文件：/var/log/astra-relay/astra-relay.log.<日期>（systemd 自动创建目录并按天滚动）
+#   stderr（journald）：journalctl -u astra-relay -f
+
+[Unit]
+Description=Astra 手机遥控公网中继 (astra-relay)
+Documentation=file:///opt/astra-relay/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/astra-relay/astra-relay
+Environment=ASTRA_RELAY_TOKEN=__REPLACE_WITH_openssl_rand_-hex_24__
+Environment=ASTRA_RELAY_LOG_DIR=/var/log/astra-relay
+Environment=ASTRA_RELAY_LOG_LEVEL=info
+# TLS 终止部署时改为 127.0.0.1（公网端口让给 stunnel/nginx 同端口透传，见 README）
+Environment=ASTRA_RELAY_BIND=0.0.0.0
+
+# 崩溃/断电后自动拉起（relay 无持久化状态，桌面端 30s 内自动重连重注册）
+Restart=always
+RestartSec=3
+
+# systemd 自动创建 /var/log/astra-relay 并授予本服务写权限
+LogsDirectory=astra-relay
+
+# 加固
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -64,6 +64,10 @@ axum = { version = "0.7", default-features = false, features = ["json", "tokio",
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # 局域网 IP 枚举（macOS getifaddrs / Windows GetAdaptersAddresses；UDP connect 路由探测的兜底）
 if-addrs = "0.13"
+# 中继客户端 TLS（mobile_relay.rs）：stunnel/Let's Encrypt 前置时用 webpki 根证书校验服务器域名
+# ring 后端：避免 aws-lc-rs 的 cmake 依赖（Windows/macOS 打包更稳）
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "0.26"
 
 [dev-dependencies]
 tokio-util = "0.7"

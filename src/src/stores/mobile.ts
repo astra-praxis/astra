@@ -36,8 +36,8 @@ export interface MobileBridgeInfo {
   /** 入口地址的二维码（SVG 字符串） */
   qr_svg: string;
   lan_ip: string;
-  /** 中继模式：非 null = 入口经公网 relay（url/qr 已指向中继） */
-  relay: { host: string; control_port: number; data_port: number } | null;
+  /** 中继模式：非 null = 入口经公网 relay（url/qr 已指向中继）；tls = 服务器前置 TLS 终止 */
+  relay: { host: string; control_port: number; data_port: number; tls: boolean } | null;
 }
 
 interface BridgeStatus {
@@ -45,7 +45,7 @@ interface BridgeStatus {
   port: number | null;
   paired: number;
   lan_ip: string;
-  relay: { host: string; control_port: number; data_port: number } | null;
+  relay: { host: string; control_port: number; data_port: number; tls: boolean } | null;
 }
 
 interface MobileBridgeState {
@@ -73,7 +73,7 @@ interface MobileBridgeState {
   relayStarting: boolean;
   relayStopping: boolean;
   relayError: string;
-  relayStart: (opts: { host: string; controlPort: number; token: string }) => Promise<void>;
+  relayStart: (opts: { host: string; controlPort: number; token: string; tls: boolean }) => Promise<void>;
   relayStop: () => Promise<void>;
 }
 
@@ -177,7 +177,7 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
   relayStarting: false,
   relayStopping: false,
   relayError: '',
-  relayStart: async ({ host, controlPort, token }) => {
+  relayStart: async ({ host, controlPort, token, tls }) => {
     if (get().relayStarting || get().relayOn) return;
     set({ relayStarting: true, relayError: '' });
     try {
@@ -185,6 +185,7 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
         host,
         controlPort,
         token,
+        tls,
       });
       // 成功后 info.url/qr 已切换为中继入口（桥没开会自动开）
       set({ info, running: true, relayOn: true, relayStarting: false });
@@ -523,6 +524,8 @@ function scheduleConfigPush() {
 interface BridgeEvent {
   type: string;
   count?: number;
+  /** 桥分配的连接级 id（WS 消息按连接隔离 msg_id，入队去重用） */
+  client?: string;
   msg_id?: number;
   session_id?: string | null;
   text?: string;
@@ -545,9 +548,19 @@ interface BridgeEvent {
 async function handleBridgeEvent(ev: BridgeEvent) {
   switch (ev.type) {
     case 'enqueue':
-      // 双层去重（msg_id LRU + 同会话同文本短窗口）：WS 消息重复投递或手机端
-      // 触摸双击时只入队一次，杜绝「直接发送 + 队列再续发一遍」的二连跑
-      if (enqueueDeduper.duplicate(ev.msg_id, String(ev.text ?? ''), ev.session_id ?? null, Date.now())) break;
+      // 双层去重（client:msg_id LRU + 同客户端同会话同文本短窗口）：WS 消息重复投递或
+      // 手机端触摸双击时只入队一次；client 是桥分配的连接 id，多客户端的 msg_id
+      // 各自从 1 起步不该互斥（真机实证：裸 msg_id 判重把 App 消息静默丢弃）
+      if (
+        enqueueDeduper.duplicate(
+          String(ev.client ?? 'unknown'),
+          ev.msg_id,
+          String(ev.text ?? ''),
+          ev.session_id ?? null,
+          Date.now(),
+        )
+      )
+        break;
       await handleEnqueue({
         session_id: ev.session_id ?? null,
         text: String(ev.text ?? ''),

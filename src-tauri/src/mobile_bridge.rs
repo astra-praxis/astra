@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -433,6 +433,8 @@ pub struct RelayStatus {
     pub host: String,
     pub control_port: u16,
     pub data_port: u16,
+    /// 服务器前置了 TLS 终止：入口 URL/QR 用 https://
+    pub tls: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -651,7 +653,10 @@ pub fn mobile_bridge_key_create(
     // 入口地址与桥 info 同源：中继在跑就走 relay 数据端口（设备 key 的 QR 同样可跨网）
     let relay = crate::mobile_relay::relay_view(&state);
     let url = match relay.as_ref() {
-        Some(r) => format!("http://{}:{}/m#{}", r.host, r.data_port, secret),
+        Some(r) => {
+            let scheme = if r.tls { "https" } else { "http" };
+            format!("{scheme}://{}:{}/m#{}", r.host, r.data_port, secret)
+        }
         None => format!("http://{}:{}/m#{}", lan_ip(), running.port, secret),
     };
     let qr_svg = qr_svg(&url)?;
@@ -715,11 +720,15 @@ pub async fn mobile_bridge_key_revoke(
 fn info_for(running: &BridgeRunning, relay: Option<&RelayStatus>) -> BridgeInfo {
     let lan_ip = lan_ip();
     let (url, mode_port) = match relay {
-        // 中继模式：入口 = relay 数据端口（数据端口哈希自 token，重连不变）
-        Some(r) => (
-            format!("http://{}:{}/m#{}", r.host, r.data_port, running.token),
-            r.data_port,
-        ),
+        // 中继模式：入口 = relay 数据端口（数据端口哈希自 token，重连不变）；
+        // TLS 终止部署时入口是 https（服务器 TLS 层与 relay 同端口透传）
+        Some(r) => {
+            let scheme = if r.tls { "https" } else { "http" };
+            (
+                format!("{scheme}://{}:{}/m#{}", r.host, r.data_port, running.token),
+                r.data_port,
+            )
+        }
         None => (
             format!("http://{lan_ip}:{}/m#{}", running.port, running.token),
             running.port,
@@ -1079,6 +1088,9 @@ async fn ws_connection(socket: axum::extract::ws::WebSocket, shared: BridgeShare
     // 出站统一走 mpsc：hello / pong（读循环）与总线转发两个生产者共用
     let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<String>(128);
     let mut bus_rx = bus().subscribe();
+    // 连接级自增 id：enqueue 事件携带，前端去重按连接隔离
+    static CONN_SEQ: AtomicU64 = AtomicU64::new(1);
+    let conn_id = CONN_SEQ.fetch_add(1, Ordering::Relaxed);
 
     shared.paired.fetch_add(1, Ordering::Relaxed);
     let paired_now = shared.paired.load(Ordering::Relaxed);
@@ -1183,7 +1195,9 @@ async fn ws_connection(socket: axum::extract::ws::WebSocket, shared: BridgeShare
 
     while let Some(msg) = stream.next().await {
         match msg {
-            Ok(Message::Text(text)) => handle_client_msg(&shared, &out_tx, &ctx, &text).await,
+            Ok(Message::Text(text)) => {
+                handle_client_msg(&shared, &out_tx, &ctx, conn_id, &text).await
+            }
             Ok(_) => {}
             Err(_) => break,
         }
@@ -1217,6 +1231,7 @@ async fn handle_client_msg(
     shared: &BridgeShared,
     out_tx: &tokio::sync::mpsc::Sender<String>,
     ctx: &AuthCtx,
+    conn_id: u64,
     text: &str,
 ) {
     let Ok(v) = serde_json::from_str::<Value>(text) else {
@@ -1249,6 +1264,9 @@ async fn handle_client_msg(
                 "mobile-bridge-event",
                 json!({
                     "type": "enqueue",
+                    // 连接级客户端标识：前端去重键按 client:msg_id 隔离，
+                    // 避免多客户端（web 页 + App）都用 msg_id=1 起步时被误判重复
+                    "client": format!("c{}", conn_id),
                     "msg_id": v["msg_id"],
                     "session_id": session_id,
                     "text": body,

@@ -117,24 +117,27 @@ export function planEnqueue(ctx: EnqueueContext, sessionId: string | null): Enqu
 
 export interface EnqueueDeduper {
   /** 返回 true = 应丢弃这次入队（重复投递或极短窗口内的同文本重发） */
-  duplicate: (msgId: unknown, text: string, sessionId: string | null, now: number) => boolean;
+  duplicate: (client: string, msgId: unknown, text: string, sessionId: string | null, now: number) => boolean;
 }
 
-/** 手机消息去重器（两层）：
- *  1) msg_id 精确去重（LRU 128）——同一条 WS 消息被重复投递（监听器重复注册、
+/** 手机消息去重器（两层，均按客户端隔离）：
+ *  1) client:msg_id 精确去重（LRU 128）——同一条 WS 消息被重复投递（监听器重复注册、
  *     事件系统重复派发等运行时形态）时只处理一次；
- *  2) 同会话同文本 1500ms 窗口去重——手机端触摸双击 / 回车+点击竞态发出
+ *  2) 同客户端同会话同文本 1500ms 窗口去重——手机端触摸双击 / 回车+点击竞态发出
  *     两条不同 msg_id 但内容相同的消息时兜底。
+ *  client 是桥分配的连接级 id：跨客户端（web 页 + 各手机 App）的 msg_id 各自从 1
+ *  起步是常态，裸按 msg_id 判重会把他端消息误杀（真机实证：App 消息被静默丢弃）。
  *  只作用于手机入队路径；桌面手动入队不受影响。 */
 export function createEnqueueDeduper(): EnqueueDeduper {
   const seenIds = new Map<string, number>();
+  let lastClient = '';
   let lastText = '';
   let lastSession: string | null = null;
   let lastAt = -Infinity;
   return {
-    duplicate(msgId, text, sessionId, now) {
+    duplicate(client, msgId, text, sessionId, now) {
       if (msgId !== null && msgId !== undefined) {
-        const key = String(msgId);
+        const key = `${client}:${String(msgId)}`;
         if (seenIds.has(key)) {
           seenIds.delete(key);
           seenIds.set(key, now); // 触摸一次保 LRU 顺序
@@ -146,7 +149,10 @@ export function createEnqueueDeduper(): EnqueueDeduper {
           if (oldest !== undefined) seenIds.delete(oldest);
         }
       }
-      if (text && text === lastText && sessionId === lastSession && now - lastAt < 1500) return true;
+      if (text && client === lastClient && text === lastText && sessionId === lastSession && now - lastAt < 1500) {
+        return true;
+      }
+      lastClient = client;
       lastText = text;
       lastSession = sessionId;
       lastAt = now;

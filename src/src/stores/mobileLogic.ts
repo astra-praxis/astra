@@ -72,7 +72,8 @@ export interface EnqueueContext {
 export type EnqueuePlan =
   /** 手机未指定会话且当前是空草稿 → 直接排进当前会话 */
   | { action: 'reuse-current'; direct: boolean }
-  /** 手机未指定会话 → 新开草稿 tab 再入队 */
+  /** 手机未指定会话 = 新对话意图 → 新开草稿 tab 直发（P3 并发：与运行中的
+   *  会话并行起跑，不再排进正在跑的会话，也不因驻留会话运行而拒收） */
   | { action: 'new-tab'; direct: boolean }
   /** 目标就是当前激活会话（运行中也允许：排进同会话子队列等续发） */
   | { action: 'enqueue-active'; direct: boolean }
@@ -85,21 +86,24 @@ export type EnqueuePlan =
 
 /** 手机发来一条消息：决定发送路径（纯决策，执行在 stores/mobile.ts）
  *
- *  准入规则：只有「目标会话就是全局正在运行的会话」或「全局无运行」时发送才安全；
- *  其余情况一律 blocked（消息不丢，留在手机端提示稍后再试），避免消息变成
- *  桌面端一条注定失败的 dispatch（agent_start_run 被准入拒绝 → 横幅 + 手动重试）。
+ *  手机未指定会话（null）= 新对话意图：P3 并发下新会话可直接起跑（后端按会话
+ *  串行、跨会话并行），一律 new-tab 直发，不再排进正在运行的会话。
  *
- *  direct：目标空闲（全局无任何运行）→ 手机消息跳过队列直接 agent_start_run；
+ *  指定会话时：只有「目标会话就是全局正在运行的会话」或「全局无运行」时发送
+ *  才安全；其余情况一律 blocked（消息不丢，留在手机端提示稍后再试），避免消息
+ *  变成桌面端一条注定失败的 dispatch（agent_start_run 被该会话执行锁拒绝）。
+ *
+ *  direct：目标空闲 → 手机消息跳过队列直接 agent_start_run；
  *  目标本身正在运行 → false，消息仍入队等既有续发。missing/blocked 不执行，无此字段。 */
 export function planEnqueue(ctx: EnqueueContext, sessionId: string | null): EnqueuePlan {
   if (ctx.busy) return { action: 'blocked', id: sessionId };
   const flatRunning = ctx.runningIds.includes(ctx.activeId);
   if (sessionId === null) {
-    // 手机没指定目标：桌面正在跑就把话排进正在跑的会话（Zed 式排队）；
-    // 准入被驻留会话占着时新 tab 的首条也发不出去 → 拒
-    if (flatRunning) return { action: 'enqueue-active', direct: false };
-    if (ctx.runningIds.length > 0) return { action: 'blocked', id: null };
-    if (ctx.isDraft && ctx.entriesLen === 0) return { action: 'reuse-current', direct: true };
+    // 新对话意图：消息属于新对话而不是正在跑的会话。空草稿直接复用当前会话；
+    // 其余（包括激活/驻留会话运行中）一律新开 tab 直发（P3 并行起跑）
+    if (!flatRunning && ctx.isDraft && ctx.entriesLen === 0) {
+      return { action: 'reuse-current', direct: true };
+    }
     return { action: 'new-tab', direct: true };
   }
   if (sessionId === ctx.activeId) {

@@ -81,27 +81,31 @@ const CTX = {
   runningIds: [],
 };
 
-test('planEnqueue: null target reuses empty draft, otherwise opens new tab', () => {
+test('planEnqueue: null target is always a new conversation (reuse draft or new tab, direct)', () => {
   const { planEnqueue } = load();
   // 注意：vm 跨 realm 对象原型不同，断言只能比字段不能 deepEqual
   let plan = planEnqueue({ ...CTX, isDraft: true, entriesLen: 0 }, null);
   assert.equal(plan.action, 'reuse-current');
+  assert.equal(plan.direct, true);
   plan = planEnqueue(CTX, null);
   assert.equal(plan.action, 'new-tab');
+  assert.equal(plan.direct, true);
   // busy 时新开 tab 也会被 no-op → 直接拒绝
   plan = planEnqueue({ ...CTX, busy: true }, null);
   assert.equal(plan.action, 'blocked');
   assert.equal(plan.id, null);
 });
 
-test('planEnqueue: while flat session runs, null target queues into the runner', () => {
+test('planEnqueue: null target opens a new tab even while other sessions run (P3 parallel)', () => {
   const { planEnqueue } = load();
-  // flat 运行中：手机发「新会话」消息 → 排进正在跑的会话（Zed 式排队）
-  const plan = planEnqueue({ ...CTX, runningIds: ['a1'] }, null);
-  assert.equal(plan.action, 'enqueue-active');
-  // 准入被驻留会话占着：null 目标拒收，避免新 tab 首条注定失败
-  const parked = planEnqueue({ ...CTX, runningIds: ['a2'] }, null);
-  assert.equal(parked.action, 'blocked');
+  // flat 运行中：手机发「新会话」消息 → 新开 tab 直发，不再排进正在跑的会话
+  let plan = planEnqueue({ ...CTX, runningIds: ['a1'] }, null);
+  assert.equal(plan.action, 'new-tab');
+  assert.equal(plan.direct, true);
+  // 驻留会话运行中：新会话照样并行起跑，不再拒收
+  plan = planEnqueue({ ...CTX, runningIds: ['a2'] }, null);
+  assert.equal(plan.action, 'new-tab');
+  assert.equal(plan.direct, true);
 });
 
 test('planEnqueue: active target queues while it runs; blocked when another run holds admission', () => {
@@ -136,13 +140,15 @@ test('planEnqueue: parked/history target activates; runner target activates; unk
 
 test('planEnqueue: direct flag separates idle direct-send from running queue', () => {
   const { planEnqueue } = load();
-  // 全局无运行：四条可执行路径全部直发（跳过队列）
+  // 无运行：四条可执行路径全部直发（跳过队列）
   assert.equal(planEnqueue({ ...CTX, isDraft: true, entriesLen: 0 }, null).direct, true);
   assert.equal(planEnqueue(CTX, null).direct, true);
   assert.equal(planEnqueue(CTX, 'a1').direct, true);
   assert.equal(planEnqueue(CTX, 'a2').direct, true);
-  // 目标在跑（flat 或驻留）→ direct false，仍走队列续发
-  assert.equal(planEnqueue({ ...CTX, runningIds: ['a1'] }, null).direct, false);
+  // null 目标（新对话）在其他会话运行时也直发（P3 并行）
+  assert.equal(planEnqueue({ ...CTX, runningIds: ['a1'] }, null).direct, true);
+  assert.equal(planEnqueue({ ...CTX, runningIds: ['a2'] }, null).direct, true);
+  // 目标本身在跑 → direct false，仍走队列续发
   assert.equal(planEnqueue({ ...CTX, runningIds: ['a1'] }, 'a1').direct, false);
   assert.equal(planEnqueue({ ...CTX, runningIds: ['a2'] }, 'a2').direct, false);
   // blocked / missing 不执行，无 direct 字段

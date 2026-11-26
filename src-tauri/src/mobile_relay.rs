@@ -535,7 +535,9 @@ pub async fn mobile_bridge_relay_stop(
 
 // ===== 中继配置持久化（relay.json）=====
 
-/// 持久化的中继连接配置：成功开启中继后落盘，下次进设置页回填表单。
+/// 持久化的中继连接配置：成功开启中继后落盘，下次进设置页回填表单；
+/// `auto = true` 时应用启动自动重连（用户手动关闭会写成 false，不再自启）。
+/// 旧版配置没有 auto 字段——旧版只在开启成功时落盘，缺字段视为 true。
 /// token 为接入凭证明文，存账户私有 data_dir（与设备 key 同目录）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelayConfig {
@@ -543,6 +545,12 @@ pub struct RelayConfig {
     pub control_port: u16,
     pub token: String,
     pub tls: bool,
+    #[serde(default = "default_relay_auto")]
+    pub auto: bool,
+}
+
+fn default_relay_auto() -> bool {
+    true
 }
 
 fn config_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -581,6 +589,42 @@ pub fn mobile_relay_config_get(app: AppHandle) -> Result<Option<RelayConfig>, St
 #[tauri::command]
 pub fn mobile_relay_config_save(app: AppHandle, config: RelayConfig) -> Result<(), String> {
     save_relay_config(&app, &config)
+}
+
+/// 启动自动重连：relay.json `auto = true`（上次退出时中继在开）→ 后台重连。
+/// 放在应用 setup 阶段而非前端：不依赖账户解锁/进设置页，服务器常驻场景
+/// 重启即恢复。失败只记日志（令牌被拒 / 网络不通等），用户可在设置页手动重开。
+pub async fn relay_auto_resume(app: tauri::AppHandle) {
+    let cfg = match load_relay_config(&app) {
+        Ok(Some(c)) if c.auto => c,
+        _ => return,
+    };
+    let state = tauri::Manager::state::<crate::mobile_bridge::MobileBridgeState>(&app);
+    match relay_start(
+        &app,
+        &state,
+        cfg.host.clone(),
+        cfg.control_port,
+        cfg.token.clone(),
+        cfg.tls,
+    )
+    .await
+    {
+        Ok(_) => crate::app_log!(
+            info,
+            "mobile",
+            "中继自动重连成功：{}:{}",
+            cfg.host,
+            cfg.control_port
+        ),
+        Err(e) => crate::app_log!(
+            error,
+            "mobile",
+            "中继自动重连失败：{}:{} {e}",
+            cfg.host,
+            cfg.control_port
+        ),
+    }
 }
 
 #[cfg(test)]

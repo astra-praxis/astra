@@ -561,6 +561,11 @@ pub async fn account_switch(
         account.display_name,
         account.account_id
     );
+    // 中继自动重连：账户已换绑、data_dir 可解析，relay.json auto=true（上次
+    // 退出时中继在开）→ 后台重连。放这里而不是 setup 阶段：setup 时账户
+    // 尚未绑定，data_dir 指向 legacy 目录读不到 relay.json。失败只记日志，
+    // 用户可在设置页手动重开。
+    tauri::async_runtime::spawn(crate::mobile_relay::relay_auto_resume(app.clone()));
     Ok(())
 }
 

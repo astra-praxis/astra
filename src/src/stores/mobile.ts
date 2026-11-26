@@ -83,12 +83,13 @@ interface MobileBridgeState {
   relayConfigLoad: () => Promise<void>;
 }
 
-/** 中继连接配置（Rust RelayConfig：成功开启后存 relay.json） */
+/** 中继连接配置（Rust RelayConfig：成功开启后存 relay.json；auto 标记是否随应用启动自动重连） */
 export interface RelayConfig {
   host: string;
   control_port: number;
   token: string;
   tls: boolean;
+  auto: boolean;
 }
 
 /** 设备 key 列表视图（Rust to_view：不含 hash/secret） */
@@ -217,11 +218,11 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
         tls,
       });
       // 成功后 info.url/qr 已切换为中继入口（桥没开会自动开）；配置入库供下次回填
+      // 与启动自动重连（auto: true；手动关闭时改写为 false）
       set({ info, running: true, relayOn: true, relayStarting: false });
-      void invoke('mobile_relay_config_save', {
-        config: { host, control_port: controlPort, token, tls } satisfies RelayConfig,
-      })
-        .then(() => set({ relayConfig: { host, control_port: controlPort, token, tls } }))
+      const cfg: RelayConfig = { host, control_port: controlPort, token, tls, auto: true };
+      void invoke('mobile_relay_config_save', { config: cfg })
+        .then(() => set({ relayConfig: cfg }))
         .catch(() => {});
     } catch (e) {
       set({
@@ -237,6 +238,14 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
       // 桥仍在跑，重新拿 LAN 入口（mobile_bridge_start 已在跑则原样返回）
       const info = await invoke<MobileBridgeInfo>('mobile_bridge_start');
       set({ info, relayOn: false, relayStopping: false });
+      // 手动关闭 = 明确不想连：入库配置标记 auto: false，下次启动不再自动重连
+      const cfg = get().relayConfig;
+      if (cfg) {
+        const off = { ...cfg, auto: false };
+        void invoke('mobile_relay_config_save', { config: off })
+          .then(() => set({ relayConfig: off }))
+          .catch(() => {});
+      }
     } catch (e) {
       set({
         relayError: e instanceof Error ? e.message : String(e),

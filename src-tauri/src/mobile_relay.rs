@@ -29,6 +29,9 @@ const POOL_TARGET: usize = 12;
 const MAX_CONSEC_PIPE_FAIL: usize = 8;
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(6);
 const PIPE_READY_TIMEOUT: Duration = Duration::from_secs(6);
+/// 注册连接心跳间隔：relay 按「90s 无字节即回收通道」判死（stunnel 后端死掉
+/// 时回环连接永不 EOF），必须主动续命；远小于 90s 留足弱网抖动余量
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
 /// relay_start 等首次注册成功的上限（注册失败/超时则整体失败返回）
 const FIRST_REGISTER_WAIT: Duration = Duration::from_secs(12);
 
@@ -237,8 +240,10 @@ async fn pipe_task(
     }
 }
 
-/// 池循环：注册连接存活期间持续补管道；注册断开（EOF）或管道连续失败
-/// （通道已失效但注册连接半开）→ 返回触发重注册
+/// 池循环：注册连接存活期间持续补管道 + 定期心跳；注册断开（EOF）或管道连续失败
+/// （通道已失效但注册连接半开）→ 返回触发重注册。
+/// 心跳：relay 侧按「超时无字节即回收通道」判定死活（经 stunnel 接入时回环
+/// 连接永不 EOF），必须定期 PING 续命，否则通道会在 90s 被回收
 async fn pool_loop(
     mut reg: RelayConn,
     host: String,
@@ -252,19 +257,37 @@ async fn pool_loop(
     let alive = Arc::new(StdMutex::new(0usize));
     let consec_fail = Arc::new(StdAtomicUsize::new(0));
     let mut tick = tokio::time::interval(Duration::from_millis(400));
+    // 心跳间隔远小于 relay 的 CONTROL_HEARTBEAT_TIMEOUT（90s），留足抖动余量
+    let mut ping = tokio::time::interval(HEARTBEAT_INTERVAL);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut buf = [0u8; 256];
     loop {
         tokio::select! {
-            _ = shutdown_rx.wait_for(|v| *v) => return,
+            // changed() 的输出是 Send 的（wait_for 返回的 RwLockReadGuard 非 Send，
+            // 会被 select 存着跨 ping 分支的 write await，把整个 future 污染成 !Send）
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow_and_update() {
+                    return;
+                }
+            }
             res = reg.read(&mut buf) => {
                 match res {
-                    // 注册连接不应再有数据；EOF/错误 = relay 已释放通道
+                    // EOF/错误 = relay 已释放通道（含心跳超时回收）；
+                    // PONG 等 ping 往返字节在这里被忽略
                     Ok(0) | Err(_) => {
                         crate::app_log!(warn, "mobile-relay",
                             "relay 通道断开（{host}:{control_port}），准备重注册");
                         return;
                     }
                     Ok(_) => {}
+                }
+            }
+            _ = ping.tick() => {
+                // 心跳续命：发送失败 = 注册连接已死，重注册
+                if let Err(e) = reg.write_all(b"PING\n").await {
+                    crate::app_log!(warn, "mobile-relay",
+                        "relay 心跳发送失败（{e}），重注册");
+                    return;
                 }
             }
             _ = tick.tick() => {

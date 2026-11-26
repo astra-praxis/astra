@@ -21,7 +21,15 @@
 //!
 //! 控制协议（首行文本，\n 结尾，之后注册/管道连接均为纯字节流）：
 //!   REGISTER <token>\n → PORT <数据端口>\n
+//!   PING\n → PONG\n（注册连接上的心跳线，桌面端定期发送）
 //!   PIPE <token> <端口>\n → OK\n | ERR pool full\n | ERR unknown port\n
+//!
+//! 僵尸通道回收（半开连接无 FIN 时 keepalive 也探不到——比如桌面端经 stunnel
+//! 接入，TLS 后端死掉但回环连接仍活着）：
+//! - 控制心跳：注册连接上任意字节都续命，超过 CONTROL_HEARTBEAT_TIMEOUT 无心跳
+//!   即释放通道（旧版桌面端不发心跳会在 90s 被回收，需两端同步升级）
+//! - 数据口空置回收：后台 reaper 定期扫描，先冲走池内超龄管道，再把
+//!   「无空闲管道 + 无在途会话」超过 CHANNEL_VACANT_TIMEOUT 的通道释放
 //!
 //! 环境变量：
 //!   ASTRA_RELAY_TOKEN        桌面端接入令牌（必填，≥32 字符）
@@ -55,6 +63,15 @@ const MAX_PIPES_TOTAL: usize = 4096;
 const PIPE_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// 控制连接握手（读首行）超时：防慢速握手占住任务与 fd
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// 控制心跳超时：注册连接上这么久没收到任何字节（桌面端 25s 一跳）即判定对端
+/// 已死，释放通道。stunnel 等前置代理会让回环连接永不 EOF，keepalive 探不到
+/// TLS 后端死掉的场景，只能靠应用层心跳
+const CONTROL_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(90);
+/// 数据口空置超时：通道内既无空闲管道也无在途会话，且这么久没新管道入池/被取用
+/// 即判定桌面端已死（活着的桌面端池每 400ms 补管道，远低于此阈值）
+const CHANNEL_VACANT_TIMEOUT: Duration = Duration::from_secs(60);
+/// 僵尸通道扫描周期：清超龄空闲管道 + 回收空置通道
+const REAP_INTERVAL: Duration = Duration::from_secs(10);
 /// 手机连接等空闲管道的最长时间（桌面端池每 400ms 补充）
 const PHONE_PIPE_WAIT: Duration = Duration::from_secs(15);
 /// 接入令牌最小长度
@@ -81,6 +98,15 @@ struct Channel {
     owner: String,
     pipes: Vec<IdlePipe>,
     accept_task: tokio::task::JoinHandle<()>,
+    /// 最近一次管道活动（入池/被取用/会话结束；注册时刻为初值），空置判定用
+    last_supply: Instant,
+    /// 已出池正在被手机使用的管道数（防活跃会话期间误判空置）
+    in_flight: usize,
+}
+
+/// 空置判定（独立函数便于单测）：无空闲管道、无在途会话、且超过空置超时
+fn channel_vacant(pipes_empty: bool, in_flight_zero: bool, last_supply_elapsed: Duration) -> bool {
+    pipes_empty && in_flight_zero && last_supply_elapsed > CHANNEL_VACANT_TIMEOUT
 }
 
 struct Registry {
@@ -186,6 +212,8 @@ fn main() {
         .build()
         .expect("构建 tokio runtime 失败");
     rt.block_on(async move {
+        // 僵尸通道回收：独立任务定期扫描（详见 reap_loop 注释）
+        tokio::spawn(reap_loop(Arc::clone(&registry)));
         let listener = TcpListener::bind((bind.as_str(), control_port))
             .await
             .unwrap_or_else(|e| {
@@ -390,21 +418,42 @@ async fn register_channel(
                 owner: token.to_string(),
                 pipes: Vec::new(),
                 accept_task,
+                last_supply: Instant::now(),
+                in_flight: 0,
             },
         );
     }
 
-    // 注册连接断连探测：整个连接移进探测任务（之后无人再用它），
-    // 持续读，EOF/错误（含 keepalive 探测失败）→ 释放通道
+    // 注册连接断连/心跳探测：整个连接移进探测任务（之后无人再用它），
+    // 持续读：EOF/错误（含 keepalive 探测失败）或心跳超时 → 释放通道。
+    // 经 stunnel 等前置 TLS 代理接入时，桌面端死掉后回环连接可能永不 EOF，
+    // 心跳超时是唯一可靠的死信判定（收到任意字节都续命，PING 回 PONG）
     let registry = Arc::clone(&registry);
     let owner = token.to_string();
     tokio::spawn(async move {
         let mut buf = [0u8; 512];
+        let mut timed_out = false;
         loop {
-            match stream.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {} // 注册连接不应再有数据，忽略
+            match tokio::time::timeout(CONTROL_HEARTBEAT_TIMEOUT, stream.read(&mut buf)).await {
+                Ok(Ok(0)) | Ok(Err(_)) => break,
+                // 心跳超时：桌面端 25s 一跳，超时说明对端已死（连接可能还半开着）
+                Err(_) => {
+                    timed_out = true;
+                    break;
+                }
+                Ok(Ok(n)) => {
+                    // 心跳线回 PONG（桌面端借此探测 relay 存活；非 PING 字节同样续命）
+                    if buf[..n].windows(5).any(|w| w == b"PING\n") {
+                        let _ = stream.write_all(b"PONG\n").await;
+                    }
+                }
             }
+        }
+        if timed_out {
+            info!(
+                "通道心跳超时释放：port={port}（{} 秒无心跳）",
+                CONTROL_HEARTBEAT_TIMEOUT.as_secs()
+            );
         }
         release_channel(&registry, port, &owner);
     });
@@ -427,6 +476,11 @@ async fn wait_and_pair(registry: SharedRegistry, port: u16, mut phone: TcpStream
                         break;
                     }
                 }
+                if taken.is_some() {
+                    // 记在途会话（防活跃会话期间被判空置）+ 刷新管道活动时间
+                    ch.in_flight += 1;
+                    ch.last_supply = Instant::now();
+                }
             }
             reg.pipes_total -= popped; // 含被丢弃的超龄管道
             taken
@@ -437,6 +491,13 @@ async fn wait_and_pair(registry: SharedRegistry, port: u16, mut phone: TcpStream
                 .await
                 .map(|(a, b)| a + b)
                 .unwrap_or(0);
+            // 会话结束：在途计数回落 + 刷新活动时间（桌面端马上会补管，
+            // 这个窗口内别被空置回收误杀）
+            let mut reg = registry.lock().unwrap();
+            if let Some(ch) = reg.channels.get_mut(&port) {
+                ch.in_flight = ch.in_flight.saturating_sub(1);
+                ch.last_supply = Instant::now();
+            }
             debug!("手机会话结束：port={port} 转发字节 {n}");
             return;
         }
@@ -462,6 +523,48 @@ fn release_channel(registry: &SharedRegistry, port: u16, owner: &str) {
         );
         ch.accept_task.abort();
         reg.pipes_total -= ch.pipes.len();
+    }
+}
+
+/// 僵尸通道回收循环：半开连接（无 FIN/RST）keepalive 探不到时，注册连接的
+/// EOF 探测永远等不到，通道会永久占用数据端口。这里定期扫描：
+/// 1. 冲走池内超龄空闲管道（死桌面端的池管道经前置代理会一直挂着）
+/// 2. 回收空置通道：无空闲管道 + 无在途会话 + 超过空置超时（活着的桌面端
+///    池每 400ms 补管，远达不到此阈值；误杀风险只在桌面端长期零活动时存在）
+async fn reap_loop(registry: SharedRegistry) {
+    let mut tick = tokio::time::interval(REAP_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        let victims: Vec<(u16, String)> = {
+            let Registry {
+                channels,
+                pipes_total,
+            } = &mut *registry.lock().unwrap();
+            let mut victims = Vec::new();
+            for (port, ch) in channels.iter_mut() {
+                let before = ch.pipes.len();
+                if before > 0 {
+                    ch.pipes.retain(|p| !p.is_stale());
+                    *pipes_total -= before - ch.pipes.len();
+                }
+                if channel_vacant(
+                    ch.pipes.is_empty(),
+                    ch.in_flight == 0,
+                    ch.last_supply.elapsed(),
+                ) {
+                    victims.push((*port, ch.owner.clone()));
+                }
+            }
+            victims
+        };
+        for (port, owner) in victims {
+            warn!(
+                "通道空置回收：port={port}（{} 秒无管道活动）",
+                CHANNEL_VACANT_TIMEOUT.as_secs()
+            );
+            release_channel(&registry, port, &owner);
+        }
     }
 }
 
@@ -517,6 +620,7 @@ async fn supply_pipe(
                 stream,
                 since: Instant::now(),
             });
+            ch.last_supply = Instant::now(); // 管道入池也算管道活动，空置计时重置
             reg.pipes_total += 1;
             debug!(
                 "管道入池：port={port} peer={peer}（池总数 {}）",
@@ -600,5 +704,30 @@ mod tests {
             };
             assert!(stale.is_stale());
         });
+    }
+
+    #[test]
+    fn channel_vacant_needs_silence_and_no_activity() {
+        // 无管道 + 无在途 + 静默超阈值 → 回收
+        assert!(channel_vacant(
+            true,
+            true,
+            CHANNEL_VACANT_TIMEOUT + Duration::from_secs(1)
+        ));
+        // 池里有管道（活着的桌面端常态）→ 不回收
+        assert!(!channel_vacant(
+            false,
+            true,
+            CHANNEL_VACANT_TIMEOUT + Duration::from_secs(999)
+        ));
+        // 有在途会话（活跃手机会话）→ 不回收，哪怕静默很久
+        assert!(!channel_vacant(
+            true,
+            false,
+            CHANNEL_VACANT_TIMEOUT + Duration::from_secs(999)
+        ));
+        // 刚有管道活动（注册后不久/会话刚结束）→ 不回收
+        assert!(!channel_vacant(true, true, CHANNEL_VACANT_TIMEOUT));
+        assert!(!channel_vacant(true, true, Duration::ZERO));
     }
 }

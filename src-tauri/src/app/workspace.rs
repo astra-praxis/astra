@@ -151,6 +151,62 @@ pub(crate) async fn list_project_files(path: String) -> Result<Vec<String>, Stri
     .map_err(|e| format!("扫描项目文件失败: {}", e))?
 }
 
+/// 读取项目内单个文本文件的预览内容（手机端文件浏览用，手机发起）。
+/// 路径安全：目标必须在 project_root 内（canonicalize 前缀校验），文本上限 256 KB，
+/// 超出截断并标注；二进制/非 UTF-8 文件明确报错不猜编码
+#[tauri::command]
+pub(crate) async fn agent_read_project_file(
+    project_root: String,
+    path: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root = Path::new(&project_root);
+        if !root.is_dir() {
+            return Err(format!("路径不是有效的目录: {}", project_root));
+        }
+        // 手机端只传相对路径；拒绝绝对路径与越界（.. 逃逸在 canonicalize 后拦截）
+        if Path::new(&path).is_absolute() {
+            return Err("只允许项目内的相对路径".into());
+        }
+        let target = root.join(&path);
+        let root_canon = root
+            .canonicalize()
+            .map_err(|e| format!("项目目录不可访问: {e}"))?;
+        let target_canon = target
+            .canonicalize()
+            .map_err(|_| format!("文件不存在或不可访问: {}", path))?;
+        if !target_canon.starts_with(&root_canon) {
+            return Err("路径越出项目目录，已拒绝".into());
+        }
+        if !target_canon.is_file() {
+            return Err(format!("不是文件: {}", path));
+        }
+        const MAX_READ: usize = 256 * 1024;
+        let bytes = std::fs::read(&target_canon).map_err(|e| format!("读取失败: {e}"))?;
+        // 剥 UTF-8 BOM 再转文本
+        let body = bytes
+            .strip_prefix([0xEF, 0xBB, 0xBF].as_slice())
+            .unwrap_or(&bytes);
+        match String::from_utf8(body.to_vec()) {
+            Ok(text) => {
+                if bytes.len() > MAX_READ {
+                    let cut = String::from_utf8_lossy(&body[..body.len().min(MAX_READ)]);
+                    Ok(format!(
+                        "{}\n\n…（已截断，全文 {} KB，用 Agent 的 read_file 查看完整内容）",
+                        cut,
+                        bytes.len() / 1024
+                    ))
+                } else {
+                    Ok(text)
+                }
+            }
+            Err(_) => Err(format!("二进制/非 UTF-8 文件，手机端不支持预览: {}", path)),
+        }
+    })
+    .await
+    .map_err(|e| format!("读取项目文件失败: {}", e))?
+}
+
 /// 递归收集项目内文件的相对路径，独立成函数便于单测。
 /// 跳过隐藏目录与常见构建产物目录，限制深度与数量，避免超大项目拖慢弹层。
 pub(crate) fn collect_project_files(root: &Path) -> Vec<String> {

@@ -12,7 +12,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { create } from 'zustand';
-import { useAgentStore, ensureAgentListeners } from '@/stores/agent';
+import { useAgentStore, ensureAgentListeners, type UserImage } from '@/stores/agent';
 import { useChatToolbarStore } from './chatToolbar';
 import type { AgentSessionMeta } from '@/pages/agent/AgentHistoryPanel';
 import type { EnqueuePlan, MobileSkillLite } from './mobileLogic';
@@ -341,7 +341,13 @@ type DirectSendOutcome = 'sent' | 'queued' | 'failed';
  *  任务文本（手机端「新对话」收养的文本匹配依赖它）；sender 缺省 = 桌面本机发送。
  *  originMsgId：消息源自某台手机 send 命令时透传其 msg_id，手机端用它做收养的
  *  精确匹配（文本可能被 PC 端解析改写，msg_id 才是可靠关联） */
-export function broadcastUserMessage(sessionId: string, text: string, sender?: string, originMsgId?: string | null): void {
+export function broadcastUserMessage(
+  sessionId: string,
+  text: string,
+  sender?: string,
+  originMsgId?: string | null,
+  images?: UserImage[],
+): void {
   invoke('mobile_bridge_push_event', {
     kind: 'agent-event',
     payload: {
@@ -350,6 +356,7 @@ export function broadcastUserMessage(sessionId: string, text: string, sender?: s
       text,
       ...(sender ? { sender } : {}),
       ...(originMsgId ? { origin_msg_id: originMsgId } : {}),
+      ...(images && images.length > 0 ? { images } : {}),
     },
   }).catch(() => {});
 }
@@ -365,6 +372,7 @@ async function directSend(
   expectedId: string,
   sender?: string,
   originMsgId?: string | null,
+  images?: UserImage[],
 ): Promise<DirectSendOutcome> {
   const toolbar = useChatToolbarStore.getState();
   const invalid = (msg: string): DirectSendOutcome => {
@@ -393,8 +401,8 @@ async function directSend(
   // 新消息 = 新意图接管：清旧失败横幅与输入框错误；绝不清 input（等价 keepInput）
   st.setRunError(null);
   st.setError('');
-  st.pushUser(raw, undefined, sender); // 会话记录保留原始 /技能名 文本，回放时可读；sender 供多设备共享时展示来源
-  broadcastUserMessage(st.sessionId, text, sender, originMsgId); // 按下发送即镜像给所有手机，不等 Run 准入；originMsgId 供手机收养匹配
+  st.pushUser(raw, images, sender); // 会话记录保留原始 /技能名 文本，回放时可读；sender 供多设备共享时展示来源
+  broadcastUserMessage(st.sessionId, text, sender, originMsgId, images); // 按下发送即镜像给所有手机，不等 Run 准入；originMsgId/images 供手机收养与回显
   st.setRunState(true, 'analyzing');
   const provider = toolbar.providers.find((p) => p.id === toolbar.selectedProviderId) ?? null;
   try {
@@ -402,7 +410,7 @@ async function directSend(
       req: {
         session_id: st.sessionId,
         user_text: text,
-        images: [],
+        images: images ?? [],
         skill,
         provider_id: toolbar.sourceType === 'provider' ? toolbar.selectedProviderId : null,
         model_port: toolbar.sourceType === 'model' ? toolbar.selectedModelPort : null,
@@ -426,12 +434,58 @@ async function directSend(
   }
 }
 
-async function handleEnqueue(payload: { session_id: string | null; text: string; sender?: string; msg_id?: string | null }) {
+async function handleEnqueue(payload: {
+  session_id: string | null;
+  text: string;
+  sender?: string;
+  msg_id?: string | null;
+  images?: Array<{ data: string }> | null;
+  files?: Array<{ name: string; data: string }> | null;
+}) {
   const parsed = parseMobileSend(String(payload.text ?? ''), await knownSkills());
   if (!parsed.ok) {
     phoneToast(parsed.error);
     return;
   }
+  // 手机上传文件：落盘粘贴目录（与桌面粘贴同目录，read_file Allow 级可读），
+  // 正文改写为「先读文件再处理指令」（与桌面 takePastedFiles 同款）；任一失败不发送
+  const files = payload.files ?? [];
+  let filePrefix = '';
+  let fileSuffix = '';
+  if (files.length > 0) {
+    const projectRoot = useAgentStore.getState().projectPath || null;
+    const saved: string[] = [];
+    for (const f of files) {
+      try {
+        const info = await invoke<{ path: string; name: string; size: number }>(
+          'agent_save_upload',
+          { projectRoot, name: f.name, dataBase64: f.data },
+        );
+        saved.push(info.path);
+      } catch (e) {
+        phoneToast(`文件「${f.name}」保存失败：${String(e)}`);
+        return;
+      }
+    }
+    const names = files.map((f) => f.name).join('、');
+    filePrefix = `【用户从手机上传的 ${files.length} 个文件已复制到：\n${saved.join('\n')}\n请先用 read_file 工具读取这些文件，再处理下方指令】\n\n`;
+    fileSuffix = `\n📎 上传文件：${names}，已让 Agent 先读取`;
+  }
+  // 手机附图：agent_normalize_image 归一化为规范 PNG（尺寸/字节预算与桌面同款，
+  // 单请求 ≤ 4 张）；归一化失败只丢图不丢消息
+  const images: UserImage[] = [];
+  for (const img of payload.images ?? []) {
+    try {
+      const n = await invoke<{ data: string; width: number; height: number }>(
+        'agent_normalize_image',
+        { bytesBase64: img.data },
+      );
+      images.push(n);
+    } catch (e) {
+      phoneToast(`图片跳过：${String(e)}`);
+    }
+  }
+  if (images.length > 4) images.length = 4;
   let st = useAgentStore.getState();
   const target = payload.session_id ?? null;
   // 目标不在列表里先刷新一次（手机看到的列表可能比桌面旧）
@@ -458,21 +512,24 @@ async function handleEnqueue(payload: { session_id: string | null; text: string;
   );
   if (!applyPlan(plan)) return;
   if (plan.action === 'missing' || plan.action === 'blocked') return;
+  // 气泡展示文本（原文 + 文件痕）与任务文本（read_file 指令前缀 + 解析后文本）
+  const rawText = String(payload.text ?? '') + fileSuffix;
+  const taskText = filePrefix + parsed.text;
   if (plan.direct) {
-    // 空闲直发：跳过队列直接起跑（消息不在队列面板闪现）；msg_id 透传供手机收养
+    // 空闲直发：跳过队列直接起跑（消息不在队列面板闪现）；msg_id/附图透传供手机收养与回显
     const expectedId = useAgentStore.getState().sessionId;
-    const outcome = await directSend(parsed.raw, parsed.text, parsed.skill, expectedId, payload.sender, payload.msg_id);
+    const outcome = await directSend(rawText, taskText, parsed.skill, expectedId, payload.sender, payload.msg_id, images);
     if (outcome === 'sent') phoneToast('已发送');
     if (outcome === 'queued') {
-      // PC 此刻忙 / 会话被切走：兜底入队（准入拒绝不丢消息），续发 effect 接手
-      useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender, originMsgId: payload.msg_id ?? undefined });
+      // PC 此刻忙 / 会话被切走：兑底入队（准入拒绝不丢消息），续发 effect 接手
+      useAgentStore.getState().enqueueMessage(rawText, taskText, parsed.skill, { sender: payload.sender, originMsgId: payload.msg_id ?? undefined }, images);
       phoneToast('PC 正忙，已加入队列');
     }
     // 'failed'：提示已在 directSend 内弹出，不入队（见 DirectSendOutcome 注释）
     return;
   }
   // 目标正在运行：入队等本轮结束后的既有续发
-  useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender, originMsgId: payload.msg_id ?? undefined });
+  useAgentStore.getState().enqueueMessage(rawText, taskText, parsed.skill, { sender: payload.sender, originMsgId: payload.msg_id ?? undefined }, images);
   phoneToast('已加入队列，本轮结束后自动发送');
 }
 
@@ -570,6 +627,14 @@ interface BridgeEvent {
   skill?: string | null;
   /** send 载荷的发送者设备名（多设备共享时标记来源） */
   sender?: string;
+  /** 手机附图（原始字节 base64，PC 端 agent_normalize_image 归一化后入消息） */
+  images?: Array<{ data: string }> | null;
+  /** 手机上传文件（base64 字节，PC 端落盘粘贴目录后改写正文） */
+  files?: Array<{ name: string; data: string }> | null;
+  /** fs_files / fs_read 请求 id（手机端等待应答匹配用） */
+  req_id?: number;
+  /** fs_read 目标（项目内相对路径） */
+  path?: string;
   id?: string;
   target_id?: string;
   after?: boolean;
@@ -604,7 +669,57 @@ async function handleBridgeEvent(ev: BridgeEvent) {
         text: String(ev.text ?? ''),
         sender: ev.sender,
         msg_id: ev.msg_id === null || ev.msg_id === undefined ? null : String(ev.msg_id),
+        images: ev.images ?? null,
+        files: ev.files ?? null,
       });
+      break;
+    case 'fs_files':
+      // 手机浏览 PC 项目文件：项目根用桌面当前 projectPath；无项目回明确错误
+      {
+        const reqId = ev.req_id ?? 0;
+        const projectRoot = useAgentStore.getState().projectPath;
+        if (!projectRoot) {
+          invoke('mobile_bridge_server_event', {
+            value: { type: 'fs_files_result', req_id: reqId, error: '桌面端未打开项目' },
+          }).catch(() => {});
+          break;
+        }
+        invoke<string[]>('list_project_files', { path: projectRoot })
+          .then((files) => {
+            invoke('mobile_bridge_server_event', {
+              value: { type: 'fs_files_result', req_id: reqId, project: projectRoot, files },
+            }).catch(() => {});
+          })
+          .catch((e) => {
+            invoke('mobile_bridge_server_event', {
+              value: { type: 'fs_files_result', req_id: reqId, error: String(e) },
+            }).catch(() => {});
+          });
+      }
+      break;
+    case 'fs_read':
+      // 手机预览项目文件：路径安全在后端 agent_read_project_file 内校验
+      {
+        const reqId = ev.req_id ?? 0;
+        const projectRoot = useAgentStore.getState().projectPath;
+        if (!projectRoot) {
+          invoke('mobile_bridge_server_event', {
+            value: { type: 'fs_read_result', req_id: reqId, error: '桌面端未打开项目' },
+          }).catch(() => {});
+          break;
+        }
+        invoke<string>('agent_read_project_file', { projectRoot, path: String(ev.path ?? '') })
+          .then((content) => {
+            invoke('mobile_bridge_server_event', {
+              value: { type: 'fs_read_result', req_id: reqId, path: ev.path, content },
+            }).catch(() => {});
+          })
+          .catch((e) => {
+            invoke('mobile_bridge_server_event', {
+              value: { type: 'fs_read_result', req_id: reqId, error: String(e) },
+            }).catch(() => {});
+          });
+      }
       break;
     case 'queue_reorder':
       // 只允许同会话内排序的校验在 reorderQueued 里（跨会话/未知 id 一律不动）

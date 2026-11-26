@@ -1255,7 +1255,11 @@ async fn handle_client_msg(
         }
         Some("send") => {
             let body = v["text"].as_str().unwrap_or("").trim().to_string();
-            if body.is_empty() {
+            // 手机附件：图片原始字节（base64，PC 端经 agent_normalize_image 归一化）
+            // 与文件（base64 落盘粘贴目录，正文改写为 read_file 指令）；桥只透传不解析
+            let images = v["images"].as_array().cloned().filter(|a| !a.is_empty());
+            let files = v["files"].as_array().cloned().filter(|a| !a.is_empty());
+            if body.is_empty() && images.is_none() && files.is_none() {
                 return;
             }
             // scoped 连接强制发进绑定会话（本层覆盖，不信客户端）
@@ -1284,7 +1288,26 @@ async fn handle_client_msg(
                     "text": body,
                     "skill": skill,
                     "sender": sender,
+                    "images": images,
+                    "files": files,
                 }),
+            );
+        }
+        // 手机浏览 PC 项目文件：桥不知道 projectPath（在前端 store），转发给前端处理，
+        // 前端回 mobile_bridge_server_event（带 req_id 广播，多设备各自认领）
+        Some("fs_files") => {
+            let req_id = v["req_id"].as_u64().unwrap_or(0);
+            let _ = shared.app.emit(
+                "mobile-bridge-event",
+                json!({ "type": "fs_files", "req_id": req_id, "client": format!("c{}", conn_id) }),
+            );
+        }
+        Some("fs_read") => {
+            let req_id = v["req_id"].as_u64().unwrap_or(0);
+            let path = v["path"].as_str().unwrap_or("").to_string();
+            let _ = shared.app.emit(
+                "mobile-bridge-event",
+                json!({ "type": "fs_read", "req_id": req_id, "path": path, "client": format!("c{}", conn_id) }),
             );
         }
         Some("queue_reorder") => {

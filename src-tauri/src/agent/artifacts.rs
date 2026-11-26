@@ -190,6 +190,44 @@ pub fn agent_import_pasted_files(
     Ok(imported)
 }
 
+/// 把手机上传的文件（base64 字节）落盘到粘贴目录，返回导入结果。
+/// 与 agent_import_pasted_files 同目录同命名约定（upload-<时间戳>-<文件名>），
+/// read_file Allow 级可读；手机端正文改写逻辑在前端（mobile.ts）
+#[tauri::command]
+pub fn agent_save_upload(
+    project_root: Option<String>,
+    name: String,
+    data_base64: String,
+) -> Result<PastedFileInfo, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.trim().as_bytes())
+        .map_err(|_| "文件数据不是合法的 base64".to_string())?;
+    if bytes.is_empty() {
+        return Err("文件内容为空".into());
+    }
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err(format!("文件超过 {} MiB 上限", 20));
+    }
+    let dir = pastes_dir(&project_root)?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");
+    let safe = sanitize_paste_name(&name);
+
+    let prefix = format!("upload-{stamp}");
+    let mut target = dir.join(format!("{prefix}-{safe}"));
+    let mut n = 1;
+    while target.exists() {
+        target = dir.join(format!("{prefix}-{n}-{safe}"));
+        n += 1;
+    }
+    std::fs::write(&target, &bytes).map_err(|e| format!("写入上传文件失败（{safe}）：{e}"))?;
+    Ok(PastedFileInfo {
+        path: target.display().to_string(),
+        name: safe,
+        size: bytes.len() as u64,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

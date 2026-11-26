@@ -471,12 +471,12 @@ export default function AgentPage() {
   /** 构建 agent_start_run 请求体（手动发送 / 队列续发 / 隐形继续 / 重试共用）。
    *  发送者不再进请求体：user_message 镜像改由前端按下发送时广播（broadcastUserMessage） */
   const buildRunReq = useCallback(
-    (text: string, skillName: string | null) => {
+    (text: string, skillName: string | null, images?: UserImage[]) => {
       const st = useChatToolbarStore.getState();
       return {
         session_id: sessionId,
         user_text: text,
-        images: [],
+        images: images ?? [],
         skill: skillName,
         provider_id: st.sourceType === 'provider' ? st.selectedProviderId : null,
         model_port: st.sourceType === 'model' ? st.selectedModelPort : null,
@@ -509,7 +509,7 @@ export default function AgentPage() {
       text: string,
       visible: boolean,
       onAdmitted?: () => void,
-      opts?: { keepInput?: boolean; sender?: string; originMsgId?: string },
+      opts?: { keepInput?: boolean; sender?: string; originMsgId?: string; images?: UserImage[] },
     ): Promise<boolean> => {
       const st = useChatToolbarStore.getState();
       if (st.sourceType === 'model' && !st.selectedModelPort) {
@@ -560,10 +560,10 @@ export default function AgentPage() {
         setError('');
         onAdmitted?.();
         // sender：手机遥控发送的设备名（落盘后多设备共享历史时展示来源）
-        pushUser(raw, undefined, opts?.sender); // 会话记录保留原始 /技能名 文本，回放时可读
+        pushUser(raw, opts?.images, opts?.sender); // 会话记录保留原始 /技能名 文本，回放时可读
         // 按下发送即镜像 user_message 给所有手机（不等 Run 准入）；sender 标来源，
         // originMsgId 是手机 send 命令的 msg_id（手机端收养的精确匹配键）
-        broadcastUserMessage(sessionId, text, opts?.sender, opts?.originMsgId);
+        broadcastUserMessage(sessionId, text, opts?.sender, opts?.originMsgId, opts?.images);
       }
       setRunState(true, 'analyzing');
       // 准入即算「已起跑」：不依赖观察到 running 翻转（React 把 setRunState(true)
@@ -572,7 +572,7 @@ export default function AgentPage() {
       retryStartedRef.current = true;
 
       try {
-        await invoke('agent_start_run', { req: buildRunReq(text, skillName) });
+        await invoke('agent_start_run', { req: buildRunReq(text, skillName, opts?.images) });
         return true;
       } catch (e) {
         setRunState(false, null);
@@ -592,7 +592,7 @@ export default function AgentPage() {
       skillName: string | null,
       text: string,
       onAdmitted?: () => void,
-      opts?: { keepInput?: boolean; sender?: string; originMsgId?: string },
+      opts?: { keepInput?: boolean; sender?: string; originMsgId?: string; images?: UserImage[] },
     ) => {
       // 用户手动发送 = 新意图接管：重置重试配额（下次失败重新获得 3 次）
       resetRetryState();
@@ -920,7 +920,7 @@ export default function AgentPage() {
       st.removeQueued(head.id);
       // keepInput：续发的是队列里的旧消息，不能清掉用户此刻正在打字的草稿；
       // sender：手机入队的消息续发时也带发送者（与直接发送路径一致）
-      void doSendRef.current(head.raw, head.skill, head.text, undefined, { keepInput: true, sender: head.sender, originMsgId: head.originMsgId });
+      void doSendRef.current(head.raw, head.skill, head.text, undefined, { keepInput: true, sender: head.sender, originMsgId: head.originMsgId, images: head.images });
     }, 120);
     return () => clearTimeout(timer);
   }, [running, settling, queue, sessionId, runError, editing]);

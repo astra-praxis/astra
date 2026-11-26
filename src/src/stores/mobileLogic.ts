@@ -64,8 +64,8 @@ export interface EnqueueContext {
   busy: boolean;
   /** 已知会话 id 集合（sessions 列表） */
   knownSessionIds: string[];
-  /** 全局正在运行/结算的会话 id（flat 运行中 + 驻留运行中）；S0 单活动 Run，
-   *  谁占着全局准入，谁之外的目标此刻入队必然触发一次注定失败的 dispatch */
+  /** 正在运行/结算的会话 id（flat 运行中 + 驻留运行中）。P3 并发下只在
+   *  判断「目标会话自己是否在跑」时用成员判断，不再做全局准入推断 */
   runningIds: string[];
 }
 
@@ -81,7 +81,7 @@ export type EnqueuePlan =
   | { action: 'activate'; id: string; direct: boolean }
   /** 目标会话不存在 */
   | { action: 'missing'; id: string }
-  /** 目标会话此刻无法切换/入队（别的会话占着全局单 Run 准入，或互斥操作进行中） */
+  /** 桌面端互斥操作进行中（新建/删除会话），此刻无法切换/入队 */
   | { action: 'blocked'; id: string | null };
 
 /** 手机发来一条消息：决定发送路径（纯决策，执行在 stores/mobile.ts）
@@ -89,9 +89,9 @@ export type EnqueuePlan =
  *  手机未指定会话（null）= 新对话意图：P3 并发下新会话可直接起跑（后端按会话
  *  串行、跨会话并行），一律 new-tab 直发，不再排进正在运行的会话。
  *
- *  指定会话时：只有「目标会话就是全局正在运行的会话」或「全局无运行」时发送
- *  才安全；其余情况一律 blocked（消息不丢，留在手机端提示稍后再试），避免消息
- *  变成桌面端一条注定失败的 dispatch（agent_start_run 被该会话执行锁拒绝）。
+ *  指定会话时按会话各自判断（队列是每会话一条子队列，不是全局）：目标在跑
+ *  → 入它自己的子队列等续发；目标空闲 → 直发（需要先激活）。唯一拒收是
+ *  sessionBusy（新建/删除会话互斥中），其余情况消息都不会丢。
  *
  *  direct：目标空闲 → 手机消息跳过队列直接 agent_start_run；
  *  目标本身正在运行 → false，消息仍入队等既有续发。missing/blocked 不执行，无此字段。 */
@@ -107,13 +107,13 @@ export function planEnqueue(ctx: EnqueueContext, sessionId: string | null): Enqu
     return { action: 'new-tab', direct: true };
   }
   if (sessionId === ctx.activeId) {
-    if (!flatRunning && ctx.runningIds.length > 0) return { action: 'blocked', id: sessionId };
+    // 目标就是激活会话：只看它自己是否在跑（别的会话运行与它无关，P3 并发）
     return { action: 'enqueue-active', direct: !flatRunning };
   }
   if (!ctx.knownSessionIds.includes(sessionId)) return { action: 'missing', id: sessionId };
-  // 目标本身就是运行中的驻留会话：切到前台，消息排进它自己的子队列等续发
+  // 目标会话自己正在跑：切到前台，消息排进它自己的子队列等续发
   if (ctx.runningIds.includes(sessionId)) return { action: 'activate', id: sessionId, direct: false };
-  if (ctx.runningIds.length > 0) return { action: 'blocked', id: sessionId };
+  // 目标空闲：先激活再直发（别的会话在跑也不影响，P3 并发）
   return { action: 'activate', id: sessionId, direct: true };
 }
 

@@ -108,30 +108,36 @@ test('planEnqueue: null target opens a new tab even while other sessions run (P3
   assert.equal(plan.direct, true);
 });
 
-test('planEnqueue: active target queues while it runs; blocked when another run holds admission', () => {
+test('planEnqueue: active target queues while it runs; direct when idle (per-session)', () => {
   const { planEnqueue } = load();
+  // 激活会话自己在跑 → 入它的子队列等续发
   assert.equal(planEnqueue({ ...CTX, runningIds: ['a1'] }, 'a1').action, 'enqueue-active');
   assert.equal(planEnqueue(CTX, 'a1').action, 'enqueue-active');
-  // 激活会话空闲但驻留会话占着准入 → 排了也会立刻触发一次注定失败的 dispatch → 拒
-  assert.equal(planEnqueue({ ...CTX, runningIds: ['a2'] }, 'a1').action, 'blocked');
+  // 激活会话空闲但别的会话在跑 → 照样直发（P3 并发，按会话各自判断）
+  const plan = planEnqueue({ ...CTX, runningIds: ['a2'] }, 'a1');
+  assert.equal(plan.action, 'enqueue-active');
+  assert.equal(plan.direct, true);
 });
 
-test('planEnqueue: parked/history target activates; runner target activates; unknown missing; other runs block', () => {
+test('planEnqueue: parked/history target activates; runner target queues; unknown missing (per-session)', () => {
   const { planEnqueue } = load();
   // 无运行：驻留/历史会话正常激活
   let plan = planEnqueue(CTX, 'a2');
   assert.equal(plan.action, 'activate');
   assert.equal(plan.id, 'a2');
-  // 目标本身就是运行中的驻留会话：切到前台排队续发
+  // 目标会话自己在跑：切到前台排队续发
   plan = planEnqueue({ ...CTX, runningIds: ['a2'] }, 'a2');
   assert.equal(plan.action, 'activate');
   assert.equal(plan.id, 'a2');
-  // 目标空闲但别的会话（flat 或驻留）占着准入 → 拒
+  assert.equal(plan.direct, false);
+  // 目标空闲但别的会话在跑 → 照样激活直发（P3 并发，按会话各自判断）
   plan = planEnqueue({ ...CTX, runningIds: ['a1'] }, 'a2');
-  assert.equal(plan.action, 'blocked');
+  assert.equal(plan.action, 'activate');
   assert.equal(plan.id, 'a2');
+  assert.equal(plan.direct, true);
   plan = planEnqueue({ ...CTX, runningIds: ['a3'] }, 'a2');
-  assert.equal(plan.action, 'blocked');
+  assert.equal(plan.action, 'activate');
+  assert.equal(plan.direct, true);
   // 未知会话
   plan = planEnqueue(CTX, 'ghost');
   assert.equal(plan.action, 'missing');
@@ -140,19 +146,20 @@ test('planEnqueue: parked/history target activates; runner target activates; unk
 
 test('planEnqueue: direct flag separates idle direct-send from running queue', () => {
   const { planEnqueue } = load();
-  // 无运行：四条可执行路径全部直发（跳过队列）
+  // 可执行路径全部直发（跳过队列），null 目标在其他会话运行时也直发（P3 并行）
   assert.equal(planEnqueue({ ...CTX, isDraft: true, entriesLen: 0 }, null).direct, true);
   assert.equal(planEnqueue(CTX, null).direct, true);
   assert.equal(planEnqueue(CTX, 'a1').direct, true);
   assert.equal(planEnqueue(CTX, 'a2').direct, true);
-  // null 目标（新对话）在其他会话运行时也直发（P3 并行）
   assert.equal(planEnqueue({ ...CTX, runningIds: ['a1'] }, null).direct, true);
   assert.equal(planEnqueue({ ...CTX, runningIds: ['a2'] }, null).direct, true);
-  // 目标本身在跑 → direct false，仍走队列续发
+  assert.equal(planEnqueue({ ...CTX, runningIds: ['a2'] }, 'a1').direct, true);
+  assert.equal(planEnqueue({ ...CTX, runningIds: ['a3'] }, 'a2').direct, true);
+  // 目标本身在跑 → direct false，仍走该会话自己的子队列续发
   assert.equal(planEnqueue({ ...CTX, runningIds: ['a1'] }, 'a1').direct, false);
   assert.equal(planEnqueue({ ...CTX, runningIds: ['a2'] }, 'a2').direct, false);
   // blocked / missing 不执行，无 direct 字段
-  assert.equal('direct' in planEnqueue({ ...CTX, runningIds: ['a2'] }, 'a1'), false);
+  assert.equal('direct' in planEnqueue({ ...CTX, busy: true }, 'a1'), false);
   assert.equal('direct' in planEnqueue(CTX, 'ghost'), false);
 });
 

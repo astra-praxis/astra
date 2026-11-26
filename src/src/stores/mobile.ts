@@ -509,7 +509,8 @@ async function handleEnqueue(payload: {
       entriesLen: st.entries.length,
       busy: st.sessionBusy,
       knownSessionIds: st.sessions.map((s) => s.id),
-      // S0 单活动 Run：flat 运行中 + 驻留运行/结算中的会话都占着全局准入
+      // 运行中/结算中的会话（flat + 驻留）：只用于判断目标会话自己是否在跑（P3 并发，
+      // 队列按会话各自判断，不做全局准入推断）
       runningIds: [
         ...(st.running ? [st.sessionId] : []),
         ...Object.entries(st.parked)

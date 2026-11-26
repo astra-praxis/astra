@@ -600,6 +600,12 @@ pub async fn relay_auto_resume(app: tauri::AppHandle) {
         _ => return,
     };
     let state = tauri::Manager::state::<crate::mobile_bridge::MobileBridgeState>(&app);
+    // 账户切换可能触发多次（自动进入 + 整页重载后再次进入）：中继已在跑就不重复连，
+    // 避免 maintain 竞态产生一对一弃一用的通道
+    if state.relay.lock().map(|r| r.is_some()).unwrap_or(false) {
+        crate::app_log!(debug, "mobile", "中继已在运行，跳过自动重连");
+        return;
+    }
     match relay_start(
         &app,
         &state,

@@ -67,6 +67,8 @@ interface MobileBridgeState {
   createKey: (opts: { name: string; scopeSessionId?: string | null; expiresDays?: number | null }) => Promise<CreatedKey>;
   /** 撤销设备 key（返回踢掉的在线连接数） */
   revokeKey: (id: string) => Promise<number>;
+  /** 彻底删除一条已撤销的 key（从 keys.json 移除；未撤销的后端会拒绝） */
+  deleteKey: (id: string) => Promise<void>;
   refreshKeys: () => Promise<void>;
   /** 公网中继：桌面端主动连出 relay 服务器，手机从任意网络接入（不再限局域网） */
   relayOn: boolean;
@@ -175,6 +177,10 @@ export const useMobileBridgeStore = create<MobileBridgeState>((set, get) => ({
     const kicked = await invoke<number>('mobile_bridge_key_revoke', { keyId: id });
     void get().refreshKeys();
     return kicked;
+  },
+  deleteKey: async (id) => {
+    await invoke('mobile_bridge_key_delete', { keyId: id });
+    void get().refreshKeys();
   },
   refreshKeys: async () => {
     set({ keysLoading: true });
@@ -332,8 +338,10 @@ type DirectSendOutcome = 'sent' | 'queued' | 'failed';
 /** 用户消息即时镜像：任一终端按下发送（pushUser）即广播 user_message 给所有手机，
  *  不等 Run 准入（checkpoint / MCP 装配等启动开销可达数秒，原先手机端气泡几乎与
  *  agent 回复同时出现）。载荷与原 run.rs 准入广播一致：text 是剥过 /技能 前缀的
- *  任务文本（手机端「新对话」收养的文本匹配依赖它）；sender 缺省 = 桌面本机发送 */
-export function broadcastUserMessage(sessionId: string, text: string, sender?: string): void {
+ *  任务文本（手机端「新对话」收养的文本匹配依赖它）；sender 缺省 = 桌面本机发送。
+ *  originMsgId：消息源自某台手机 send 命令时透传其 msg_id，手机端用它做收养的
+ *  精确匹配（文本可能被 PC 端解析改写，msg_id 才是可靠关联） */
+export function broadcastUserMessage(sessionId: string, text: string, sender?: string, originMsgId?: string | null): void {
   invoke('mobile_bridge_push_event', {
     kind: 'agent-event',
     payload: {
@@ -341,6 +349,7 @@ export function broadcastUserMessage(sessionId: string, text: string, sender?: s
       session_id: sessionId,
       text,
       ...(sender ? { sender } : {}),
+      ...(originMsgId ? { origin_msg_id: originMsgId } : {}),
     },
   }).catch(() => {});
 }
@@ -355,6 +364,7 @@ async function directSend(
   skill: string | null,
   expectedId: string,
   sender?: string,
+  originMsgId?: string | null,
 ): Promise<DirectSendOutcome> {
   const toolbar = useChatToolbarStore.getState();
   const invalid = (msg: string): DirectSendOutcome => {
@@ -384,7 +394,7 @@ async function directSend(
   st.setRunError(null);
   st.setError('');
   st.pushUser(raw, undefined, sender); // 会话记录保留原始 /技能名 文本，回放时可读；sender 供多设备共享时展示来源
-  broadcastUserMessage(st.sessionId, text, sender); // 按下发送即镜像给所有手机，不等 Run 准入
+  broadcastUserMessage(st.sessionId, text, sender, originMsgId); // 按下发送即镜像给所有手机，不等 Run 准入；originMsgId 供手机收养匹配
   st.setRunState(true, 'analyzing');
   const provider = toolbar.providers.find((p) => p.id === toolbar.selectedProviderId) ?? null;
   try {
@@ -416,7 +426,7 @@ async function directSend(
   }
 }
 
-async function handleEnqueue(payload: { session_id: string | null; text: string; sender?: string }) {
+async function handleEnqueue(payload: { session_id: string | null; text: string; sender?: string; msg_id?: string | null }) {
   const parsed = parseMobileSend(String(payload.text ?? ''), await knownSkills());
   if (!parsed.ok) {
     phoneToast(parsed.error);
@@ -449,20 +459,20 @@ async function handleEnqueue(payload: { session_id: string | null; text: string;
   if (!applyPlan(plan)) return;
   if (plan.action === 'missing' || plan.action === 'blocked') return;
   if (plan.direct) {
-    // 空闲直发：跳过队列直接起跑（消息不在队列面板闪现）
+    // 空闲直发：跳过队列直接起跑（消息不在队列面板闪现）；msg_id 透传供手机收养
     const expectedId = useAgentStore.getState().sessionId;
-    const outcome = await directSend(parsed.raw, parsed.text, parsed.skill, expectedId, payload.sender);
+    const outcome = await directSend(parsed.raw, parsed.text, parsed.skill, expectedId, payload.sender, payload.msg_id);
     if (outcome === 'sent') phoneToast('已发送');
     if (outcome === 'queued') {
       // PC 此刻忙 / 会话被切走：兜底入队（准入拒绝不丢消息），续发 effect 接手
-      useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender });
+      useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender, originMsgId: payload.msg_id ?? undefined });
       phoneToast('PC 正忙，已加入队列');
     }
     // 'failed'：提示已在 directSend 内弹出，不入队（见 DirectSendOutcome 注释）
     return;
   }
   // 目标正在运行：入队等本轮结束后的既有续发
-  useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender });
+  useAgentStore.getState().enqueueMessage(parsed.raw, parsed.text, parsed.skill, { sender: payload.sender, originMsgId: payload.msg_id ?? undefined });
   phoneToast('已加入队列，本轮结束后自动发送');
 }
 
@@ -593,6 +603,7 @@ async function handleBridgeEvent(ev: BridgeEvent) {
         session_id: ev.session_id ?? null,
         text: String(ev.text ?? ''),
         sender: ev.sender,
+        msg_id: ev.msg_id === null || ev.msg_id === undefined ? null : String(ev.msg_id),
       });
       break;
     case 'queue_reorder':

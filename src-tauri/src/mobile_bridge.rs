@@ -717,6 +717,18 @@ pub async fn mobile_bridge_key_revoke(
     Ok(kicked)
 }
 
+/// 彻底删除一条已撤销的设备 key（从 keys.json 移除条目；未撤销的拒绝，先撤销再删）
+#[tauri::command]
+pub fn mobile_bridge_key_delete(app: AppHandle, key_id: String) -> Result<(), String> {
+    let mut keys = crate::mobile_keys::load_keys(&app)?;
+    if !crate::mobile_keys::delete_in_list(&mut keys, &key_id) {
+        return Err("设备密钥不存在或尚未撤销（请先撤销再删除）".to_string());
+    }
+    crate::mobile_keys::save_keys(&app, &keys)?;
+    app_log!(info, "mobile-bridge", "deleted revoked key {key_id}");
+    Ok(())
+}
+
 fn info_for(running: &BridgeRunning, relay: Option<&RelayStatus>) -> BridgeInfo {
     let lan_ip = lan_ip();
     let (url, mode_port) = match relay {

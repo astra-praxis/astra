@@ -509,7 +509,7 @@ export default function AgentPage() {
       text: string,
       visible: boolean,
       onAdmitted?: () => void,
-      opts?: { keepInput?: boolean; sender?: string },
+      opts?: { keepInput?: boolean; sender?: string; originMsgId?: string },
     ): Promise<boolean> => {
       const st = useChatToolbarStore.getState();
       if (st.sourceType === 'model' && !st.selectedModelPort) {
@@ -561,8 +561,9 @@ export default function AgentPage() {
         onAdmitted?.();
         // sender：手机遥控发送的设备名（落盘后多设备共享历史时展示来源）
         pushUser(raw, undefined, opts?.sender); // 会话记录保留原始 /技能名 文本，回放时可读
-        // 按下发送即镜像 user_message 给所有手机（不等 Run 准入）；sender 标来源
-        broadcastUserMessage(sessionId, text, opts?.sender);
+        // 按下发送即镜像 user_message 给所有手机（不等 Run 准入）；sender 标来源，
+        // originMsgId 是手机 send 命令的 msg_id（手机端收养的精确匹配键）
+        broadcastUserMessage(sessionId, text, opts?.sender, opts?.originMsgId);
       }
       setRunState(true, 'analyzing');
       // 准入即算「已起跑」：不依赖观察到 running 翻转（React 把 setRunState(true)
@@ -591,7 +592,7 @@ export default function AgentPage() {
       skillName: string | null,
       text: string,
       onAdmitted?: () => void,
-      opts?: { keepInput?: boolean; sender?: string },
+      opts?: { keepInput?: boolean; sender?: string; originMsgId?: string },
     ) => {
       // 用户手动发送 = 新意图接管：重置重试配额（下次失败重新获得 3 次）
       resetRetryState();
@@ -919,7 +920,7 @@ export default function AgentPage() {
       st.removeQueued(head.id);
       // keepInput：续发的是队列里的旧消息，不能清掉用户此刻正在打字的草稿；
       // sender：手机入队的消息续发时也带发送者（与直接发送路径一致）
-      void doSendRef.current(head.raw, head.skill, head.text, undefined, { keepInput: true, sender: head.sender });
+      void doSendRef.current(head.raw, head.skill, head.text, undefined, { keepInput: true, sender: head.sender, originMsgId: head.originMsgId });
     }, 120);
     return () => clearTimeout(timer);
   }, [running, settling, queue, sessionId, runError, editing]);

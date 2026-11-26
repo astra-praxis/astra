@@ -163,6 +163,18 @@ pub fn revoke_in_list(keys: &mut [BridgeKey], key_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 彻底删除一条已撤销的 key（需求：撤销列表可清理）。未撤销或不存在返回 false
+pub fn delete_in_list(keys: &mut Vec<BridgeKey>, key_id: &str) -> bool {
+    let at = keys.iter().position(|k| k.key_id == key_id);
+    match at {
+        Some(i) if keys[i].revoked_at.is_some() => {
+            keys.remove(i);
+            true
+        }
+        _ => false,
+    }
+}
+
 // ===== 文件 IO（账户私有 data_dir） =====
 
 fn keys_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -277,6 +289,22 @@ mod tests {
         assert!(!revoke_in_list(&mut keys, &k4.key_id));
         // 未知 id 返回 false
         assert!(!revoke_in_list(&mut keys, "no-such"));
+    }
+
+    #[test]
+    fn delete_only_revoked() {
+        let mut keys = Vec::new();
+        let (k1, _s1) = create_in_list(&mut keys, "未撤销不可删", KeyScope::All, None);
+        let (k2, _s2) = create_in_list(&mut keys, "已撤销可删", KeyScope::All, None);
+        assert!(revoke_in_list(&mut keys, &k2.key_id));
+        // 未撤销 / 未知 id：拒绝
+        assert!(!delete_in_list(&mut keys, &k1.key_id));
+        assert!(!delete_in_list(&mut keys, "no-such"));
+        assert_eq!(keys.len(), 2);
+        // 已撤销：删除成功且列表缩短
+        assert!(delete_in_list(&mut keys, &k2.key_id));
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].key_id, k1.key_id);
     }
 
     #[test]

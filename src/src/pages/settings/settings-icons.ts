@@ -11,6 +11,7 @@ import {
   Plug,
   Search,
   Settings,
+  Smartphone,
   SquarePen,
   UsersRound,
   Wrench,
@@ -25,6 +26,7 @@ export const SECTION_ICONS: Record<string, LucideIcon> = {
   memory: Brain,
   search: Search,
   'image-gen': ImagePlus,
+  remote: Smartphone,
   editor: SquarePen,
   workspace: FolderOpen,
 };

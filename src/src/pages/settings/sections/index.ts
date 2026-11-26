@@ -10,6 +10,7 @@ import SearchSettings from './SearchSettings';
 import ImageGenerationSettings from './ImageGenerationSettings';
 import DevelopmentSettings from './DevelopmentSettings';
 import WorkspaceSettings from './WorkspaceSettings';
+import RemoteSettings from './RemoteSettings';
 
 export interface SettingsSectionDef {
   id: string;
@@ -49,6 +50,12 @@ export const PREFERENCE_SECTIONS: SettingsSectionDef[] = [
     label: '搜索',
     desc: 'Agent 联网搜索（search_web）使用的后端',
     component: SearchSettings,
+  },
+  {
+    id: 'remote',
+    label: '设备与中继',
+    desc: '手机遥控的持久设备密钥与公网中继接入',
+    component: RemoteSettings,
   },
   {
     id: 'image-gen',

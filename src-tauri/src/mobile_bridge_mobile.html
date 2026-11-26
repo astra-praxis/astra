@@ -799,7 +799,8 @@
       running: {},             // sessionId -> 是否有进行中的 Run
       msgSeq: Date.now(),
       sentAt: 0,               // 从「新对话」发出消息的时刻（收养新会话用）
-      sentText: '',            // 从「新对话」发出的消息文本（收养时精确匹配）
+      sentText: '',            // 从「新对话」发出的消息文本（收养时文本匹配兜底）
+      sentMsgId: '',           // 从「新对话」发出的 send msg_id（收养时精确匹配，见 doSend）
       openApplied: false,      // 嵌入模式：open 参数已应用（只在首连 hello 生效一次）
     };
 
@@ -981,8 +982,9 @@
         // PC 起跑时广播的首条 user_message（文本精确匹配）到达时切过去，
         // 此前的事件全部进 pending 缓冲，收养后回放，全程不丢输出。
         if (env.type === 'user_message' && state.current === NEW &&
-            state.sentText && env.text === state.sentText &&
-            Date.now() - state.sentAt < 60000) {
+            Date.now() - state.sentAt < 60000 &&
+            ((env.origin_msg_id && state.sentMsgId && String(env.origin_msg_id) === state.sentMsgId) ||
+             (state.sentText && env.text === state.sentText))) {
           adoptSession(sid);
         }
         (state.pending[sid] = state.pending[sid] || []).push(env);
@@ -1000,6 +1002,7 @@
     function adoptSession(sid) {
       state.sentAt = 0;
       state.sentText = '';
+      state.sentMsgId = '';
       state.pickedNew = false;
       state.current = sid;
       renderTop(); renderDrawer();
@@ -1241,10 +1244,11 @@
         void send.offsetWidth;
         send.classList.add('is-launch');
         try { navigator.vibrate && navigator.vibrate(10); } catch (e) {}
-        // 新对话模式的发送记录：PC 发送时广播的 user_message 是剥过 /技能前缀的
-        // 文本，这里用同款正则预剥离后再存，收养时才能精确匹配
+        // 新对话模式的发送记录：收养优先用 msg_id 精确匹配（PC 广播 user_message 时
+        // 透传 origin_msg_id，文本可能被 PC 端解析改写不可靠），文本匹配兜底
         if (payload.session_id === null) {
           state.sentAt = now;
+          state.sentMsgId = String(payload.msg_id);
           var sm = text.match(/^\/[\w\u4e00-\u9fff.-]+(?:\s+([\s\S]*))?$/);
           state.sentText = text.charAt(0) === '/' ? (sm && sm[1] ? sm[1].trim() : '') : text;
         }

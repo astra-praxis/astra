@@ -434,6 +434,7 @@ pub fn run() {
             mobile_bridge::mobile_bridge_key_create,
             mobile_bridge::mobile_bridge_key_list,
             mobile_bridge::mobile_bridge_key_revoke,
+            mobile_bridge::mobile_bridge_key_delete,
             mobile_relay::mobile_bridge_relay_start,
             mobile_relay::mobile_bridge_relay_stop,
             mobile_relay::mobile_relay_config_get,
